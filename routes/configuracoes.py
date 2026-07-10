@@ -45,6 +45,7 @@ async def configuracoes(request: Request):
         analise_concorrencia=config_service.get_analise_concorrencia(),
         analise_concorrencia_max=config_service.ANALISE_CONCORRENCIA_MAX,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
+        envio_modos=config_service.get_envio_modos(),
         comunicados=config_service.listar_comunicados(),  # gerais
         paragrafos=config_service.listar_paragrafos(),    # gerais
         caixas_disponiveis=caixas_disp,
@@ -69,6 +70,14 @@ async def set_analise_concorrencia(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "n": config_service.set_analise_concorrencia(n)}
+
+
+@router.post("/api/config/envio-modo", response_class=JSONResponse)
+async def set_envio_modo(payload: dict = Body(...)):
+    """Define o modo de UM meio: 'simulado' (não dispara) ou 'real' (dispara)."""
+    meio = (payload or {}).get("meio", "")
+    modo = (payload or {}).get("modo", "simulado")
+    return {"ok": True, "modos": config_service.set_envio_modo_meio(meio, modo)}
 
 
 @router.post("/api/config/prazos-predefinidos", response_class=JSONResponse)

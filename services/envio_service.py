@@ -90,7 +90,7 @@ async def enviar(meio: str, ctx: dict) -> dict:
     if meio not in _HANDLERS:
         return {"ok": False, "status": "falha", "detalhe": f"Meio desconhecido: {meio}"}
 
-    if config_service.get_envio_modo() == "simulado":
+    if config_service.get_envio_modo_meio(meio) == "simulado":  # modo POR MEIO
         await asyncio.sleep(0.4)  # simula latência do disparo
         return {"ok": True, "status": "simulado",
                 "detalhe": f"[simulado] {label_meio(meio)} para {ctx.get('assistido') or ctx.get('paj')}"}

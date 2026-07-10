@@ -42,7 +42,7 @@ async def dashboard(request: Request, slug: str):
         paragrafos=paragrafos, comunicados=comunicados,
         meios_envio=envio_service.meios_disponiveis(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
-        envio_modo=config_service.get_envio_modo()))
+        envio_modos_resumo=config_service.resumo_modos()))
 
 
 @router.get("/api/caixa/{slug}/sincronizar/stream")
@@ -83,7 +83,7 @@ async def prontos_envio(request: Request):
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
-        envio_modo=config_service.get_envio_modo()))
+        envio_modos_resumo=config_service.resumo_modos()))
 
 
 @router.get("/api/prontos/enviar/stream")

@@ -260,6 +260,7 @@
                                         data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                         data-sugestao="{{ paj.sugestao_atual }}"
                                         data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
+                                        data-anexos='{{ paj.anexos|tojson }}'
                                         data-app="{{ 1 if c.app_sisdpu else 0 }}"
                                         data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                                         data-email="{{ 1 if c.email else 0 }}"
@@ -319,6 +320,7 @@
                                     data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
                                     data-tramite="{{ paj.id_tramite }}"
                                     data-mensagem="{{ paj.sugestao_atual }}"
+                                    data-anexos='{{ paj.anexos|tojson }}'
                                     data-app="{{ 1 if c.app_sisdpu else 0 }}"
                                     data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                                     data-email="{{ 1 if c.email else 0 }}"
@@ -661,7 +663,19 @@
         — o PAJ sai de "pendentes" e entra na fila; o disparo ocorre em "Enviar Agora".
     </p>
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" style="min-height:340px;" placeholder="Mensagem ao assistido…"></textarea>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:238px;" placeholder="Mensagem ao assistido…"></textarea>
+    <div style="margin-top:14px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Anexos</div>
+        <div id="grava-anx-lista"></div>
+        <div style="margin-top:8px;">
+            <input type="file" id="grava-anx-input" multiple style="display:none;"
+                   accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="gravaAnxUpload(this)">
+            <button type="button" class="btn-subtle" style="padding:5px 12px;font-size:12px;"
+                    onclick="document.getElementById('grava-anx-input').click()">+ Adicionar anexo(s)</button>
+            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
+            <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
+        </div>
+    </div>
     <div style="margin-top:14px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
         <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
@@ -730,6 +744,13 @@ function gravarAbrir(btn) {
     gravaTipo = btn.dataset.tipo || 'tramite';
     document.getElementById('grava-paj').textContent = btn.dataset.pajnum || '';
     document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
+    // Anexos embutidos no modal (incluir/remover ali mesmo).
+    window.gravaAnx = { slug: CAIXA_SLUG, paj_norm: gravaPajAtual, tipo: gravaTipo, id_tramite: gravaTramite };
+    window.gravaAnxMudou = false;
+    let jaAnexos = [];
+    try { jaAnexos = JSON.parse(btn.dataset.anexos || '[]'); } catch (e) {}
+    const _am = document.getElementById('grava-anx-msg'); if (_am) _am.textContent = '';
+    gravaAnxRender(jaAnexos);
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
     const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido (ao editar)
@@ -818,7 +839,10 @@ function gravarAbrir(btn) {
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
-function gravarFechar() { document.getElementById('grava-modal').style.display = 'none'; }
+function gravarFechar() {
+    document.getElementById('grava-modal').style.display = 'none';
+    if (window.gravaAnxMudou) location.reload();  // reflete anexos alterados no card/coluna
+}
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
@@ -856,14 +880,26 @@ function enviarAgora() {
 }
 
 // ---------- Triagem (múltiplas tramitações no mesmo PAJ) ----------
+// Coloca um spinner em movimento no botão (e guarda o conteúdo p/ restaurar em erro).
+function btnSpinner(btn, texto) {
+    btn.disabled = true;
+    btn.dataset._orig = btn.innerHTML;
+    btn.style.display = 'inline-flex'; btn.style.alignItems = 'center'; btn.style.gap = '6px';
+    btn.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid currentColor;'
+        + 'border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>' + texto;
+}
+function btnRestore(btn) {
+    btn.disabled = false;
+    if (btn.dataset._orig != null) { btn.innerHTML = btn.dataset._orig; delete btn.dataset._orig; }
+}
 async function tratarConjunto(btn) {
     if (!confirm('Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?')) return;
-    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Analisando…';
+    btnSpinner(btn, 'Analisando…');
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/conjunto', { method: 'POST' });
         const d = await r.json();
-        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = orig; }
-    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = orig; }
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btnRestore(btn); }
+    } catch (e) { alert('Erro: ' + e); btnRestore(btn); }
 }
 async function desfazerConjunto(btn) {
     if (!confirm('Desfazer o tratamento em conjunto e voltar este PAJ à triagem?')) return;
@@ -886,13 +922,13 @@ async function tratarSeparado(btn) {
     const tr = btn.closest('tr');
     const mapeamento = {};
     tr.querySelectorAll('.tri-sel').forEach(s => { mapeamento[s.dataset.tramite] = s.value; });
-    btn.disabled = true; const o = btn.textContent; btn.textContent = 'Analisando…';
+    btnSpinner(btn, 'Analisando…');
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/separado',
             { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mapeamento}) });
         const d = await r.json();
-        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = o; }
-    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = o; }
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btnRestore(btn); }
+    } catch (e) { alert('Erro: ' + e); btnRestore(btn); }
 }
 
 // ---------- Ver mensagem (íntegra) ----------
@@ -909,7 +945,7 @@ let sugMeta = {};
 function sugAbrir(btn) {
     sugPajAtual = btn.dataset.paj;
     sugMeta = { paj: btn.dataset.paj, pajnum: btn.dataset.pajnum || '', tramite: btn.dataset.tramite || '',
-                tipo: btn.dataset.tipo || 'tramite',
+                tipo: btn.dataset.tipo || 'tramite', anexos: btn.dataset.anexos || '[]',
                 app: btn.dataset.app || '0', whats: btn.dataset.whats || '0', email: btn.dataset.email || '0' };
     document.getElementById('sug-paj').textContent = btn.dataset.pajnum || '';
     document.getElementById('sug-texto').value = btn.dataset.sugestao || '';
@@ -1132,7 +1168,7 @@ async function sugParaEnvio() {
     sugFechar();
     gravarAbrir({ dataset: {
         paj: sugMeta.paj, pajnum: sugMeta.pajnum, tramite: sugMeta.tramite, tipo: sugMeta.tipo, mensagem: texto,
-        app: sugMeta.app, whats: sugMeta.whats, email: sugMeta.email, meios: '[]'
+        anexos: sugMeta.anexos, app: sugMeta.app, whats: sugMeta.whats, email: sugMeta.email, meios: '[]'
     }});
 }
 // Persiste a sugestão (texto + classificação manual, se aplicada) SEM recarregar.

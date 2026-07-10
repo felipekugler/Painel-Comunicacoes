@@ -655,10 +655,11 @@ def listar_tramites(slug: str, somente_em_caixa: bool = True) -> list[dict]:
 
 
 def contar_em_caixa(slug: str) -> int:
-    """Nº de itens que exigem ação: triagem + pendentes + gravados para envio.
-    Conjuntos contam como 1. Exclui os já enviados."""
+    """Nº de itens que ainda falta TRATAR na caixa: triagem + pendentes.
+    Conjuntos contam como 1. NÃO inclui os gravados aguardando disparo (esses têm
+    contador próprio no menu "Prontos para Envio") nem os já enviados."""
     db = montar_dashboard(slug)
-    return len(db["triagem"]) + len(db["pendentes"]) + len(db["fila"])
+    return len(db["triagem"]) + len(db["pendentes"])
 
 
 def menu_caixas() -> list[dict]:
@@ -852,8 +853,8 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
     caixa = config_service.get_caixa(slug)
     if not caixa:
         return {"ok": False, "erro": "caixa desconhecida"}
-    if _sync_lock.locked():
-        return {"ok": False, "erro": "Há uma sincronização em andamento. Aguarde."}
+    if _ocupado_exclusivo():
+        return {"ok": False, "erro": "Há uma sincronização/envio em andamento. Aguarde."}
     box = _ler_box(slug, paj_norm)
     pend = _sols_pendentes(box) if box else []
     if len(pend) < 2:
@@ -861,10 +862,11 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
     id_proc = pend[0].get("id", "")
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
-    async with _sync_lock:
+    async with _triagem_ctx():  # roda em paralelo com outras triagens (até _TRIAGEM_MAX)
         if id_proc:
             with contextlib.suppress(Exception):
-                det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
+                async with _browser_lock:  # navegador é sessão única — serializa este passo
+                    det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
                 if det:
                     atualizar_contato_do_detalhe(paj_norm, det)
         cont = ler_contato(paj_norm)
@@ -905,8 +907,8 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
     box = _ler_box(slug, paj_norm)
     if not box:
         return {"ok": False, "erro": "PAJ não encontrado"}
-    if _sync_lock.locked():
-        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
+    if _ocupado_exclusivo():
+        return {"ok": False, "erro": "Há uma sincronização/envio em andamento. Aguarde."}
     mapeamento = mapeamento or {}
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
@@ -915,7 +917,7 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
     movs_por_seq = {str(m.get("seq")): m for m in todas}  # foco pode ser qualquer mov extraída
     movs_ia = movs_para_ia(cont)  # contexto que vai à IA (recorte/seleção/corte padrão)
     chave_movs = _chave_movs(cont, movs_ia)
-    async with _sync_lock:
+    async with _triagem_ctx():  # roda em paralelo com outras triagens (até _TRIAGEM_MAX)
         box = _ler_box(slug, paj_norm)
         pend = _sols_pendentes(box)
         pend_ids = sorted(s.get("id_tramite", "") for s in pend)
@@ -993,7 +995,42 @@ def definir_sugestao_conjunto(slug: str, paj_norm: str, texto: str,
 
 
 # ==================== sincronização ====================
+# _sync_lock: EXCLUSIVO para operações que dirigem o navegador (Playwright é sessão
+#   única) e/ou são longas: sincronizar, sincronizar_paj, envio, reanálise.
+# Triagens (tratar_conjunto/separado) são majoritariamente IA (subprocesso, já
+#   paralelizável) e escrevem só o box do PRÓPRIO PAJ → podem rodar em PARALELO
+#   entre si (até _TRIAGEM_MAX), mas são MUTUAMENTE EXCLUSIVAS com o grupo exclusivo
+#   acima (para não haver corrida de escrita nos boxes / no navegador).
 _sync_lock = asyncio.Lock()
+_TRIAGEM_MAX = 4
+_triagem_sem = asyncio.Semaphore(_TRIAGEM_MAX)  # até 4 triagens simultâneas
+_triagem_ativas = 0            # nº de triagens em andamento (grupo exclusivo recusa se > 0)
+_browser_lock = asyncio.Lock()  # serializa o passo de navegador (detalhar_paj) entre triagens
+
+
+def _ocupado_exclusivo() -> bool:
+    """True se há sincronização/envio/reanálise em andamento (grupo exclusivo).
+    Usado pelas TRIAGENS para recusar enquanto uma op exclusiva roda."""
+    return _sync_lock.locked()
+
+
+def _pode_exclusivo() -> bool:
+    """Pode iniciar uma op EXCLUSIVA (sync/envio/reanálise)? Não, se já há uma
+    exclusiva OU alguma triagem em andamento (evita corrida de escrita nos boxes)."""
+    return not _sync_lock.locked() and _triagem_ativas == 0
+
+
+@contextlib.asynccontextmanager
+async def _triagem_ctx():
+    """Contexto de uma triagem: conta como ativa (para o grupo exclusivo recusar) e
+    limita a _TRIAGEM_MAX simultâneas. O incremento ocorre ANTES de qualquer await."""
+    global _triagem_ativas
+    _triagem_ativas += 1
+    try:
+        async with _triagem_sem:
+            yield
+    finally:
+        _triagem_ativas -= 1
 
 
 def _ids_em_caixa(slug: str) -> set[str]:
@@ -1018,8 +1055,8 @@ async def sincronizar_stream(slug: str):
         yield {"done": True, "resumo": {"ok": False, "erro": "caixa_desconhecida"}}
         return
 
-    if _sync_lock.locked():
-        yield {"level": "erro", "msg": "Já existe uma sincronização em andamento."}
+    if not _pode_exclusivo():
+        yield {"level": "erro", "msg": "Já existe uma operação em andamento (sincronização/envio/triagem)."}
         yield {"done": True, "resumo": {"ok": False, "erro": "em_andamento"}}
         return
 
@@ -1295,8 +1332,8 @@ async def sincronizar_paj(slug: str, paj_norm: str) -> dict:
     if not id_proc:
         return {"ok": False, "erro": "PAJ sem id de processo (sincronize a caixa primeiro)"}
 
-    if _sync_lock.locked():
-        return {"ok": False, "erro": "Há uma sincronização em andamento. Aguarde."}
+    if not _pode_exclusivo():
+        return {"ok": False, "erro": "Há uma operação em andamento (sincronização/envio/triagem). Aguarde."}
 
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
@@ -1410,8 +1447,8 @@ async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
     box = _ler_box(slug, paj_norm)
     if not box:
         return {"ok": False, "erro": "PAJ não encontrado"}
-    if _sync_lock.locked():
-        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
+    if not _pode_exclusivo():
+        return {"ok": False, "erro": "Há uma operação em andamento (sincronização/envio/triagem). Aguarde."}
     if not analise_service.disponivel():
         return {"ok": True}  # IA desativada — nada a fazer
 
@@ -1599,8 +1636,8 @@ async def enviar_fila_stream(slug: str):
         yield {"done": True, "resumo": {"ok": False, "erro": "caixa_desconhecida"}}
         return
 
-    if _sync_lock.locked():
-        yield {"level": "erro", "msg": "Já existe uma operação em andamento."}
+    if not _pode_exclusivo():
+        yield {"level": "erro", "msg": "Já existe uma operação em andamento (sincronização/envio/triagem)."}
         yield {"done": True, "resumo": {"ok": False, "erro": "em_andamento"}}
         return
 
@@ -1613,9 +1650,8 @@ async def enviar_fila_stream(slug: str):
             yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0, "duracao": 0}}
             return
 
-        aviso = " (MODO SIMULADO — nada será realmente enviado)" if modo == "simulado" else ""
         yield {"level": "info",
-               "msg": f"Iniciando envio de {len(fila)} PAJ(s) — {caixa['nome']}{aviso}."}
+               "msg": f"Iniciando envio de {len(fila)} PAJ(s) — {caixa['nome']} · modos: {config_service.resumo_modos()}."}
 
         enviados = falhas = 0
         for i, t in enumerate(fila, 1):
@@ -1667,8 +1703,8 @@ async def enviar_selecao_stream(selecao: list[dict]):
     """"Enviar Agora" da página "Prontos para Envio" restrito a uma SELEÇÃO.
     selecao: lista de {slug, paj_norm, id_tramite, tipo('tramite'|'conjunto')}.
     Envia SOMENTE esses itens (de quaisquer caixas)."""
-    if _sync_lock.locked():
-        yield {"level": "erro", "msg": "Já existe uma operação em andamento."}
+    if not _pode_exclusivo():
+        yield {"level": "erro", "msg": "Já existe uma operação em andamento (sincronização/envio/triagem)."}
         yield {"done": True, "resumo": {"ok": False, "erro": "em_andamento"}}
         return
     modo = config_service.get_envio_modo()
@@ -1693,8 +1729,8 @@ async def enviar_selecao_stream(selecao: list[dict]):
             yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0}}
             return
 
-        aviso = " (MODO SIMULADO — nada será realmente enviado)" if modo == "simulado" else ""
-        yield {"level": "info", "msg": f"Enviando {len(itens)} item(ns) selecionado(s){aviso}."}
+        yield {"level": "info",
+               "msg": f"Enviando {len(itens)} item(ns) selecionado(s) · modos: {config_service.resumo_modos()}."}
         enviados = falhas = 0
         for i, (slug, caixa, t) in enumerate(itens, 1):
             async for ev in _enviar_item_stream(slug, caixa, t, modo,

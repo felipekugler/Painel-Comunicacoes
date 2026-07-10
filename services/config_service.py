@@ -94,7 +94,7 @@ def _default() -> dict:
         "comunicados_rev": 1,
         "comunicados": [{"id": uuid.uuid4().hex[:8], **c} for c in _COMUNICADOS_SEED],
         "paragrafos": [{"id": uuid.uuid4().hex[:8], **p} for p in _PARAGRAFOS_SEED],
-        "envio_modo": "simulado",
+        "envio_modos": {"app_sisdpu": "simulado", "whatsapp": "simulado", "email": "simulado"},
         "prazos_predefinidos": list(PRAZOS_PREDEF_PADRAO),
         "caixas_disponiveis": [],
         "caixas": {},
@@ -218,16 +218,53 @@ def comunicados_rev() -> int:
 # "simulado" (padrão): "Enviar Agora" não dispara nada de verdade, só simula e
 # registra "[simulado]" — para validar o fluxo antes de configurar cada meio.
 # "real": usa os handlers de envio_service (meios sem handler ficam pendentes).
-def get_envio_modo() -> str:
-    modo = str(ler_config().get("envio_modo", "simulado")).strip().lower()
-    return modo if modo in ("simulado", "real") else "simulado"
+# Modo de envio POR MEIO (permite ligar 1 meio em real e manter os outros simulados).
+_MEIOS_ENVIO = ("app_sisdpu", "whatsapp", "email")
+_MEIO_LABELS = {"app_sisdpu": "Aplicativo SISDPU", "whatsapp": "WhatsApp", "email": "E-mail"}
 
 
-def set_envio_modo(modo: str) -> str:
+def _norm_modo(v) -> str:
+    return "real" if str(v).strip().lower() == "real" else "simulado"
+
+
+def get_envio_modos() -> dict:
+    """Modo ('simulado'/'real') de CADA meio. Migra do antigo `envio_modo` global."""
     d = ler_config()
-    d["envio_modo"] = "real" if str(modo).strip().lower() == "real" else "simulado"
+    modos = d.get("envio_modos")
+    if not isinstance(modos, dict):  # migração do formato antigo (global)
+        antigo = _norm_modo(d.get("envio_modo", "simulado"))
+        modos = {m: antigo for m in _MEIOS_ENVIO}
+    return {m: _norm_modo(modos.get(m, "simulado")) for m in _MEIOS_ENVIO}
+
+
+def get_envio_modo_meio(meio: str) -> str:
+    """Modo de UM meio ('simulado'/'real'). Padrão simulado."""
+    return get_envio_modos().get(meio, "simulado")
+
+
+def set_envio_modo_meio(meio: str, modo: str) -> dict:
+    if meio not in _MEIOS_ENVIO:
+        return get_envio_modos()
+    d = ler_config()
+    modos = get_envio_modos()
+    modos[meio] = _norm_modo(modo)
+    d["envio_modos"] = modos
+    d.pop("envio_modo", None)  # some com o formato antigo
     _gravar(d)
-    return d["envio_modo"]
+    return modos
+
+
+def get_envio_modo() -> str:
+    """Resumo global: 'simulado' só se TODOS os meios estiverem simulados; senão 'real'.
+    (Usado apenas para avisos/banners; o disparo consulta o modo POR MEIO.)"""
+    return "simulado" if all(v == "simulado" for v in get_envio_modos().values()) else "real"
+
+
+def resumo_modos() -> str:
+    """Texto curto do modo de cada meio, p/ logs/avisos. Ex.: 'App=REAL · WhatsApp=simulado'."""
+    modos = get_envio_modos()
+    return " · ".join(f"{_MEIO_LABELS[m]}={modos[m].upper() if modos[m]=='real' else modos[m]}"
+                      for m in _MEIOS_ENVIO)
 
 
 # ---------------- caixas ----------------

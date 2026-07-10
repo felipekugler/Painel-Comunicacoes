@@ -568,6 +568,74 @@
             else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
         } catch (e) { msg.textContent = 'Erro: ' + e; }
     }
+
+    // ===== Anexos DENTRO do modal "Gravar para envio" (usa window.gravaAnx) =====
+    // gravaAnx = {slug, paj_norm, tipo, id_tramite} — definido pelo gravarAbrir de cada
+    // página. Renderiza em #grava-anx-lista; usa as MESMAS rotas de anexos. Como as
+    // alterações persistem na hora, ao fechar/gravar a página recarrega (gravaAnxMudou).
+    window.gravaAnx = null;
+    window.gravaAnxMudou = false;
+    function gravaAnxRaiz() {
+        const g = window.gravaAnx || {};
+        const b = '/api/caixa/' + g.slug + '/paj/' + encodeURIComponent(g.paj_norm);
+        return g.tipo === 'conjunto'
+            ? b + '/conjunto'
+            : b + '/tramite/' + encodeURIComponent(g.id_tramite || '');
+    }
+    function gravaAnxRender(anexos) {
+        const box = document.getElementById('grava-anx-lista');
+        if (!box) return;
+        if (!anexos || !anexos.length) {
+            box.innerHTML = '<div class="text-tertiary" style="font-size:12.5px;padding:4px 0;">Nenhum anexo.</div>';
+            return;
+        }
+        let h = '<table class="fluent-table" style="width:100%;font-size:12.5px;"><tbody>';
+        anexos.forEach(a => {
+            const dl = a.arquivo ? (gravaAnxRaiz() + '/anexo/' + encodeURIComponent(a.arquivo)) : '';
+            const nome = dl ? '<a class="accent-link" href="' + dl + '" target="_blank" rel="noopener">' + anxEsc(a.nome) + '</a>' : anxEsc(a.nome);
+            h += '<tr><td style="word-break:break-all;">' + nome + '</td>' +
+                 '<td style="width:5rem;">' + anxTam(a.tamanho) + '</td>' +
+                 '<td style="width:2.5rem;"><button type="button" class="btn-subtle" style="padding:2px 7px;color:#dc2626;" ' +
+                 'title="Remover" onclick="gravaAnxRemover(\'' + a.id + '\')">✕</button></td></tr>';
+        });
+        box.innerHTML = h + '</tbody></table>';
+    }
+    async function gravaAnxUpload(input) {
+        if (!input.files || !input.files.length) return;
+        const EXTS = ['doc','docx','odt','png','jpg','jpeg','gif','pdf'];
+        const msg = document.getElementById('grava-anx-msg');
+        const fd = new FormData(); const rejLocal = []; let n = 0;
+        for (const f of input.files) {
+            const ext = (f.name.split('.').pop() || '').toLowerCase();
+            if (EXTS.includes(ext)) { fd.append('arquivos', f); n++; } else rejLocal.push(f.name);
+        }
+        if (!n) { msg.textContent = 'Formato não permitido: ' + rejLocal.join(', ') + '. Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.'; input.value=''; return; }
+        msg.textContent = 'Enviando…';
+        try {
+            const r = await fetch(gravaAnxRaiz() + '/anexos', { method: 'POST', body: fd });
+            const d = await r.json();
+            if (d.ok) {
+                window.gravaAnxMudou = true;
+                gravaAnxRender(d.anexos || []);
+                const avisos = [];
+                const rej = (d.rejeitados || []).concat(rejLocal);
+                if (rej.length) avisos.push('Formato não permitido: ' + rej.join(', '));
+                if ((d.duplicados || []).length) avisos.push('Já constava(m): ' + d.duplicados.join(', '));
+                msg.textContent = avisos.join(' · ');
+            } else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
+        } catch (e) { msg.textContent = 'Erro: ' + e; }
+        input.value = '';
+    }
+    async function gravaAnxRemover(id) {
+        if (!confirm('Remover este anexo?')) return;
+        const msg = document.getElementById('grava-anx-msg');
+        try {
+            const r = await fetch(gravaAnxRaiz() + '/anexos/' + encodeURIComponent(id) + '/remover', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) { window.gravaAnxMudou = true; gravaAnxRender(d.anexos || []); }
+            else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
+        } catch (e) { msg.textContent = 'Erro: ' + e; }
+    }
     </script>
 
     {% block scripts %}{% endblock %}

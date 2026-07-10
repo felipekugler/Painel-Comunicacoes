@@ -29,9 +29,8 @@
 
 <div class="section-head">
     <span class="pill" id="pr-total">{{ prontos|length }}</span>
-    {% if envio_modo == 'simulado' %}
-    <span class="badge-modo" title="Nenhuma mensagem será realmente enviada — apenas simulação para validar o fluxo.">MODO SIMULADO</span>
-    {% endif %}
+    <span class="badge-modo" title="Modo de disparo por meio (ajuste em Configurações). REAL dispara de verdade.">
+        Envio: {{ envio_modos_resumo }}</span>
     {% if prontos %}
     <div style="margin-left:auto;">
         <button class="btn-accent" id="btn-enviar" onclick="enviarSelecionados()">
@@ -169,6 +168,7 @@
                                 data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                 data-mensagem="{{ paj.envio_mensagem }}"
                                 data-meios='{{ paj.envio_meios|tojson }}'
+                                data-anexos='{{ paj.anexos|tojson }}'
                                 data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
                                 data-prazo-app="{{ paj.envio_prazo_app }}"
                                 data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
@@ -256,7 +256,19 @@
         PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
     </p>
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" style="min-height:340px;" placeholder="Mensagem ao assistido…"></textarea>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:238px;" placeholder="Mensagem ao assistido…"></textarea>
+    <div style="margin-top:14px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Anexos</div>
+        <div id="grava-anx-lista"></div>
+        <div style="margin-top:8px;">
+            <input type="file" id="grava-anx-input" multiple style="display:none;"
+                   accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="gravaAnxUpload(this)">
+            <button type="button" class="btn-subtle" style="padding:5px 12px;font-size:12px;"
+                    onclick="document.getElementById('grava-anx-input').click()">+ Adicionar anexo(s)</button>
+            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
+            <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
+        </div>
+    </div>
     <div style="margin-top:14px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
         <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
@@ -358,6 +370,13 @@ function gravarAbrir(btn) {
     gravaTramite = btn.dataset.tramite || ''; gravaTipo = btn.dataset.tipo || 'tramite';
     document.getElementById('grava-paj').textContent = btn.dataset.pajnum || '';
     document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
+    // Anexos embutidos no modal (incluir/remover ali mesmo).
+    window.gravaAnx = { slug: gravaSlug, paj_norm: gravaPaj, tipo: gravaTipo, id_tramite: gravaTramite };
+    window.gravaAnxMudou = false;
+    let jaAnexos = [];
+    try { jaAnexos = JSON.parse(btn.dataset.anexos || '[]'); } catch (e) {}
+    const _am = document.getElementById('grava-anx-msg'); if (_am) _am.textContent = '';
+    gravaAnxRender(jaAnexos);
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
     const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido
@@ -436,7 +455,10 @@ function gravarAbrir(btn) {
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
-function gravarFechar() { document.getElementById('grava-modal').style.display = 'none'; }
+function gravarFechar() {
+    document.getElementById('grava-modal').style.display = 'none';
+    if (window.gravaAnxMudou) location.reload();  // reflete anexos alterados na coluna/clipe
+}
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);

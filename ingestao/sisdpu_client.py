@@ -358,9 +358,15 @@ _JS_LER_POPUP_TRAMITE = r"""() => {
     const t = (d.innerText || '').replace(/\r/g, '');
     // 1ª data-hora do diálogo = "Data do trâmite" (o Prazo vem depois).
     const dt = t.match(/(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/);
+    // Se a "descrição" capturada for, na verdade, o RÓTULO do próximo campo (ex.:
+    // "Assistido(s):"), a descrição está VAZIA — devolve '' em vez de vazar o campo
+    // seguinte. (Um rótulo = palavra-chave + "(s)" opcional + ":", tudo no início.)
+    const ehRotulo = (v) => /^(Assistido|Atribui[çc][ãa]o|Data do tr[âa]mite|Situa[çc][ãa]o|Órg[ãa]o)\s*(\(s\))?\s*:/i.test(v);
     const pega = (rot) => {
         const m = t.match(new RegExp(rot + '\\s*:?\\s*\\n\\s*([^\\n]+)', 'i'));
-        return m ? m[1].trim() : '';
+        if (!m) return '';
+        const v = m[1].trim();
+        return ehRotulo(v) ? '' : v;
     };
     return {
         data_envio: dt ? dt[1] : '',
