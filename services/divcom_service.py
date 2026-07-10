@@ -1082,11 +1082,16 @@ async def sincronizar_paj(slug: str, paj_norm: str) -> dict:
 
 
 def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
-                    caixa_nome: str, movs_ia: list, movs_por_seq: dict, chave_movs: str) -> bool:
+                    caixa_nome: str, movs_ia: list, movs_por_seq: dict, chave_movs: str,
+                    limpar: bool = False) -> bool:
     """Re-executa a análise de IA de um box (SEM scraping), respeitando o estado:
     conjunto → re-analisa o conjunto; senão → cada tramitação (com mov_foco se
-    houver vínculo da triagem separada). Retorna True se algo mudou. Usa movs_ia
-    (recorte manual / seleção / corte padrão) como contexto enviado à IA."""
+    houver vínculo da triagem separada). Usa movs_ia (recorte manual / seleção /
+    corte padrão) como contexto enviado à IA. Retorna True se algo mudou.
+
+    `limpar=True` (botão "Reanálise pela IA"): DESCARTA a análise anterior — resumo,
+    sugestão, classificação da IA E os overrides manuais (texto e tipo editados) —
+    e gera uma análise totalmente nova (ignora o cache)."""
     mudou = False
     conj = box.get("conjunto")
     if box.get("triagem", {}).get("decisao") == "conjunto" and conj:
@@ -1097,6 +1102,11 @@ def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
                           "descricao_tramite": s.get("descricao_tramite", "")} for s in pend]
         desc_conj = _desc_hash("||".join(sorted((s.get("descricao_tramite") or "") for s in pend)))
         chave = f"{chave_movs}|c{com_rev}|conj{','.join(sorted(ids))}|d{desc_conj}"
+        if limpar:
+            for k in ("resumo_ia", "sugestao_ia", "sugestao_editada",
+                      "sugestao_tipo_editada", "resumo_ia_chave"):
+                conj[k] = ""
+            mudou = True
         if conj.get("resumo_ia_chave") != chave:
             ana = analise_service.analisar_conjunto(movs_ia, comunicados, caixa_nome, tramites_info)
             if ana:
@@ -1116,7 +1126,12 @@ def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
             tinfo["mov_foco"] = mf
         chave = (f"{chave_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
                  f"|m{mseq}|d{_desc_hash(sol.get('descricao_tramite', ''))}")
-        if sol.get("resumo_ia_chave") == chave:
+        if limpar:
+            for k in ("resumo_ia", "sugestao_ia", "sugestao_tipo",
+                      "sugestao_tipo_editada", "sugestao_editada", "resumo_ia_chave"):
+                sol[k] = ""
+            mudou = True
+        elif sol.get("resumo_ia_chave") == chave:
             continue
         ana = analise_service.analisar_paj(movs_ia, comunicados, caixa_nome, tinfo)
         if ana:
@@ -1146,9 +1161,9 @@ def definir_selecao_movs(paj_norm: str, selecao: list | None, texto: str | None)
 
 
 async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
-    """Reanalisa UM PAJ com as movimentações JÁ extraídas (SEM voltar ao SISDPU),
-    usando a seleção/recorte atual do contato. Cobre conjunto e tramitações
-    individuais. Usada após o usuário ajustar a seleção de movimentações no popup."""
+    """Reanálise pela IA (botão da seção de Ações): DESCARTA a análise anterior e
+    gera uma nova, usando as movimentações JÁ extraídas (SEM voltar ao SISDPU) e a
+    seleção/recorte atual do contato. Cobre conjunto e tramitações individuais."""
     caixa = config_service.get_caixa(slug)
     if not caixa:
         return {"ok": False, "erro": "caixa desconhecida"}
@@ -1174,7 +1189,7 @@ async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
         box = _ler_box(slug, paj_norm)
         mudou = await asyncio.to_thread(
             _reanalisar_box, box, cont, comunicados, com_rev, caixa["nome"],
-            movs_ia, movs_por_seq, chave_movs)
+            movs_ia, movs_por_seq, chave_movs, True)  # limpar=True: descarta e refaz
         if mudou:
             _gravar_box(slug, box)
     return {"ok": True}

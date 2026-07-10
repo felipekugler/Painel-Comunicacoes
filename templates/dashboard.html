@@ -291,6 +291,15 @@
                                     title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
                             {% endif %}
                             {% endif %}
+                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+                                    data-paj="{{ paj.paj_norm }}" onclick="reanalisarIA(this)"
+                                    title="Descartar a análise atual e gerar uma nova pela IA (usa as movimentações selecionadas no popup)">
+                                <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+                                <svg class="ic-ia" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:13px;height:13px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+                                </svg>
+                                Reanálise pela IA
+                            </button>
                             <button class="btn-grava grava-btn" style="padding:5px 9px;font-size:12px;box-shadow:none;"
                                     data-tipo="{{ paj.tipo }}"
                                     data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
@@ -680,9 +689,10 @@
         <textarea id="mov-recorte" class="mov-recorte" rows="3"
                   placeholder="(opcional) Recorte manual: cole aqui SÓ o texto relevante para a IA. Se preenchido, PREVALECE sobre os checkboxes."></textarea>
         <div class="mov-mais-btns">
-            <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção e reanalisar</button>
+            <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção</button>
             <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;"></span>
         </div>
+        <p class="text-tertiary" style="font-size:11px;margin:8px 0 0;">Depois de salvar, clique em <strong>“Reanálise pela IA”</strong> na linha do PAJ para gerar a nova análise com a seleção.</p>
     </div>
   </div>
 </div>
@@ -1021,7 +1031,8 @@ function movAbrir(btn) {
 }
 function movFechar() { document.getElementById('mov-modal').style.display = 'none'; }
 
-// Salva a seleção (checkboxes + recorte manual) e reanalisa o PAJ.
+// Salva APENAS a seleção (checkboxes + recorte manual). A reanálise é disparada
+// depois pelo botão "Reanálise pela IA" na seção de ações do PAJ.
 async function salvarSelecaoMovs(btn) {
     if (!movPajAtual) return;
     const selecao = Array.from(document.querySelectorAll('#mov-lista .mov-cb'))
@@ -1033,17 +1044,43 @@ async function salvarSelecaoMovs(btn) {
         return;
     }
     btn.disabled = true;
-    if (msg) msg.textContent = 'Salvando e reanalisando (pode levar alguns segundos)…';
+    if (msg) msg.textContent = 'Salvando…';
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(movPajAtual) + '/movs-selecao',
             { method: 'POST', headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ selecao: selecao, texto: texto }) });
         const d = await r.json();
-        if (d.ok) { location.reload(); }
-        else { if (msg) msg.textContent = 'Falha: ' + (d.erro || 'erro'); btn.disabled = false; }
+        if (d.ok) {
+            if (msg) msg.textContent = '✓ Seleção salva. Clique em "Reanálise pela IA" na linha do PAJ.';
+        } else if (msg) { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
     } catch (e) {
-        if (msg) msg.textContent = 'Erro: ' + e; btn.disabled = false;
+        if (msg) msg.textContent = 'Erro: ' + e;
+    } finally {
+        btn.disabled = false;
     }
+}
+
+// Reanálise pela IA (botão da seção de ações): descarta a análise atual e gera nova.
+async function reanalisarIA(btn) {
+    const paj = btn.dataset.paj;
+    if (!confirm('Isto vai DESCARTAR a análise atual deste PAJ (resumo, sugestão e classificação, inclusive edições manuais) e gerar uma análise totalmente nova com as movimentações selecionadas. Continuar?')) return;
+    const spin = btn.querySelector('.spin-mini');
+    const ic = btn.querySelector('.ic-ia');
+    btn.disabled = true;
+    if (spin) spin.style.display = 'inline-block';
+    if (ic) ic.style.display = 'none';
+    const restaura = () => {
+        btn.disabled = false;
+        if (spin) spin.style.display = 'none';
+        if (ic) ic.style.display = '';
+    };
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(paj) + '/reanalisar',
+            { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); }
+        else { alert('Falha na reanálise: ' + (d.erro || 'erro')); restaura(); }
+    } catch (e) { alert('Erro na reanálise: ' + e); restaura(); }
 }
 
 // ---------- Sincronizar apenas um PAJ ----------

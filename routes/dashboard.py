@@ -105,11 +105,21 @@ async def sincronizar_paj(slug: str, paj_norm: str):
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/movs-selecao", response_class=JSONResponse)
 async def movs_selecao(slug: str, paj_norm: str, payload: dict = Body(default={})):
-    """Salva quais movimentações vão à IA (checkboxes + recorte manual) e reanalisa
-    o PAJ com elas — sem voltar ao SISDPU."""
+    """Salva quais movimentações vão à IA (checkboxes + recorte manual). NÃO reanalisa
+    — a reanálise é disparada pelo botão "Reanálise pela IA" na seção de ações."""
     try:
         divcom_service.definir_selecao_movs(
             paj_norm, payload.get("selecao"), payload.get("texto"))
+        return JSONResponse({"ok": True})
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/reanalisar", response_class=JSONResponse)
+async def reanalisar(slug: str, paj_norm: str):
+    """Reanálise pela IA: descarta a análise anterior (texto + classificação) e gera
+    uma nova com as movimentações selecionadas/recorte — sem voltar ao SISDPU."""
+    try:
         res = await divcom_service.reanalisar_paj(slug, paj_norm)
         return JSONResponse(res, status_code=200 if res.get("ok") else 502)
     except Exception as e:  # noqa: BLE001
