@@ -103,6 +103,17 @@ async def sincronizar_paj(slug: str, paj_norm: str):
         return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
 
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/mais-movimentacoes", response_class=JSONResponse)
+async def mais_movimentacoes(slug: str, paj_norm: str, payload: dict = Body(default={})):
+    """Extrai mais N movimentações deste PAJ (acumula às já baixadas)."""
+    try:
+        res = await divcom_service.extrair_mais_movimentacoes(
+            slug, paj_norm, payload.get("extra", 5))
+        return JSONResponse(res, status_code=200 if res.get("ok") else 502)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+
+
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/gravar", response_class=JSONResponse)
 async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: dict = Body(...)):
     """Grava UMA tramitação na fila de envio da caixa (mensagem + meios)."""

@@ -102,6 +102,17 @@ def _gravar_contato(d: dict) -> None:
     _write_json(_contato_file(d["paj_norm"]), d)
 
 
+def n_movs_efetivo(paj_norm: str) -> int:
+    """Nº de movimentações a extrair para ESTE PAJ: o padrão global (config) OU
+    um override por PAJ, quando o usuário pediu "Extrair mais" no popup (persistido
+    em `n_movimentacoes` do contato). Usa-se o MAIOR dos dois, para que sincronizações
+    posteriores não encolham de volta ao padrão."""
+    override = 0
+    with contextlib.suppress(Exception):
+        override = int(ler_contato(paj_norm).get("n_movimentacoes", 0) or 0)
+    return max(config_service.get_n_movimentacoes(), override)
+
+
 def atualizar_contato_do_detalhe(paj_norm: str, det: dict) -> dict:
     """Atualiza o contato compartilhado com dados frescos do detalhamento.
     Preserva a escolha manual de WhatsApp."""
@@ -575,7 +586,7 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
     if len(pend) < 2:
         return {"ok": False, "erro": "PAJ não tem 2+ tramitações pendentes"}
     id_proc = pend[0].get("id", "")
-    n_movs = config_service.get_n_movimentacoes()
+    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
     async with _sync_lock:
@@ -626,7 +637,7 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
     if _sync_lock.locked():
         return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
     mapeamento = mapeamento or {}
-    n_movs = config_service.get_n_movimentacoes()
+    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
     cont = ler_contato(paj_norm)
@@ -813,9 +824,10 @@ async def sincronizar_stream(slug: str):
 
             assistido, resumo_contatos, det = "", "", {}
             id_proc = itens_paj[0].get("id", "")
+            n_eff = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
             if id_proc:
                 try:
-                    det = await sisdpu_client.detalhar_paj(id_proc, n_movs=n_movs)
+                    det = await sisdpu_client.detalhar_paj(id_proc, n_movs=n_eff)
                 except Exception as e:  # noqa: BLE001
                     det = {}
                     yield {"level": "erro",
@@ -860,12 +872,12 @@ async def sincronizar_stream(slug: str):
                     # Só agenda se ALGUMA tramitação está com o cache desatualizado.
                     faltam = any(
                         s.get("resumo_ia_chave")
-                        != f"{seqs}|n{n_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
+                        != f"{seqs}|n{n_eff}|c{com_rev}|t{s.get('id_tramite', '')}"
                            f"|d{_desc_hash(s.get('descricao_tramite', ''))}"
                         for s in box.get("solicitacoes", []))
                     if faltam:
                         trabalhos_ia.append({"paj_norm": paj_norm, "paj": paj,
-                                             "movs": movs, "seqs": seqs})
+                                             "movs": movs, "seqs": seqs, "n_eff": n_eff})
 
             if id_proc:
                 await asyncio.sleep(1.0)
@@ -888,7 +900,7 @@ async def sincronizar_stream(slug: str):
                         return logs
                     mudou = False
                     for sol in box.get("solicitacoes", []):
-                        chave = (f"{job['seqs']}|n{n_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
+                        chave = (f"{job['seqs']}|n{job['n_eff']}|c{com_rev}|t{sol.get('id_tramite', '')}"
                                  f"|d{_desc_hash(sol.get('descricao_tramite', ''))}")
                         if sol.get("resumo_ia_chave") == chave:
                             continue
@@ -1005,7 +1017,7 @@ async def sincronizar_paj(slug: str, paj_norm: str) -> dict:
     if _sync_lock.locked():
         return {"ok": False, "erro": "Há uma sincronização em andamento. Aguarde."}
 
-    n_movs = config_service.get_n_movimentacoes()
+    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
 
@@ -1042,6 +1054,53 @@ async def sincronizar_paj(slug: str, paj_norm: str) -> dict:
             if mudou:
                 _gravar_box(slug, box)
     return {"ok": True}
+
+
+async def extrair_mais_movimentacoes(slug: str, paj_norm: str, extra: int) -> dict:
+    """Extrai MAIS movimentações de UM PAJ (além das já baixadas), sem alterar o
+    padrão global. Re-lê o detalhamento com um total maior (atual + `extra`),
+    grava as movimentações no contato e PERSISTE o override `n_movimentacoes` — para
+    que a próxima sincronização (do PAJ, da caixa ou de todas) use esse total e a
+    análise passe a contar com as movimentações necessárias. NÃO reanalisa aqui;
+    o usuário revê as movimentações no popup e depois clica em "Sincronizar"."""
+    caixa = config_service.get_caixa(slug)
+    if not caixa:
+        return {"ok": False, "erro": "caixa desconhecida"}
+    box = _ler_box(slug, paj_norm)
+    solic = box.get("solicitacoes", []) if box else []
+    id_proc = solic[0].get("id") if solic else ""
+    if not id_proc:
+        return {"ok": False, "erro": "PAJ sem id de processo (sincronize a caixa primeiro)"}
+    if _sync_lock.locked():
+        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
+
+    try:
+        extra = int(extra)
+    except (TypeError, ValueError):
+        extra = 0
+    extra = max(1, min(extra, 100))  # limita o incremento por clique
+
+    cont = ler_contato(paj_norm)
+    atual = len(cont.get("movimentacoes", []) or [])
+    base = max(atual, int(cont.get("n_movimentacoes", 0) or 0))
+    novo_n = base + extra
+
+    async with _sync_lock:
+        try:
+            det = await sisdpu_client.detalhar_paj(id_proc, n_movs=novo_n)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "erro": str(e)}
+        atualizar_contato_do_detalhe(paj_norm, det)
+        cont = ler_contato(paj_norm)
+        movs = cont.get("movimentacoes", []) or []
+        # Se o PAJ tem menos movimentações que o pedido, chegou ao teto: fixa o
+        # override no total real disponível (evita crescer o override à toa).
+        esgotou = len(movs) < novo_n
+        cont["n_movimentacoes"] = len(movs) if esgotou else novo_n
+        _gravar_contato(cont)
+
+    return {"ok": True, "movimentacoes": movs, "total": len(movs),
+            "adicionadas": max(0, len(movs) - atual), "esgotou": esgotou}
 
 
 # ==================== disparo em lote da fila (Enviar Agora) ====================

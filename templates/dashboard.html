@@ -135,6 +135,7 @@
                     <div class="tri-actions-row">
                         {% if paj.movimentacoes %}
                         <button class="mov-badge" onclick="movAbrir(this)"
+                                data-paj="{{ paj.paj_norm }}"
                                 data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
                                 title="Ver a íntegra das últimas movimentações">
                             {{ paj.movimentacoes|length }} movimentações (ver íntegra)
@@ -231,6 +232,7 @@
                             {% endif %}
                             {% if paj.movimentacoes %}
                             <button class="mov-badge" onclick="movAbrir(this)"
+                                    data-paj="{{ paj.paj_norm }}"
                                     data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
                                     title="Ver a íntegra das últimas movimentações">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
@@ -547,6 +549,9 @@
 .mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
 /* Movimentações abrem POR CIMA do modal de triagem separada (z-index maior). */
 #mov-modal { z-index:1100; }
+.mov-mais { margin-top:12px; padding-top:12px; border-top:1px solid var(--stroke); }
+.mov-mais-lbl { font-size:12px; color:var(--text-tertiary); margin-bottom:8px; }
+.mov-mais-btns { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
 .mov-item:first-child { border-top:none; }
 .mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
@@ -656,6 +661,16 @@
         <button class="btn-subtle" style="padding:4px 10px;" onclick="movFechar()">Fechar</button>
     </div>
     <div id="mov-lista" style="margin-top:8px;"></div>
+    <div class="mov-mais">
+        <div class="mov-mais-lbl">As movimentações não bastam para a IA? Extraia mais (somam às atuais) e depois clique em <strong>Sincronizar</strong> no PAJ para reanalisar:</div>
+        <div class="mov-mais-btns">
+            <button class="btn-subtle" onclick="movExtrairMais(5, this)">Extrair mais 5</button>
+            <button class="btn-subtle" onclick="movExtrairMais(10, this)">Extrair mais 10</button>
+            <button class="btn-subtle" onclick="movExtrairMais(20, this)">Extrair mais 20</button>
+            <button class="btn-subtle" onclick="movExtrairMais(50, this)">Extrair mais 50</button>
+            <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
   </div>
 </div>
 
@@ -949,10 +964,8 @@ function sugParagrafoToggle(cb) {
 function sugFechar() { document.getElementById('sug-modal').style.display = 'none'; }
 
 // ---------- Últimas movimentações (badge → modal) ----------
-function movAbrir(btn) {
-    document.getElementById('mov-paj').textContent = btn.dataset.pajnum || '';
-    let movs = [];
-    try { movs = JSON.parse(btn.dataset.movs || '[]'); } catch (e) {}
+let movPajAtual = '';
+function movRender(movs) {
     const lista = document.getElementById('mov-lista');
     lista.innerHTML = movs.length ? '' : '<div class="text-tertiary" style="font-size:13px;padding:12px 0;">Sem movimentações.</div>';
     movs.forEach(m => {
@@ -965,9 +978,45 @@ function movAbrir(btn) {
         div.querySelector('.mov-desc').textContent = m.descricao || '(sem descrição)';
         lista.appendChild(div);
     });
+}
+function movAbrir(btn) {
+    movPajAtual = btn.dataset.paj || '';
+    document.getElementById('mov-paj').textContent = btn.dataset.pajnum || '';
+    let movs = [];
+    try { movs = JSON.parse(btn.dataset.movs || '[]'); } catch (e) {}
+    movRender(movs);
+    const msg = document.getElementById('mov-mais-msg');
+    if (msg) msg.textContent = movs.length + ' movimentação(ões) extraída(s)';
     document.getElementById('mov-modal').style.display = 'flex';
 }
 function movFechar() { document.getElementById('mov-modal').style.display = 'none'; }
+
+// Extrai MAIS n movimentações deste PAJ (acumula) e atualiza a lista no popup.
+// Depois o usuário clica em "Sincronizar" no PAJ para reanalisar com elas.
+async function movExtrairMais(n, btn) {
+    if (!movPajAtual) return;
+    const botoes = btn.parentElement.querySelectorAll('button');
+    const msg = document.getElementById('mov-mais-msg');
+    botoes.forEach(b => b.disabled = true);
+    if (msg) msg.textContent = 'Extraindo mais ' + n + '…';
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(movPajAtual) + '/mais-movimentacoes',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extra: n }) });
+        const d = await r.json();
+        if (d.ok) {
+            movRender(d.movimentacoes || []);
+            if (msg) msg.textContent = d.total + ' movimentação(ões)' +
+                (d.esgotou ? ' — todas já extraídas' : ' (+' + d.adicionadas + ')') +
+                ' · sincronize o PAJ para reanalisar';
+        } else if (msg) {
+            msg.textContent = 'Falha: ' + (d.erro || 'erro');
+        }
+    } catch (e) {
+        if (msg) msg.textContent = 'Erro: ' + e;
+    } finally {
+        botoes.forEach(b => b.disabled = false);
+    }
+}
 
 // ---------- Sincronizar apenas um PAJ ----------
 async function sincronizarPaj(btn) {
