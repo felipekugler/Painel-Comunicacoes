@@ -36,6 +36,12 @@ CONTATOS_DIR = DADOS_DIR / "_contatos"
 
 CONTATOS_KEYS = ["app_sisdpu", "telefone", "whatsapp", "email", "endereco"]
 
+# Teto de movimentações extraídas por PAJ em CADA sincronização. O scraping lê a
+# tabela inteira do DOM de uma vez (custo ~igual para 5 ou 30), então extraímos
+# até este total e guardamos todas. O nº padrão da config (n_movimentacoes) passa
+# a ser apenas o CORTE de exibição/IA, não o limite de extração.
+MOVS_EXTRACAO_MAX = 30
+
 # A concorrência das análises de IA (quantas rodam EM PARALELO no sync; 1 =
 # sequencial) é configurável na tela de Configurações e lida DINAMICAMENTE no
 # início da Fase 2 via config_service.get_analise_concorrencia() — sem restart.
@@ -92,9 +98,11 @@ def ler_contato(paj_norm: str) -> dict:
     d.setdefault("paj_norm", paj_norm)
     d.setdefault("assistido", "")
     d.setdefault("contatos", _contatos_vazio())
-    for k in ("telefones", "emails", "enderecos", "whatsapp_numeros", "movimentacoes"):
+    for k in ("telefones", "emails", "enderecos", "whatsapp_numeros", "movimentacoes",
+              "movs_selecao"):
         d.setdefault(k, [])
     d.setdefault("whatsapp_config", False)
+    d.setdefault("movs_texto_ia", "")
     return d
 
 
@@ -102,15 +110,48 @@ def _gravar_contato(d: dict) -> None:
     _write_json(_contato_file(d["paj_norm"]), d)
 
 
-def n_movs_efetivo(paj_norm: str) -> int:
-    """Nº de movimentações a extrair para ESTE PAJ: o padrão global (config) OU
-    um override por PAJ, quando o usuário pediu "Extrair mais" no popup (persistido
-    em `n_movimentacoes` do contato). Usa-se o MAIOR dos dois, para que sincronizações
-    posteriores não encolham de volta ao padrão."""
-    override = 0
-    with contextlib.suppress(Exception):
-        override = int(ler_contato(paj_norm).get("n_movimentacoes", 0) or 0)
-    return max(config_service.get_n_movimentacoes(), override)
+def movs_para_ia(cont: dict) -> list[dict]:
+    """Movimentações que vão à IA para este PAJ (de todas as extraídas):
+    1) se houver RECORTE MANUAL (movs_texto_ia), ele PREVALECE — vira um bloco único;
+    2) senão, as SELECIONADAS (movs_selecao, por seq);
+    3) senão, as N mais recentes (corte padrão da config)."""
+    todas = cont.get("movimentacoes", []) or []
+    texto = (cont.get("movs_texto_ia") or "").strip()
+    if texto:
+        return [{"seq": "M", "data": "", "tipo": "recorte manual do usuário",
+                 "fases": "", "descricao": texto[:4000]}]
+    sel = cont.get("movs_selecao") or []
+    if sel:
+        alvo = {str(s) for s in sel}
+        escolhidas = [m for m in todas if str(m.get("seq")) in alvo]
+        if escolhidas:
+            return escolhidas
+    n = config_service.get_n_movimentacoes()
+    return todas[:n]
+
+
+def _chave_movs(cont: dict, movs_ia: list[dict]) -> str:
+    """Componente de cache que reflete O QUE vai à IA (recorte manual ou seqs).
+    Muda ⇒ a análise é refeita."""
+    texto = (cont.get("movs_texto_ia") or "").strip()
+    if texto:
+        return "txt" + _desc_hash(texto)
+    return "s" + ",".join(str(m.get("seq")) for m in movs_ia)
+
+
+def _marcar_selecao(cont: dict) -> list[dict]:
+    """Cópia das movimentações com flag `sel` (marcada para a IA) — alimenta os
+    checkboxes do popup. Default: seleção salva; senão, as N mais recentes."""
+    todas = cont.get("movimentacoes", []) or []
+    sel = cont.get("movs_selecao") or []
+    if sel:
+        alvo = {str(s) for s in sel}
+        marcada = lambda m: str(m.get("seq")) in alvo  # noqa: E731
+    else:
+        n = config_service.get_n_movimentacoes()
+        recentes = {str(m.get("seq")) for m in todas[:n]}
+        marcada = lambda m: str(m.get("seq")) in recentes  # noqa: E731
+    return [{**m, "sel": marcada(m)} for m in todas]
 
 
 def atualizar_contato_do_detalhe(paj_norm: str, det: dict) -> dict:
@@ -319,7 +360,8 @@ def _contato_derivado(cont: dict) -> dict:
     d["telefones"] = cont.get("telefones", [])
     d["emails"] = cont.get("emails", [])
     d["enderecos"] = cont.get("enderecos", [])
-    d["movimentacoes"] = cont.get("movimentacoes", [])
+    d["movimentacoes"] = _marcar_selecao(cont)  # com flag `sel` p/ os checkboxes
+    d["movs_texto_ia"] = cont.get("movs_texto_ia", "")
     d["whatsapp_numeros"] = cont.get("whatsapp_numeros", [])
     d["whatsapp_config"] = cont.get("whatsapp_config", False)
     d["telefones_txt"] = "\n".join(
@@ -586,17 +628,16 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
     if len(pend) < 2:
         return {"ok": False, "erro": "PAJ não tem 2+ tramitações pendentes"}
     id_proc = pend[0].get("id", "")
-    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
     async with _sync_lock:
         if id_proc:
             with contextlib.suppress(Exception):
-                det = await sisdpu_client.detalhar_paj(id_proc, n_movs=n_movs)
+                det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
                 if det:
                     atualizar_contato_do_detalhe(paj_norm, det)
         cont = ler_contato(paj_norm)
-        movs = cont.get("movimentacoes", []) or []
+        movs_ia = movs_para_ia(cont)  # respeita recorte manual / seleção / corte padrão
         box = _ler_box(slug, paj_norm)
         pend = _sols_pendentes(box)
         pend_ids = sorted(s.get("id_tramite", "") for s in pend)
@@ -607,16 +648,15 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
         # o conjunto seja re-analisado quando as descrições dos trâmites mudarem.
         desc_conj = _desc_hash("||".join(sorted((s.get("descricao_tramite") or "") for s in pend)))
         ana = None
-        if movs and analise_service.disponivel():
+        if movs_ia and analise_service.disponivel():
             ana = await asyncio.to_thread(
-                analise_service.analisar_conjunto, movs, comunicados, caixa["nome"], tramites_info)
-        seqs = ",".join(str(m.get("seq")) for m in movs)
+                analise_service.analisar_conjunto, movs_ia, comunicados, caixa["nome"], tramites_info)
         box["conjunto"] = {
             "tramite_ids": pend_ids,
             "resumo_ia": (ana or {}).get("resumo", ""),
             "sugestao_ia": (ana or {}).get("sugestao", ""),
             "sugestao_editada": "",
-            "resumo_ia_chave": f"{seqs}|n{n_movs}|c{com_rev}|conj{','.join(pend_ids)}|d{desc_conj}",
+            "resumo_ia_chave": f"{_chave_movs(cont, movs_ia)}|c{com_rev}|conj{','.join(pend_ids)}|d{desc_conj}",
             "envio": {}, "enviados": [],
         }
         box["triagem"] = {"decisao": "conjunto", "ids": pend_ids}
@@ -637,13 +677,13 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
     if _sync_lock.locked():
         return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
     mapeamento = mapeamento or {}
-    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
     cont = ler_contato(paj_norm)
-    movs = cont.get("movimentacoes", []) or []
-    movs_por_seq = {str(m.get("seq")): m for m in movs}
-    seqs = ",".join(str(m.get("seq")) for m in movs)
+    todas = cont.get("movimentacoes", []) or []
+    movs_por_seq = {str(m.get("seq")): m for m in todas}  # foco pode ser qualquer mov extraída
+    movs_ia = movs_para_ia(cont)  # contexto que vai à IA (recorte/seleção/corte padrão)
+    chave_movs = _chave_movs(cont, movs_ia)
     async with _sync_lock:
         box = _ler_box(slug, paj_norm)
         pend = _sols_pendentes(box)
@@ -656,14 +696,14 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
                      "descricao_tramite": s.get("descricao_tramite", "")}
             if mov_foco:
                 tinfo["mov_foco"] = mov_foco
-            if movs and analise_service.disponivel():
+            if movs_ia and analise_service.disponivel():
                 ana = await asyncio.to_thread(
-                    analise_service.analisar_paj, movs, comunicados, caixa["nome"], tinfo)
+                    analise_service.analisar_paj, movs_ia, comunicados, caixa["nome"], tinfo)
                 if ana:
                     s["resumo_ia"] = ana.get("resumo", "")
                     s["sugestao_ia"] = ana.get("sugestao", "")
                     s["sugestao_tipo"] = ana.get("tipo", "")
-                    s["resumo_ia_chave"] = (f"{seqs}|n{n_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
+                    s["resumo_ia_chave"] = (f"{chave_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
                                             f"|m{mseq}|d{_desc_hash(s.get('descricao_tramite', ''))}")
             s["mov_seq"] = mseq
         box["triagem"] = {"decisao": "separado", "ids": pend_ids}
@@ -824,10 +864,9 @@ async def sincronizar_stream(slug: str):
 
             assistido, resumo_contatos, det = "", "", {}
             id_proc = itens_paj[0].get("id", "")
-            n_eff = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
             if id_proc:
                 try:
-                    det = await sisdpu_client.detalhar_paj(id_proc, n_movs=n_eff)
+                    det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
                 except Exception as e:  # noqa: BLE001
                     det = {}
                     yield {"level": "erro",
@@ -860,24 +899,25 @@ async def sincronizar_stream(slug: str):
             # a triagem (onde a IA roda em conjunto ou separado). Por isso NÃO
             # os analisamos aqui — evita análises iniciais desperdiçadas.
             if id_proc and analise_service.disponivel():
-                movs = det.get("movimentacoes", []) or []
+                cont = ler_contato(paj_norm)
+                movs_ia = movs_para_ia(cont)  # respeita recorte manual / seleção / corte padrão
+                chave_movs = _chave_movs(cont, movs_ia)
                 box = _ler_box(slug, paj_norm)
                 pend = _sols_pendentes(box)
                 if len(pend) >= 2:
                     yield {"level": "muted",
                            "msg": f"     {len(pend)} tramitações pendentes → análise adiada para a triagem "
                                   "(IA não chamada agora)."}
-                elif movs:
-                    seqs = ",".join(str(m.get("seq")) for m in movs)
+                elif movs_ia:
                     # Só agenda se ALGUMA tramitação está com o cache desatualizado.
                     faltam = any(
                         s.get("resumo_ia_chave")
-                        != f"{seqs}|n{n_eff}|c{com_rev}|t{s.get('id_tramite', '')}"
+                        != f"{chave_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
                            f"|d{_desc_hash(s.get('descricao_tramite', ''))}"
                         for s in box.get("solicitacoes", []))
                     if faltam:
                         trabalhos_ia.append({"paj_norm": paj_norm, "paj": paj,
-                                             "movs": movs, "seqs": seqs, "n_eff": n_eff})
+                                             "movs": movs_ia, "chave_movs": chave_movs})
 
             if id_proc:
                 await asyncio.sleep(1.0)
@@ -900,7 +940,7 @@ async def sincronizar_stream(slug: str):
                         return logs
                     mudou = False
                     for sol in box.get("solicitacoes", []):
-                        chave = (f"{job['seqs']}|n{job['n_eff']}|c{com_rev}|t{sol.get('id_tramite', '')}"
+                        chave = (f"{job['chave_movs']}|c{com_rev}|t{sol.get('id_tramite', '')}"
                                  f"|d{_desc_hash(sol.get('descricao_tramite', ''))}")
                         if sol.get("resumo_ia_chave") == chave:
                             continue
@@ -1017,90 +1057,127 @@ async def sincronizar_paj(slug: str, paj_norm: str) -> dict:
     if _sync_lock.locked():
         return {"ok": False, "erro": "Há uma sincronização em andamento. Aguarde."}
 
-    n_movs = n_movs_efetivo(paj_norm)  # respeita "Extrair mais" (override por PAJ)
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
 
     async with _sync_lock:
         try:
-            det = await sisdpu_client.detalhar_paj(id_proc, n_movs=n_movs)
+            det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "erro": str(e)}
         atualizar_contato_do_detalhe(paj_norm, det)
-        movs = det.get("movimentacoes", []) or []
-        if movs and analise_service.disponivel():
+        cont = ler_contato(paj_norm)
+        movs_ia = movs_para_ia(cont)
+        todas = cont.get("movimentacoes", []) or []
+        movs_por_seq = {str(m.get("seq")): m for m in todas}
+        chave_movs = _chave_movs(cont, movs_ia)
+        if movs_ia and analise_service.disponivel():
             box = _ler_box(slug, paj_norm)
-            seqs = ",".join(str(m.get("seq")) for m in movs)
-            movs_por_seq = {str(m.get("seq")): m for m in movs}
-            mudou = False
-            for sol in box.get("solicitacoes", []):  # re-analisa TODAS as tramitações
-                mseq = str(sol.get("mov_seq", "") or "")
-                tinfo = {"data_envio": sol.get("data_envio", ""),
-                         "oficio_origem": sol.get("oficio_origem", ""),
-                         "remetente": sol.get("remetente", ""),
-                         "descricao_tramite": sol.get("descricao_tramite", "")}
-                mf = movs_por_seq.get(mseq)  # se a tramitação foi vinculada a uma mov
-                if mf:
-                    tinfo["mov_foco"] = mf
-                ana = await asyncio.to_thread(
-                    analise_service.analisar_paj, movs, comunicados, caixa["nome"], tinfo)
-                if ana:
-                    sol["resumo_ia"] = ana.get("resumo", "")
-                    sol["sugestao_ia"] = ana.get("sugestao", "")
-                    sol["sugestao_tipo"] = ana.get("tipo", "")
-                    sol["resumo_ia_chave"] = (f"{seqs}|n{n_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
-                                              f"|m{mseq}|d{_desc_hash(sol.get('descricao_tramite', ''))}")
-                    mudou = True
+            mudou = await asyncio.to_thread(
+                _reanalisar_box, box, cont, comunicados, com_rev, caixa["nome"],
+                movs_ia, movs_por_seq, chave_movs)
             if mudou:
                 _gravar_box(slug, box)
     return {"ok": True}
 
 
-async def extrair_mais_movimentacoes(slug: str, paj_norm: str, extra: int) -> dict:
-    """Extrai MAIS movimentações de UM PAJ (além das já baixadas), sem alterar o
-    padrão global. Re-lê o detalhamento com um total maior (atual + `extra`),
-    grava as movimentações no contato e PERSISTE o override `n_movimentacoes` — para
-    que a próxima sincronização (do PAJ, da caixa ou de todas) use esse total e a
-    análise passe a contar com as movimentações necessárias. NÃO reanalisa aqui;
-    o usuário revê as movimentações no popup e depois clica em "Sincronizar"."""
+def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
+                    caixa_nome: str, movs_ia: list, movs_por_seq: dict, chave_movs: str) -> bool:
+    """Re-executa a análise de IA de um box (SEM scraping), respeitando o estado:
+    conjunto → re-analisa o conjunto; senão → cada tramitação (com mov_foco se
+    houver vínculo da triagem separada). Retorna True se algo mudou. Usa movs_ia
+    (recorte manual / seleção / corte padrão) como contexto enviado à IA."""
+    mudou = False
+    conj = box.get("conjunto")
+    if box.get("triagem", {}).get("decisao") == "conjunto" and conj:
+        ids = conj.get("tramite_ids", [])
+        pend = [s for s in box.get("solicitacoes", []) if s.get("id_tramite") in ids]
+        tramites_info = [{"data_envio": s.get("data_envio", ""), "oficio_origem": s.get("oficio_origem", ""),
+                          "remetente": s.get("remetente", ""),
+                          "descricao_tramite": s.get("descricao_tramite", "")} for s in pend]
+        desc_conj = _desc_hash("||".join(sorted((s.get("descricao_tramite") or "") for s in pend)))
+        chave = f"{chave_movs}|c{com_rev}|conj{','.join(sorted(ids))}|d{desc_conj}"
+        if conj.get("resumo_ia_chave") != chave:
+            ana = analise_service.analisar_conjunto(movs_ia, comunicados, caixa_nome, tramites_info)
+            if ana:
+                conj["resumo_ia"] = ana.get("resumo", "")
+                conj["sugestao_ia"] = ana.get("sugestao", "")
+                conj["resumo_ia_chave"] = chave
+                mudou = True
+        return mudou
+    for sol in box.get("solicitacoes", []):
+        mseq = str(sol.get("mov_seq", "") or "")
+        tinfo = {"data_envio": sol.get("data_envio", ""),
+                 "oficio_origem": sol.get("oficio_origem", ""),
+                 "remetente": sol.get("remetente", ""),
+                 "descricao_tramite": sol.get("descricao_tramite", "")}
+        mf = movs_por_seq.get(mseq)
+        if mf:
+            tinfo["mov_foco"] = mf
+        chave = (f"{chave_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
+                 f"|m{mseq}|d{_desc_hash(sol.get('descricao_tramite', ''))}")
+        if sol.get("resumo_ia_chave") == chave:
+            continue
+        ana = analise_service.analisar_paj(movs_ia, comunicados, caixa_nome, tinfo)
+        if ana:
+            sol["resumo_ia"] = ana.get("resumo", "")
+            sol["sugestao_ia"] = ana.get("sugestao", "")
+            sol["sugestao_tipo"] = ana.get("tipo", "")
+            sol["resumo_ia_chave"] = chave
+            mudou = True
+    return mudou
+
+
+def definir_selecao_movs(paj_norm: str, selecao: list | None, texto: str | None) -> dict:
+    """Persiste, no contato do PAJ, QUAIS movimentações vão à IA: `selecao` (lista
+    de seqs marcadas nos checkboxes) e `texto` (recorte manual, que PREVALECE).
+    Não reanalisa — quem chama decide (a rota chama reanalisar_paj em seguida)."""
+    cont = ler_contato(paj_norm)
+    sel: list[int] = []
+    for s in (selecao or []):
+        try:
+            sel.append(int(s))
+        except (TypeError, ValueError):
+            pass
+    cont["movs_selecao"] = sel
+    cont["movs_texto_ia"] = (texto or "").strip()[:4000]
+    _gravar_contato(cont)
+    return cont
+
+
+async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
+    """Reanalisa UM PAJ com as movimentações JÁ extraídas (SEM voltar ao SISDPU),
+    usando a seleção/recorte atual do contato. Cobre conjunto e tramitações
+    individuais. Usada após o usuário ajustar a seleção de movimentações no popup."""
     caixa = config_service.get_caixa(slug)
     if not caixa:
         return {"ok": False, "erro": "caixa desconhecida"}
     box = _ler_box(slug, paj_norm)
-    solic = box.get("solicitacoes", []) if box else []
-    id_proc = solic[0].get("id") if solic else ""
-    if not id_proc:
-        return {"ok": False, "erro": "PAJ sem id de processo (sincronize a caixa primeiro)"}
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
     if _sync_lock.locked():
         return {"ok": False, "erro": "Há uma operação em andamento. Aguarde."}
+    if not analise_service.disponivel():
+        return {"ok": True}  # IA desativada — nada a fazer
 
-    try:
-        extra = int(extra)
-    except (TypeError, ValueError):
-        extra = 0
-    extra = max(1, min(extra, 100))  # limita o incremento por clique
-
+    comunicados = config_service.comunicados_da_caixa(slug)
+    com_rev = config_service.comunicados_rev()
     cont = ler_contato(paj_norm)
-    atual = len(cont.get("movimentacoes", []) or [])
-    base = max(atual, int(cont.get("n_movimentacoes", 0) or 0))
-    novo_n = base + extra
+    movs_ia = movs_para_ia(cont)
+    todas = cont.get("movimentacoes", []) or []
+    movs_por_seq = {str(m.get("seq")): m for m in todas}
+    chave_movs = _chave_movs(cont, movs_ia)
+    if not movs_ia:
+        return {"ok": False, "erro": "Nenhuma movimentação selecionada para a IA"}
 
     async with _sync_lock:
-        try:
-            det = await sisdpu_client.detalhar_paj(id_proc, n_movs=novo_n)
-        except Exception as e:  # noqa: BLE001
-            return {"ok": False, "erro": str(e)}
-        atualizar_contato_do_detalhe(paj_norm, det)
-        cont = ler_contato(paj_norm)
-        movs = cont.get("movimentacoes", []) or []
-        # Se o PAJ tem menos movimentações que o pedido, chegou ao teto: fixa o
-        # override no total real disponível (evita crescer o override à toa).
-        esgotou = len(movs) < novo_n
-        cont["n_movimentacoes"] = len(movs) if esgotou else novo_n
-        _gravar_contato(cont)
-
-    return {"ok": True, "movimentacoes": movs, "total": len(movs),
-            "adicionadas": max(0, len(movs) - atual), "esgotou": esgotou}
+        box = _ler_box(slug, paj_norm)
+        mudou = await asyncio.to_thread(
+            _reanalisar_box, box, cont, comunicados, com_rev, caixa["nome"],
+            movs_ia, movs_por_seq, chave_movs)
+        if mudou:
+            _gravar_box(slug, box)
+    return {"ok": True}
 
 
 # ==================== disparo em lote da fila (Enviar Agora) ====================

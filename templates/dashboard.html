@@ -137,6 +137,7 @@
                         <button class="mov-badge" onclick="movAbrir(this)"
                                 data-paj="{{ paj.paj_norm }}"
                                 data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+                                data-texto='{{ paj.movs_texto_ia|tojson }}'
                                 title="Ver a íntegra das últimas movimentações">
                             {{ paj.movimentacoes|length }} movimentações (ver íntegra)
                         </button>
@@ -234,6 +235,7 @@
                             <button class="mov-badge" onclick="movAbrir(this)"
                                     data-paj="{{ paj.paj_norm }}"
                                     data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+                                    data-texto='{{ paj.movs_texto_ia|tojson }}'
                                     title="Ver a íntegra das últimas movimentações">
                                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
@@ -549,9 +551,17 @@
 .mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
 /* Movimentações abrem POR CIMA do modal de triagem separada (z-index maior). */
 #mov-modal { z-index:1100; }
+#mov-lista { max-height:42vh; overflow-y:auto; }
 .mov-mais { margin-top:12px; padding-top:12px; border-top:1px solid var(--stroke); }
 .mov-mais-lbl { font-size:12px; color:var(--text-tertiary); margin-bottom:8px; }
+.mov-mais-lbl a { color:var(--accent); text-decoration:none; }
 .mov-mais-btns { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.mov-recorte { width:100%; box-sizing:border-box; padding:8px 10px; margin-bottom:8px; border-radius:8px;
+    border:1px solid var(--stroke-strong); background:var(--card); color:var(--text); font-size:12.5px; resize:vertical; }
+.mov-cab-line { display:flex; align-items:flex-start; gap:8px; cursor:pointer; }
+.mov-cb { margin-top:3px; flex:0 0 auto; }
+.mov-item.mov-off .mov-desc { opacity:.45; }
+.mov-item.mov-off .mov-cab { opacity:.6; }
 .mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
 .mov-item:first-child { border-top:none; }
 .mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
@@ -662,12 +672,15 @@
     </div>
     <div id="mov-lista" style="margin-top:8px;"></div>
     <div class="mov-mais">
-        <div class="mov-mais-lbl">As movimentações não bastam para a IA? Extraia mais (somam às atuais) e depois clique em <strong>Sincronizar</strong> no PAJ para reanalisar:</div>
+        <div class="mov-mais-lbl">
+            Marque as movimentações que a <strong>IA</strong> deve considerar (as demais são ignoradas na análise).
+            <a href="#" onclick="movMarcarTodas(true);return false;">marcar todas</a> ·
+            <a href="#" onclick="movMarcarTodas(false);return false;">limpar</a>
+        </div>
+        <textarea id="mov-recorte" class="mov-recorte" rows="3"
+                  placeholder="(opcional) Recorte manual: cole aqui SÓ o texto relevante para a IA. Se preenchido, PREVALECE sobre os checkboxes."></textarea>
         <div class="mov-mais-btns">
-            <button class="btn-subtle" onclick="movExtrairMais(5, this)">Extrair mais 5</button>
-            <button class="btn-subtle" onclick="movExtrairMais(10, this)">Extrair mais 10</button>
-            <button class="btn-subtle" onclick="movExtrairMais(20, this)">Extrair mais 20</button>
-            <button class="btn-subtle" onclick="movExtrairMais(50, this)">Extrair mais 50</button>
+            <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção e reanalisar</button>
             <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;"></span>
         </div>
     </div>
@@ -964,6 +977,9 @@ function sugParagrafoToggle(cb) {
 function sugFechar() { document.getElementById('sug-modal').style.display = 'none'; }
 
 // ---------- Últimas movimentações (badge → modal) ----------
+// Cada movimentação tem um checkbox (marcada = enviada à IA). Um recorte manual
+// (textarea) prevalece sobre os checkboxes. "Salvar seleção e reanalisar" persiste
+// a escolha e reanalisa o PAJ SEM voltar ao SISDPU (todas as movs já estão baixadas).
 let movPajAtual = '';
 function movRender(movs) {
     const lista = document.getElementById('mov-lista');
@@ -972,11 +988,21 @@ function movRender(movs) {
         const cab = '[' + (m.seq ?? '') + '] ' + waEsc(m.data || '') +
             (m.tipo ? ' · ' + waEsc(m.tipo) : '') + (m.fases ? ' · ' + waEsc(m.fases) : '');
         const div = document.createElement('div');
-        div.className = 'mov-item';
-        div.innerHTML = '<div class="mov-cab"></div><div class="mov-desc"></div>';
+        div.className = 'mov-item' + (m.sel ? '' : ' mov-off');
+        div.innerHTML = '<label class="mov-cab-line"><input type="checkbox" class="mov-cb">' +
+            '<span class="mov-cab"></span></label><div class="mov-desc"></div>';
+        const cb = div.querySelector('.mov-cb');
+        cb.value = (m.seq ?? '');
+        cb.checked = !!m.sel;
+        cb.onchange = () => div.classList.toggle('mov-off', !cb.checked);
         div.querySelector('.mov-cab').textContent = cab;
         div.querySelector('.mov-desc').textContent = m.descricao || '(sem descrição)';
         lista.appendChild(div);
+    });
+}
+function movMarcarTodas(v) {
+    document.querySelectorAll('#mov-lista .mov-cb').forEach(cb => {
+        cb.checked = v; cb.closest('.mov-item').classList.toggle('mov-off', !v);
     });
 }
 function movAbrir(btn) {
@@ -985,36 +1011,38 @@ function movAbrir(btn) {
     let movs = [];
     try { movs = JSON.parse(btn.dataset.movs || '[]'); } catch (e) {}
     movRender(movs);
+    let texto = '';
+    try { texto = JSON.parse(btn.dataset.texto || '""'); } catch (e) {}
+    const ta = document.getElementById('mov-recorte');
+    if (ta) ta.value = texto || '';
     const msg = document.getElementById('mov-mais-msg');
-    if (msg) msg.textContent = movs.length + ' movimentação(ões) extraída(s)';
+    if (msg) msg.textContent = movs.length + ' movimentação(ões) disponível(is)';
     document.getElementById('mov-modal').style.display = 'flex';
 }
 function movFechar() { document.getElementById('mov-modal').style.display = 'none'; }
 
-// Extrai MAIS n movimentações deste PAJ (acumula) e atualiza a lista no popup.
-// Depois o usuário clica em "Sincronizar" no PAJ para reanalisar com elas.
-async function movExtrairMais(n, btn) {
+// Salva a seleção (checkboxes + recorte manual) e reanalisa o PAJ.
+async function salvarSelecaoMovs(btn) {
     if (!movPajAtual) return;
-    const botoes = btn.parentElement.querySelectorAll('button');
+    const selecao = Array.from(document.querySelectorAll('#mov-lista .mov-cb'))
+        .filter(cb => cb.checked).map(cb => cb.value);
+    const texto = (document.getElementById('mov-recorte') || {}).value || '';
     const msg = document.getElementById('mov-mais-msg');
-    botoes.forEach(b => b.disabled = true);
-    if (msg) msg.textContent = 'Extraindo mais ' + n + '…';
+    if (!selecao.length && !texto.trim()) {
+        if (msg) msg.textContent = 'Marque ao menos uma movimentação ou preencha o recorte.';
+        return;
+    }
+    btn.disabled = true;
+    if (msg) msg.textContent = 'Salvando e reanalisando (pode levar alguns segundos)…';
     try {
-        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(movPajAtual) + '/mais-movimentacoes',
-            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ extra: n }) });
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(movPajAtual) + '/movs-selecao',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ selecao: selecao, texto: texto }) });
         const d = await r.json();
-        if (d.ok) {
-            movRender(d.movimentacoes || []);
-            if (msg) msg.textContent = d.total + ' movimentação(ões)' +
-                (d.esgotou ? ' — todas já extraídas' : ' (+' + d.adicionadas + ')') +
-                ' · sincronize o PAJ para reanalisar';
-        } else if (msg) {
-            msg.textContent = 'Falha: ' + (d.erro || 'erro');
-        }
+        if (d.ok) { location.reload(); }
+        else { if (msg) msg.textContent = 'Falha: ' + (d.erro || 'erro'); btn.disabled = false; }
     } catch (e) {
-        if (msg) msg.textContent = 'Erro: ' + e;
-    } finally {
-        botoes.forEach(b => b.disabled = false);
+        if (msg) msg.textContent = 'Erro: ' + e; btn.disabled = false;
     }
 }
 
