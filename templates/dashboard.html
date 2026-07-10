@@ -534,7 +534,7 @@
 .section-head { display:flex; align-items:center; gap:10px; margin:0 0 12px; flex-wrap:wrap; }
 .badge-modo { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 8px; border-radius:6px;
               background:#fde68a; color:#713f12; border:1px solid #eab308; }
-.grava-dialog { width:100%; max-width:600px; padding:24px; max-height:88vh; overflow:auto; }
+.grava-dialog { width:50vw; max-width:50vw; padding:24px; max-height:88vh; overflow:auto; }
 .msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
 </style>
 
@@ -661,9 +661,9 @@
         — o PAJ sai de "pendentes" e entra na fila; o disparo ocorre em "Enviar Agora".
     </p>
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" style="min-height:170px;" placeholder="Mensagem ao assistido…"></textarea>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:340px;" placeholder="Mensagem ao assistido…"></textarea>
     <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de contato</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
         <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
@@ -696,6 +696,7 @@ const CAIXA_SLUG = "{{ caixa.slug }}";
 const PARAGRAFOS = {{ paragrafos|tojson }};
 const COMUNICADOS = {{ comunicados|tojson }};
 const MEIOS_ENVIO = {{ meios_envio|tojson }};
+const PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};  // prazos (dias) pré-definidos; 0 = sem prazo
 // ---------- Copiar para a area de transferencia + toast ----------
 function mostrarToast(msg) {
     const c = document.getElementById('toast-container');
@@ -732,6 +733,12 @@ function gravarAbrir(btn) {
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
     const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido (ao editar)
+    const _pr = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 5 : n; };  // preserva 0 (sem prazo)
+    const prazoRestore = {  // prazo (dias) de resposta POR MEIO (ao editar; padrão 5)
+        app_sisdpu: _pr(btn.dataset.prazoApp),
+        whatsapp: _pr(btn.dataset.prazoWhatsapp),
+        email: _pr(btn.dataset.prazoEmail),
+    };
     const disp = { app_sisdpu: btn.dataset.app === '1',
                    whatsapp: btn.dataset.whats === '1',
                    email: btn.dataset.email === '1' };
@@ -755,25 +762,59 @@ function gravarAbrir(btn) {
             '<span class="text-tertiary" style="font-size:11.5px;"></span>';
         lab.querySelectorAll('span')[0].textContent = m.label;
         if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
-        // "Somente leitura" — sub-opção do App SISDPU, na MESMA linha (só habilita com o App marcado).
+        // Cada meio na SUA linha, com "Prazo (dias)" (aparece só quando o meio está marcado);
+        // o App SISDPU ganha também "Somente leitura". Extras ocultos enquanto o meio não é marcado.
+        const row = document.createElement('div');
+        // min-height reserva o espaço do input de prazo → sem "pulo" ao marcar/desmarcar.
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:42px;';
+        row.appendChild(lab);
+        const meioCb = lab.querySelector('input');
+        const extras = [];
+        let slCb = null;
         if (m.key === 'app_sisdpu') {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:4px;flex-wrap:wrap;';
-            row.appendChild(lab);
             const slWrap = document.createElement('label');
             slWrap.className = 'wa-opt';
             slWrap.innerHTML = '<input type="checkbox" id="grava-sl"><span style="font-size:13px;">Somente leitura</span>';
             row.appendChild(slWrap);
-            box.appendChild(row);
-            const appCb = lab.querySelector('input');
-            const slCb = slWrap.querySelector('input');
-            const syncSl = () => { slCb.disabled = !appCb.checked; if (slCb.disabled) slCb.checked = false; };
-            appCb.addEventListener('change', syncSl);
-            slCb.checked = appCb.checked && slRestore;
-            syncSl();
-        } else {
-            box.appendChild(lab);
+            slCb = slWrap.querySelector('input');
+            extras.push(slWrap);
         }
+        const przWrap = document.createElement('label');
+        przWrap.className = 'wa-opt';
+        przWrap.innerHTML = '<span style="font-size:13px;">Prazo (dias)</span>' +
+            '<input type="number" id="grava-prazo-' + m.key + '" min="0" value="' + prazoRestore[m.key] + '" ' +
+            'style="width:54px;padding:3px 6px;border-radius:6px;border:1px solid var(--stroke-strong);' +
+            'background:var(--layer-alt);color:var(--text);font-size:13px;">';
+        row.appendChild(przWrap);
+        extras.push(przWrap);
+        const przInput = przWrap.querySelector('input');
+        // Badges de prazos pré-definidos + "Urgente" (último); escondem junto com o meio.
+        PRAZOS_PREDEF.forEach(v => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'prazo-badge';
+            b.textContent = v + ' dias';
+            b.onclick = () => { przInput.value = v; };
+            row.appendChild(b);
+            extras.push(b);
+        });
+        const urg = document.createElement('button');
+        urg.type = 'button';
+        urg.className = 'prazo-badge urgente';
+        urg.textContent = '⚡ Urgente';
+        urg.title = 'Prioridade máxima na fila (prazo 0)';
+        urg.onclick = () => { przInput.value = 0; };
+        row.appendChild(urg);
+        extras.push(urg);
+        box.appendChild(row);
+        const sync = () => {
+            const on = meioCb.checked;
+            extras.forEach(el => el.style.display = on ? '' : 'none');
+            if (!on && slCb) slCb.checked = false;
+        };
+        meioCb.addEventListener('change', sync);
+        if (slCb) slCb.checked = meioCb.checked && slRestore;
+        sync();
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
@@ -783,6 +824,8 @@ async function gravarSalvar() {
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
     const slCb = document.getElementById('grava-sl');
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
+    const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo
+    const prazos = { app_sisdpu: prazoDe('app_sisdpu'), whatsapp: prazoDe('whatsapp'), email: prazoDe('email') };
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
@@ -790,7 +833,7 @@ async function gravarSalvar() {
             ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/conjunto/gravar'
             : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
         const r = await fetch(url,
-            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura}) });
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }

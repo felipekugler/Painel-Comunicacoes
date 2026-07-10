@@ -47,13 +47,15 @@
             <tr>
                 <th class="sortable" data-col="0" data-type="num" onclick="ordenarTabela(this)" style="width:9.5rem;">Data/hora<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Caixa de origem<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Tipo<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Meios<span class="sort-arrow"></span></th>
-                <th style="min-width:18rem;">Mensagem</th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Caixa de origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Tipo<span class="sort-arrow"></span></th>
+                <th style="min-width:16rem;">Mensagem</th>
                 <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Anexos<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="8" data-type="text" onclick="ordenarTabela(this)" style="width:6.5rem;">Status<span class="sort-arrow"></span></th>
+                <th class="text-center" style="width:6rem;">Prazo</th>
+                <th class="sortable text-center" data-col="9" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Meios<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="10" data-type="text" onclick="ordenarTabela(this)" style="width:6.5rem;">Status<span class="sort-arrow"></span></th>
             </tr>
         </thead>
         <tbody>
@@ -63,6 +65,7 @@
                 <td data-sort="{{ r.paj }}">
                     <span style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ r.paj }}</span>
                 </td>
+                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ (r.oficio or '~')|lower }}">{{ r.oficio or "—" }}</td>
                 <td data-sort="{{ (r.assistido or '~')|lower }}">{{ r.assistido or "—" }}</td>
                 <td data-sort="{{ (r.caixa_nome or '')|lower }}">
                     {% if r.caixa_nome %}{%- set _cor = cor_caixa(r.caixa_slug) -%}
@@ -73,16 +76,6 @@
                 <td data-sort="{{ (r.tipo or '~')|lower }}">
                     {% if r.tipo %}<span class="pill" title="Texto padrão / classificação">{{ r.tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
-                </td>
-                <td class="text-center" data-sort="{{ r.meios_labels|join(',')|lower }}">
-                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:flex-start;">
-                        {% for m in r.meios %}
-                            {% if m == 'app_sisdpu' and r.somente_leitura %}
-                            <span class="meio-sl">{{ meio_icon(m, r.meios_labels[loop.index0]) }}<span class="sl-badge" title="Enviado em modo Somente Leitura">SL</span></span>
-                            {% else %}{{ meio_icon(m, r.meios_labels[loop.index0]) }}{% endif %}
-                        {% endfor %}
-                        {% if not r.meios %}<span class="text-tertiary">—</span>{% endif %}
-                    </div>
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">
                     <div class="clamp2">{{ r.mensagem or "—" }}</div>
@@ -103,6 +96,19 @@
                         <span class="anx-n">{{ r.anexos|length }}</span>
                     </button>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td class="text-center" style="font-size:12.5px;white-space:nowrap;">
+                    {% if r.meio %}{% if r.prazo == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ r.prazo }} dia(s){% endif %}{% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td class="text-center" data-sort="{{ r.meios_labels|join(',')|lower }}">
+                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:center;">
+                        {% for m in r.meios %}
+                            {% if m == 'app_sisdpu' and r.somente_leitura %}
+                            <span class="meio-sl">{{ meio_icon(m, r.meios_labels[loop.index0]) }}<span class="sl-badge" title="Enviado em modo Somente Leitura">SL</span></span>
+                            {% else %}{{ meio_icon(m, r.meios_labels[loop.index0]) }}{% endif %}
+                        {% endfor %}
+                        {% if not r.meios %}<span class="text-tertiary">—</span>{% endif %}
+                    </div>
                 </td>
                 <td data-sort="{{ r.status }}">
                     {%- set cor = {'enviado':'var(--c-zap)','simulado':'#a06d00','parcial':'var(--c-red)','falha':'var(--c-red)'}.get(r.status, 'var(--text-secondary)') -%}

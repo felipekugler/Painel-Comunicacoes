@@ -13,6 +13,7 @@ handler retornam status "nao_configurado" (não marcam como enviado).
 Assinatura dos handlers: async def _enviar_x(ctx) -> dict, onde ctx traz:
   paj, paj_norm, tramite_ids[], assistido, mensagem, telefones[], emails[],
   whatsapp_numeros[], somente_leitura (bool — App SISDPU: só leitura, sem resposta),
+  prazo_app / prazo_whatsapp / prazo_email (int>=1 — prazo de resposta por meio, padrão 5),
   anexos[] (cada um: nome, arquivo, tamanho, tipo, incluido_em, caminho=ABSOLUTO no disco).
 """
 

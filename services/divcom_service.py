@@ -313,11 +313,34 @@ def definir_sugestao(slug: str, paj_norm: str, id_tramite: str, texto: str,
 
 
 # ==================== fila de envio (POR TRAMITAÇÃO) ====================
+def _prazo_ok(prazo_dias) -> int:
+    """Normaliza um prazo (dias) de resposta: inteiro >= 0 (0 = URGENTE), padrão 5."""
+    try:
+        n = int(prazo_dias)
+    except (TypeError, ValueError):
+        n = 5
+    return n if n >= 0 else 0
+
+
+def _prazos_envio(prazos: dict | None) -> dict:
+    """Constrói os prazos POR MEIO (variáveis separadas) a partir de um dict
+    {app_sisdpu, whatsapp, email}. Cada prazo é normalizado (>=1, padrão 5)."""
+    prazos = prazos or {}
+    return {
+        "prazo_app": _prazo_ok(prazos.get("app_sisdpu", 5)),
+        "prazo_whatsapp": _prazo_ok(prazos.get("whatsapp", 5)),
+        "prazo_email": _prazo_ok(prazos.get("email", 5)),
+    }
+
+
 def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
-                      meios: list[str], somente_leitura: bool = False) -> dict:
+                      meios: list[str], somente_leitura: bool = False,
+                      prazos: dict | None = None) -> dict:
     """Grava UMA tramitação na fila de envio (sai de "pendentes" e entra em
     "gravados para envio"). Guarda a mensagem a disparar e os meios escolhidos.
-    `somente_leitura` (App SISDPU): o assistido só lê a notificação, não responde."""
+    `somente_leitura` (App SISDPU): o assistido só lê a notificação, não responde.
+    `prazos` (dict por meio {app_sisdpu, whatsapp, email}): prazo de resposta em
+    dias de cada meio (>=1, padrão 5); armazenados como prazo_app/whatsapp/email."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
     if not box:
@@ -331,6 +354,7 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
         "mensagem": (mensagem or "").strip(),
         "meios": meios,
         "somente_leitura": bool(somente_leitura),
+        **_prazos_envio(prazos),
         "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     _gravar_box(slug, box)
@@ -397,23 +421,32 @@ def adicionar_anexos(slug: str, paj_norm: str, tipo: str, id_tramite: str,
         return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
     dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
     dest.mkdir(parents=True, exist_ok=True)
+    # Dedupe: não adiciona o mesmo documento duas vezes (mesmo nome, sem diferenciar
+    # maiúsculas). Duplicados são ignorados e devolvidos em `duplicados`.
+    existentes = {(a.get("nome") or "").strip().lower() for a in anexos}
+    duplicados: list[str] = []
     for nome, dados in arquivos:
         if not dados:
             continue
+        nome_base = Path(nome or "arquivo").name
+        if nome_base.strip().lower() in existentes:
+            duplicados.append(nome_base)
+            continue
         if len(dados) > _ANEXO_MAX:
             return {"ok": False, "erro": f"'{nome}' excede o limite de 25 MB."}
+        existentes.add(nome_base.strip().lower())
         aid = uuid.uuid4().hex[:12]
         seguro = _nome_seguro(nome)
         arquivo_salvo = f"{aid}__{seguro}"
         with contextlib.suppress(Exception):
             (dest / arquivo_salvo).write_bytes(dados)
         anexos.append({
-            "id": aid, "nome": Path(nome or seguro).name, "arquivo": arquivo_salvo,
+            "id": aid, "nome": nome_base, "arquivo": arquivo_salvo,
             "tamanho": len(dados), "tipo": Path(seguro).suffix.lstrip(".").lower(),
             "incluido_em": _dt.datetime.now().isoformat(timespec="seconds"),
         })
     _gravar_box(slug, box)
-    return {"ok": True, "anexos": anexos}
+    return {"ok": True, "anexos": anexos, "duplicados": duplicados}
 
 
 def remover_anexo(slug: str, paj_norm: str, tipo: str, id_tramite: str, anexo_id: str) -> dict:
@@ -450,7 +483,7 @@ def listar_prontos_envio() -> list[dict]:
         for item in montar_dashboard(c["slug"])["fila"]:
             out.append({**item, "caixa_slug": c["slug"],
                         "caixa_nome": c["nome"], "grupo": c["grupo"]})
-    out.sort(key=lambda d: d.get("envio_gravado_em", ""))
+    out.sort(key=lambda d: (0 if d.get("envio_urgente") else 1, d.get("envio_gravado_em", "")))
     return out
 
 
@@ -545,6 +578,12 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
     d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
+    d["envio_prazo_app"] = envio.get("prazo_app", envio.get("prazo_dias", 5))  # fallback legado
+    d["envio_prazo_whatsapp"] = envio.get("prazo_whatsapp", 5)
+    d["envio_prazo_email"] = envio.get("prazo_email", 5)
+    _prz_meio = {"app_sisdpu": d["envio_prazo_app"], "whatsapp": d["envio_prazo_whatsapp"], "email": d["envio_prazo_email"]}
+    d["envio_urgente"] = any(_prz_meio.get(m) == 0 for m in d["envio_meios"])  # prazo 0 = urgente
+    d["envio_falhas"] = envio.get("falhas") or {}  # {meio: detalhe} do último envio (reenvio)
     d["envio_gravado_em"] = envio.get("gravado_em", "")
     # anexos (documentos a enviar) por tramitação
     anx = sol.get("anexos", []) or []
@@ -695,6 +734,12 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
     d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
+    d["envio_prazo_app"] = envio.get("prazo_app", envio.get("prazo_dias", 5))  # fallback legado
+    d["envio_prazo_whatsapp"] = envio.get("prazo_whatsapp", 5)
+    d["envio_prazo_email"] = envio.get("prazo_email", 5)
+    _prz_meio = {"app_sisdpu": d["envio_prazo_app"], "whatsapp": d["envio_prazo_whatsapp"], "email": d["envio_prazo_email"]}
+    d["envio_urgente"] = any(_prz_meio.get(m) == 0 for m in d["envio_meios"])  # prazo 0 = urgente
+    d["envio_falhas"] = envio.get("falhas") or {}  # {meio: detalhe} do último envio (reenvio)
     d["envio_gravado_em"] = envio.get("gravado_em", "")
     anx = conj.get("anexos", []) or []
     d["anexos"] = anx
@@ -756,7 +801,8 @@ def montar_dashboard(slug: str) -> dict:
                     triagem.append(_item_triagem(box, pend, cont))
     triagem.sort(key=lambda d: d.get("paj", ""))
     pendentes.sort(key=lambda d: d.get("data_envio_key") or "99999999")
-    fila.sort(key=lambda d: d.get("envio_gravado_em", ""))
+    # Urgentes (prazo 0) primeiro na fila; depois por ordem de gravação.
+    fila.sort(key=lambda d: (0 if d.get("envio_urgente") else 1, d.get("envio_gravado_em", "")))
     enviados.sort(key=lambda d: d.get("contato_em", ""), reverse=True)
     return {"triagem": triagem, "pendentes": pendentes, "fila": fila, "enviados": enviados}
 
@@ -874,7 +920,7 @@ def desfazer_triagem(slug: str, paj_norm: str) -> dict:
 
 
 def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
-                    somente_leitura: bool = False) -> dict:
+                    somente_leitura: bool = False, prazos: dict | None = None) -> dict:
     """Grava o CONJUNTO de um PAJ na fila de envio."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
@@ -884,6 +930,7 @@ def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
     box["conjunto"]["envio"] = {
         "status": "gravado", "mensagem": (mensagem or "").strip(),
         "meios": meios, "somente_leitura": bool(somente_leitura),
+        **_prazos_envio(prazos),
         "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     _gravar_box(slug, box)
@@ -1417,47 +1464,90 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         "mensagem": mensagem, "telefones": cont.get("telefones", []),
         "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
         "somente_leitura": bool(t.get("envio_somente_leitura")),
+        "prazo_app": _prazo_ok(t.get("envio_prazo_app", 5)),
+        "prazo_whatsapp": _prazo_ok(t.get("envio_prazo_whatsapp", 5)),
+        "prazo_email": _prazo_ok(t.get("envio_prazo_email", 5)),
         "anexos": anexos_ctx,
     }
-    resultados, res_por_meio = [], {}
-    for meio in meios:
-        r = await envio_service.enviar(meio, ctx)
-        r["meio"] = meio
-        resultados.append(r)
-        res_por_meio[meio] = r.get("status", "falha")
-        nivel = "ok" if r.get("ok") else "erro"
-        yield {"level": nivel,
-               "msg": f"     {envio_service.label_meio(meio)}: {r.get('detalhe', r.get('status'))}"}
-
-    status = _status_geral(resultados)
-    reg = historico_service.registrar({
+    # Prazo de cada meio (variáveis separadas) e id que agrupa as linhas do disparo.
+    prazo_por_meio = {
+        "app_sisdpu": _prazo_ok(t.get("envio_prazo_app", 5)),
+        "whatsapp": _prazo_ok(t.get("envio_prazo_whatsapp", 5)),
+        "email": _prazo_ok(t.get("envio_prazo_email", 5)),
+    }
+    envio_id = uuid.uuid4().hex[:12]  # agrupa as linhas (UMA por meio) do mesmo disparo
+    base_reg = {
+        "envio_id": envio_id,
         "paj_norm": paj_norm, "paj": t["paj"], "assistido": t.get("assistido", ""),
+        "oficio": t.get("oficio", ""),
         "id_tramite": ids[0] if len(ids) == 1 else "", "tramite_ids": ids,
         "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
         "tipo": t.get("sugestao_tipo", ""),  # classificação do texto padrão
         "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
-        "meios": meios, "mensagem": mensagem,
-        "anexos": anexos_meta,  # metadados completos (nome, arquivo, tamanho, tipo, incluido_em)
+        "mensagem": mensagem, "anexos": anexos_meta,
         "anexo_tipo": tipo_alvo, "anexo_ref": ("" if conjunto else ids[0]),
-        "somente_leitura": bool(t.get("envio_somente_leitura")),
-        "status": status, "resultado": res_por_meio,
-    })
+    }
 
-    if status != "falha":
-        box = _ler_box(slug, paj_norm)
-        registro = {"em": reg["ts"], "meios": meios, "mensagem": mensagem,
-                    "status": status, "resultado": res_por_meio, "historico_id": reg["id"],
-                    "anexos": anexos_meta, "somente_leitura": bool(t.get("envio_somente_leitura"))}
-        if conjunto and box.get("conjunto"):
-            box["conjunto"].setdefault("enviados", []).append({**registro, "tramite_ids": ids})
-            box["conjunto"]["envio"] = {}
+    # UMA linha de histórico POR MEIO (status/prazo próprios + campos de baixa reservados).
+    ok_meios, fail_meios, falhas, ok_ids = [], [], {}, []
+    algum_real = False
+    ultimo_ts = ""
+    for meio in meios:
+        r = await envio_service.enviar(meio, ctx)
+        st = r.get("status", "falha")
+        detalhe = r.get("detalhe", st)
+        reg = historico_service.registrar({
+            **base_reg,
+            "meio": meio, "meios": [meio],
+            "prazo": prazo_por_meio.get(meio, 5),
+            "somente_leitura": bool(t.get("envio_somente_leitura")) if meio == "app_sisdpu" else False,
+            "status": st, "detalhe": detalhe,
+            # reservados p/ controle futuro de resposta/baixa (por meio):
+            "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+        })
+        ultimo_ts = reg["ts"]
+        yield {"level": ("ok" if r.get("ok") else "erro"),
+               "msg": f"     {envio_service.label_meio(meio)}: {detalhe}"}
+        if r.get("ok"):
+            ok_meios.append(meio)
+            ok_ids.append(reg["id"])
+            if st == "enviado":
+                algum_real = True
         else:
-            sol = _achar_solic(box, ids[0]) if box else None
-            if sol:
-                sol.setdefault("enviados", []).append(registro)
-                sol["envio"] = {}
-        if box:
-            _gravar_box(slug, box)
+            fail_meios.append(meio)
+            falhas[meio] = detalhe
+
+    # status consolidado (só para o resumo do lote).
+    if not ok_meios:
+        status = "falha"
+    elif fail_meios:
+        status = "parcial"
+    else:
+        status = "enviado" if algum_real else "simulado"
+
+    # Box: meios OK viram um registro de enviados e saem; meios com FALHA PERMANECEM
+    # na fila (com marcação `falhas`) para reenvio no próximo "Enviar Agora".
+    box = _ler_box(slug, paj_norm)
+    if box:
+        alvo = box.get("conjunto") if conjunto else _achar_solic(box, ids[0])
+        if alvo is not None:
+            if ok_meios:
+                entry = {"em": ultimo_ts, "meios": ok_meios, "mensagem": mensagem,
+                         "status": ("enviado" if algum_real else "simulado"),
+                         "envio_id": envio_id, "historico_ids": ok_ids, "anexos": anexos_meta,
+                         "somente_leitura": bool(t.get("envio_somente_leitura")) if "app_sisdpu" in ok_meios else False}
+                if conjunto:
+                    entry["tramite_ids"] = ids
+                alvo.setdefault("enviados", []).append(entry)
+            if fail_meios:
+                envio = alvo.get("envio") or {}
+                envio["meios"] = fail_meios       # só os que faltam reenviar
+                envio["falhas"] = falhas          # {meio: detalhe} — marcação da falha
+                envio["falha_em"] = ultimo_ts
+                alvo["envio"] = envio
+            else:
+                alvo["envio"] = {}                # tudo OK → sai da fila
+        _gravar_box(slug, box)
     yield {"_status": status}
 
 
@@ -1561,6 +1651,7 @@ async def enviar_selecao_stream(selecao: list[dict]):
                                   s.get("tipo", "tramite"), s.get("id_tramite", ""))
             if it:
                 itens.append((slug, caixa, it))
+        itens.sort(key=lambda x: 0 if x[2].get("envio_urgente") else 1)  # urgentes primeiro
         if not itens:
             yield {"level": "info", "msg": "Nada a enviar (seleção vazia ou já processada)."}
             yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0}}

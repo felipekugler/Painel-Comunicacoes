@@ -41,6 +41,7 @@ async def dashboard(request: Request, slug: str):
         triagem=db["triagem"], pendentes=db["pendentes"], fila=db["fila"], enviados=db["enviados"],
         paragrafos=paragrafos, comunicados=comunicados,
         meios_envio=envio_service.meios_disponiveis(),
+        prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modo=config_service.get_envio_modo()))
 
 
@@ -81,6 +82,7 @@ async def prontos_envio(request: Request):
         meio_labels={m["key"]: m["label"] for m in meios},
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
+        prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modo=config_service.get_envio_modo()))
 
 
@@ -194,11 +196,12 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
     mensagem = payload.get("mensagem", "") if isinstance(payload, dict) else ""
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
     somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
+    prazos = payload.get("prazos") if isinstance(payload, dict) else None
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."},
                             status_code=400)
     dados = divcom_service.gravar_para_envio(slug, paj_norm, id_tramite, mensagem, meios,
-                                             somente_leitura=somente_leitura)
+                                             somente_leitura=somente_leitura, prazos=prazos)
     if not dados:
         return JSONResponse({"ok": False, "erro": "tramitação não encontrada"}, status_code=404)
     return {"ok": True}
@@ -242,10 +245,11 @@ async def triar_desfazer(slug: str, paj_norm: str):
 async def gravar_conjunto(slug: str, paj_norm: str, payload: dict = Body(...)):
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
     somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
+    prazos = payload.get("prazos") if isinstance(payload, dict) else None
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."}, status_code=400)
     dados = divcom_service.gravar_conjunto(slug, paj_norm, payload.get("mensagem", ""), meios,
-                                           somente_leitura=somente_leitura)
+                                           somente_leitura=somente_leitura, prazos=prazos)
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}

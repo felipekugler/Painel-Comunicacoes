@@ -149,6 +149,27 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Prazos de resposta pré-definidos</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Botões de atalho oferecidos ao gravar o envio (ao lado do campo <strong>Prazo (dias)</strong>), para cada meio.
+            O prazo padrão do campo (5 dias) e o badge <strong>⚡ Urgente</strong> (prioridade máxima na fila) já são fixos.
+        </p>
+        <div id="prazos-lista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+            {% for p in prazos_predefinidos %}
+            <span class="prazo-chip">{{ p }} dias
+                <button title="Remover" onclick="delPrazoPredef({{ p }})">✕</button></span>
+            {% endfor %}
+            {% if not prazos_predefinidos %}<span class="text-tertiary" style="font-size:13px;">Nenhum prazo pré-definido.</span>{% endif %}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label for="novo-prazo" style="font-size:14px;">Novo prazo (dias):</label>
+            <input type="number" id="novo-prazo" class="wa-input" style="width:90px;" min="1" placeholder="ex.: 20">
+            <button class="btn-accent" onclick="addPrazoPredef()">Adicionar</button>
+            <span id="prazo-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Backups do histórico de mensagens</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             Cópias de segurança do histórico geradas automaticamente (antes de cada limpeza e a cada gravação).
@@ -307,6 +328,10 @@
 .cfg-tab-off { color:var(--text-tertiary); }
 .cfg-panel { display:none; }
 .cfg-panel.ativa { display:block; }
+.prazo-chip { display:inline-flex; align-items:center; gap:6px; font-size:13px; padding:4px 10px; border-radius:999px;
+              background:var(--accent-soft); color:var(--accent); border:1px solid var(--stroke-strong); }
+.prazo-chip button { background:none; border:none; color:inherit; cursor:pointer; font-size:12px; line-height:1; padding:0; }
+.prazo-chip button:hover { color:var(--c-red); }
 .btn-subtle:disabled { opacity:.4; cursor:not-allowed; }
 .aviso-ro { background:color-mix(in srgb, #eab308 16%, transparent); border:1px solid color-mix(in srgb,#eab308 40%,transparent);
             color:var(--text-secondary); font-size:13px; border-radius:8px; padding:12px 16px; margin-bottom:18px; }
@@ -437,6 +462,19 @@ async function salvarConcorrencia(){
     const d=await r.json();
     if(d.ok){ document.getElementById('n-conc').value=d.n; document.getElementById('conc-status').textContent='salvo ✓'; toast('Configuração salva'); }
     else alert('Erro: '+(d.erro||'falha'));
+}
+async function addPrazoPredef(){
+    const el=document.getElementById('novo-prazo'); const v=parseInt(el.value,10);
+    const st=document.getElementById('prazo-status');
+    if(isNaN(v)||v<1){ st.textContent='Informe um número ≥ 1 (0 é reservado para Urgente).'; return; }
+    const r=await fetch('/api/config/prazos-predefinidos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valor:v})});
+    const d=await r.json();
+    if(d.ok){ toast('Prazo adicionado'); location.reload(); } else { st.textContent='Falha ao adicionar.'; }
+}
+async function delPrazoPredef(v){
+    const r=await fetch('/api/config/prazos-predefinidos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valor:v})});
+    const d=await r.json();
+    if(d.ok){ toast('Prazo removido'); location.reload(); }
 }
 async function toggleCaixa(grupo, on){
     const r=await fetch('/api/config/caixa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo,on})});

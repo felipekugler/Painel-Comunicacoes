@@ -29,6 +29,11 @@ N_MOVIMENTACOES_PADRAO = 5
 ANALISE_CONCORRENCIA_PADRAO = 6
 ANALISE_CONCORRENCIA_MAX = 8
 
+# Prazos (dias) pré-definidos, oferecidos como badges no "Gravar para envio".
+# São ADICIONAIS ao prazo default (5) do campo e ao badge fixo "Urgente" (=0).
+# Apenas valores POSITIVOS (>=1); o 0 é RESERVADO para "Urgente".
+PRAZOS_PREDEF_PADRAO = [5, 10, 15, 30]
+
 CAIXA_DIVCOM_GRUPO = "01 - PREV_DIVCOM"
 
 _COMUNICADOS_SEED = [
@@ -90,6 +95,7 @@ def _default() -> dict:
         "comunicados": [{"id": uuid.uuid4().hex[:8], **c} for c in _COMUNICADOS_SEED],
         "paragrafos": [{"id": uuid.uuid4().hex[:8], **p} for p in _PARAGRAFOS_SEED],
         "envio_modo": "simulado",
+        "prazos_predefinidos": list(PRAZOS_PREDEF_PADRAO),
         "caixas_disponiveis": [],
         "caixas": {},
     }
@@ -105,6 +111,7 @@ def ler_config() -> dict:
             d.setdefault("paragrafos", [])
             d.setdefault("comunicados_rev", 1)
             d.setdefault("caixas_disponiveis", [])
+            d.setdefault("prazos_predefinidos", list(PRAZOS_PREDEF_PADRAO))
             d.setdefault("caixas", {})  # pode ficar vazio (reset total / primeiro uso)
             return d
     d = _default()
@@ -163,6 +170,44 @@ def set_analise_concorrencia(n: int) -> int:
     d["analise_concorrencia"] = max(1, min(int(n), ANALISE_CONCORRENCIA_MAX))
     _gravar(d)
     return d["analise_concorrencia"]
+
+
+# ---------------- prazos pré-definidos (badges do "Gravar para envio") ----------------
+def _norm_prazo(v) -> int | None:
+    """Normaliza um prazo pré-definido: inteiro >= 1. None se inválido.
+    O 0 NÃO é aceito aqui (é reservado para "Urgente", oferecido por badge fixo)."""
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    return n if n >= 1 else None
+
+
+def get_prazos_predefinidos() -> list[int]:
+    """Lista de prazos (dias) pré-definidos, ordenada (0 = 'sem prazo' primeiro)."""
+    bruto = ler_config().get("prazos_predefinidos", PRAZOS_PREDEF_PADRAO)
+    vals = sorted({n for n in (_norm_prazo(v) for v in (bruto or [])) if n is not None})
+    return vals
+
+
+def add_prazo_predef(valor) -> list[int]:
+    n = _norm_prazo(valor)
+    d = ler_config()
+    atuais = [x for x in (_norm_prazo(v) for v in d.get("prazos_predefinidos", [])) if x is not None]
+    if n is not None and n not in atuais:
+        atuais.append(n)
+    d["prazos_predefinidos"] = sorted(set(atuais))
+    _gravar(d)
+    return d["prazos_predefinidos"]
+
+
+def del_prazo_predef(valor) -> list[int]:
+    n = _norm_prazo(valor)
+    d = ler_config()
+    atuais = [x for x in (_norm_prazo(v) for v in d.get("prazos_predefinidos", [])) if x is not None]
+    d["prazos_predefinidos"] = sorted({x for x in atuais if x != n})
+    _gravar(d)
+    return d["prazos_predefinidos"]
 
 
 def comunicados_rev() -> int:

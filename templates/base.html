@@ -312,6 +312,16 @@
         .anx-clip[disabled] { cursor:default; opacity:.45; }
         .anx-clip[disabled]:hover { background:none; color: var(--text-tertiary); }
 
+        /* Badges de prazo pré-definido (no "Gravar para envio") */
+        .prazo-badge { font-size:11px; padding:2px 9px; border-radius:999px; cursor:pointer;
+                       border:1px solid var(--stroke-strong); background:var(--accent-soft);
+                       color:var(--accent); white-space:nowrap; line-height:1.5; }
+        .prazo-badge:hover { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); }
+        .prazo-badge.urgente { background:rgba(220,38,38,0.12); color:#dc2626; border-color:#dc2626; font-weight:700; }
+        .prazo-badge.urgente:hover { background:#dc2626; color:#fff; }
+        .pill-urgente { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:800;
+                        padding:1px 7px; border-radius:999px; background:#dc2626; color:#fff; }
+
         /* Selo "SL" (somente leitura) abaixo do ícone do App SISDPU */
         .meio-sl { display:inline-flex; flex-direction:column; align-items:center; gap:1px; }
         .sl-badge { font-size:9px; font-weight:800; line-height:1; letter-spacing:.03em; color:var(--c-app);
@@ -440,7 +450,7 @@
 
     <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->
     <div id="anx-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)anxFechar()">
-      <div class="fluent-card" style="width:min(600px,92vw);max-height:86vh;overflow:auto;">
+      <div class="fluent-card" style="width:50vw;max-height:86vh;overflow:auto;">
         <h3 class="font-display" style="font-size:18px;margin:0;">
             Anexos — PAJ <span id="anx-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
         </h3>
@@ -454,7 +464,7 @@
             <span id="anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:14px;">
-            <button class="btn-subtle" style="padding:6px 14px;" onclick="anxFechar()">Fechar</button>
+            <button class="btn-accent" style="padding:6px 14px;" onclick="anxFechar()">Salvar</button>
         </div>
       </div>
     </div>
@@ -522,7 +532,12 @@
         try {
             const r = await fetch(anxRaiz() + '/anexos', { method: 'POST', body: fd });
             const d = await r.json();
-            if (d.ok) { anxMudou = true; msg.textContent = ''; anxRender(d.anexos || []); }
+            if (d.ok) {
+                anxMudou = true;
+                anxRender(d.anexos || []);
+                const dup = d.duplicados || [];
+                msg.textContent = dup.length ? ('Já constava(m), não adicionado(s): ' + dup.join(', ')) : '';
+            }
             else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
         } catch (e) { msg.textContent = 'Erro: ' + e; }
         input.value = '';

@@ -4,10 +4,15 @@ Registro append-only em dados/_historico/mensagens.jsonl (uma linha JSON por
 mensagem enviada). Independe da caixa: reúne tudo o que foi disparado pelo
 painel, para consulta/pesquisa na página "Histórico de mensagens".
 
-Cada registro:
-  id, ts (ISO), paj_norm, paj, assistido, caixa_slug, caixa_nome, grupo,
-  meios [str], mensagem, anexos [str], status ("enviado"/"simulado"/"parcial"),
-  resultado {meio: "ok"/"falha"/"simulado"/...}
+Cada registro é POR MEIO (uma linha por meio disparado), para permitir filtro,
+acompanhamento e baixa por canal:
+  id, ts (ISO), envio_id (agrupa os meios do mesmo disparo), paj_norm, paj, oficio,
+  assistido, caixa_slug, caixa_nome, grupo, tipo, conjunto, id_tramite/tramite_ids,
+  mensagem, anexos [{...}], meio (str), prazo (int), somente_leitura (bool),
+  status ("enviado"/"simulado"/"falha"/"nao_configurado"), detalhe,
+  + campos reservados p/ baixa: respondido, respondido_em, baixado, baixado_em, obs.
+Registros ANTIGOS (agregados: meios[] + resultado{}) são expandidos na leitura por
+`listar_por_meio()` (o arquivo não é reescrito).
 """
 
 from __future__ import annotations
@@ -70,6 +75,37 @@ def listar() -> list[dict]:
     return itens
 
 
+def listar_por_meio() -> list[dict]:
+    """Histórico expandido: UMA linha por MEIO (para filtro/baixa por canal).
+
+    Registros novos já são por meio (têm 'meio'). Registros ANTIGOS (agregados,
+    com 'meios'[] + 'resultado'{}) são expandidos aqui SÓ para exibição — o arquivo
+    não é reescrito."""
+    out: list[dict] = []
+    for r in listar():
+        if r.get("meio"):  # já é por meio (formato novo)
+            r = dict(r)
+            r.setdefault("meios", [r["meio"]])
+            r.setdefault("prazo", 5)
+            out.append(r)
+            continue
+        meios = r.get("meios") or []
+        resultado = r.get("resultado") or {}
+        prazos = {"app_sisdpu": r.get("prazo_app") or r.get("prazo_dias") or 5,
+                  "whatsapp": r.get("prazo_whatsapp") or 5,
+                  "email": r.get("prazo_email") or 5}
+        if not meios:
+            out.append({**r, "meio": "", "meios": [], "prazo": 5})
+            continue
+        for m in meios:
+            out.append({**r, "meio": m, "meios": [m],
+                        "status": resultado.get(m, r.get("status", "")),
+                        "prazo": prazos.get(m, 5),
+                        "somente_leitura": r.get("somente_leitura") if m == "app_sisdpu" else False,
+                        "envio_id": r.get("envio_id") or r.get("id")})
+    return out
+
+
 # nomes de backup aceitos: o .bak de 1 nível e os snapshots datados da limpeza
 _RE_BAK = re.compile(r"^(mensagens\.jsonl\.bak|mensagens-\d{4}-\d{2}-\d{2}-\d{6}\.bak\.jsonl)$")
 
@@ -118,13 +154,16 @@ def restaurar(nome: str) -> dict:
 
 
 def contar_por_paj() -> dict:
-    """Retorna {paj_norm: nº de mensagens no histórico}."""
-    contagem: dict = {}
+    """Retorna {paj_norm: nº de MENSAGENS (disparos distintos) no histórico}.
+    Com o histórico por meio, conta `envio_id` distintos (as linhas de um mesmo
+    disparo, uma por meio, contam como 1); registros antigos caem no próprio id."""
+    vistos: dict = {}
     for r in listar():
         k = r.get("paj_norm") or r.get("paj")
-        if k:
-            contagem[k] = contagem.get(k, 0) + 1
-    return contagem
+        if not k:
+            continue
+        vistos.setdefault(k, set()).add(r.get("envio_id") or r.get("id"))
+    return {k: len(v) for k, v in vistos.items()}
 
 
 def limpar(modo: str = "tudo", data: str = "") -> int:

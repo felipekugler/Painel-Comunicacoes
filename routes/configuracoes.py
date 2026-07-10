@@ -44,6 +44,7 @@ async def configuracoes(request: Request):
         n_movimentacoes=config_service.get_n_movimentacoes(),
         analise_concorrencia=config_service.get_analise_concorrencia(),
         analise_concorrencia_max=config_service.ANALISE_CONCORRENCIA_MAX,
+        prazos_predefinidos=config_service.get_prazos_predefinidos(),
         comunicados=config_service.listar_comunicados(),  # gerais
         paragrafos=config_service.listar_paragrafos(),    # gerais
         caixas_disponiveis=caixas_disp,
@@ -68,6 +69,19 @@ async def set_analise_concorrencia(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "n": config_service.set_analise_concorrencia(n)}
+
+
+@router.post("/api/config/prazos-predefinidos", response_class=JSONResponse)
+async def add_prazo_predef(payload: dict = Body(...)):
+    """Adiciona um prazo pré-definido (badge). valor inteiro >= 0 (0 = sem prazo)."""
+    if "valor" not in (payload or {}):
+        return JSONResponse({"ok": False, "erro": "valor ausente"}, status_code=400)
+    return {"ok": True, "prazos": config_service.add_prazo_predef(payload.get("valor"))}
+
+
+@router.post("/api/config/prazos-predefinidos/del", response_class=JSONResponse)
+async def del_prazo_predef(payload: dict = Body(...)):
+    return {"ok": True, "prazos": config_service.del_prazo_predef((payload or {}).get("valor"))}
 
 
 @router.post("/api/config/caixa", response_class=JSONResponse)

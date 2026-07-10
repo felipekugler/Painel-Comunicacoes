@@ -84,14 +84,15 @@
         <thead>
             <tr>
                 <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" checked onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar visíveis"></th>
-                <th style="width: 10rem;">Caixa de origem</th>
                 <th style="width: 7rem;">PAJ</th>
                 <th style="width: 8rem;">Ofício</th>
                 <th style="width: 9rem;">Assistido</th>
+                <th style="width: 10rem;">Caixa de origem</th>
                 <th style="width: 10rem;">Tipo</th>
-                <th style="min-width: 18rem;">Mensagem a enviar</th>
-                <th class="text-center" style="width: 7rem;">Meios</th>
+                <th style="min-width: 16rem;">Mensagem</th>
                 <th class="text-center" style="width: 3rem;">Anexos</th>
+                <th class="text-center" style="width: 6rem;">Prazo</th>
+                <th class="text-center" style="width: 7rem;">Meios</th>
                 <th style="width: 8rem;">Ações</th>
             </tr>
         </thead>
@@ -108,17 +109,19 @@
                            data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
                 </td>
                 <td>
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
+                    {% if paj.envio_urgente %}<div class="mt-1"><span class="pill-urgente" title="Urgente — prioridade na fila de envio">⚡ Urgente</span></div>{% endif %}
+                    {% if paj.envio_falhas %}<div class="mt-1"><span title="Falhou no último envio ({{ paj.envio_falhas.keys()|join(', ') }}) — reenviar" style="display:inline-flex;font-size:10.5px;font-weight:700;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:1px 6px;">⚠ falha no envio</span></div>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
+                <td>{{ paj.assistido or "—" }}</td>
+                <td>
                     {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
                           style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
-                <td>
-                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
-                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
-                    {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
-                </td>
-                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
-                <td>{{ paj.assistido or "—" }}</td>
                 <td>
                     {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
@@ -128,16 +131,6 @@
                     <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
                             data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
                             title="Ver a mensagem completa">Ver mensagem</button>
-                </td>
-                <td class="text-center">
-                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:flex-start;">
-                        {% for m in paj.envio_meios %}
-                            {% if m == 'app_sisdpu' and paj.envio_somente_leitura %}
-                            <span class="meio-sl">{{ meio_icon(m, meio_labels.get(m, m)) }}<span class="sl-badge" title="Será enviado em modo Somente Leitura">SL</span></span>
-                            {% else %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endif %}
-                        {% endfor %}
-                        {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
-                    </div>
                 </td>
                 <td class="text-center">
                     <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
@@ -152,6 +145,22 @@
                         {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
                     </button>
                 </td>
+                <td class="text-center">
+                    {% set _plab = {'app_sisdpu':'App','whatsapp':'WhatsApp','email':'E-mail'} %}
+                    {% set _prz = {'app_sisdpu': paj.envio_prazo_app, 'whatsapp': paj.envio_prazo_whatsapp, 'email': paj.envio_prazo_email} %}
+                    {% for m in paj.envio_meios %}{% set _p = _prz.get(m, 5) %}<div style="font-size:12px;white-space:nowrap;"><span class="text-tertiary">{{ _plab.get(m, m) }}:</span> {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}</div>{% endfor %}
+                    {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td class="text-center">
+                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:flex-start;">
+                        {% for m in paj.envio_meios %}
+                            {% if m == 'app_sisdpu' and paj.envio_somente_leitura %}
+                            <span class="meio-sl">{{ meio_icon(m, meio_labels.get(m, m)) }}<span class="sl-badge" title="Será enviado em modo Somente Leitura">SL</span></span>
+                            {% else %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endif %}
+                        {% endfor %}
+                        {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
+                    </div>
+                </td>
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
                         <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
@@ -161,6 +170,9 @@
                                 data-mensagem="{{ paj.envio_mensagem }}"
                                 data-meios='{{ paj.envio_meios|tojson }}'
                                 data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                data-prazo-app="{{ paj.envio_prazo_app }}"
+                                data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
+                                data-prazo-email="{{ paj.envio_prazo_email }}"
                                 data-app="{{ 1 if c.app_sisdpu else 0 }}"
                                 data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                                 data-email="{{ 1 if c.email else 0 }}"
@@ -217,7 +229,7 @@
 .wa-opt.opt-off input { cursor:not-allowed; }
 .sug-textarea { width:100%; min-height:170px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
                 background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
-.grava-dialog { width:100%; max-width:600px; padding:24px; max-height:88vh; overflow:auto; }
+.grava-dialog { width:50vw; max-width:50vw; padding:24px; max-height:88vh; overflow:auto; }
 .mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
 .msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
 .sync-dialog { width:100%; max-width:660px; padding:22px; }
@@ -244,9 +256,9 @@
         PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
     </p>
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" placeholder="Mensagem ao assistido…"></textarea>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:340px;" placeholder="Mensagem ao assistido…"></textarea>
     <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de contato</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
         <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
     </div>
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
@@ -284,6 +296,7 @@
 
 <script>
 const MEIOS_ENVIO = {{ meios_envio|tojson }};
+const PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};  // prazos (dias) pré-definidos; 0 = sem prazo
 
 function mostrarToast(msg) {
     const cnt = document.getElementById('toast-container');
@@ -348,6 +361,12 @@ function gravarAbrir(btn) {
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
     const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido
+    const _pr = (v) => { const n = parseInt(v, 10); return isNaN(n) ? 5 : n; };  // preserva 0 (sem prazo)
+    const prazoRestore = {  // prazo (dias) de resposta POR MEIO (ao editar; padrão 5)
+        app_sisdpu: _pr(btn.dataset.prazoApp),
+        whatsapp: _pr(btn.dataset.prazoWhatsapp),
+        email: _pr(btn.dataset.prazoEmail),
+    };
     const disp = { app_sisdpu: btn.dataset.app === '1', whatsapp: btn.dataset.whats === '1', email: btn.dataset.email === '1' };
     const AVISO = { app_sisdpu: 'assistido sem adesão ao aplicativo', whatsapp: 'cadastre um número de WhatsApp antes', email: 'sem e-mail cadastrado' };
     const box = document.getElementById('grava-meios');
@@ -361,25 +380,59 @@ function gravarAbrir(btn) {
             '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
         lab.querySelectorAll('span')[0].textContent = m.label;
         if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
-        // "Somente leitura" — sub-opção do App SISDPU, na MESMA linha (só habilita com o App marcado).
+        // Cada meio na SUA linha, com "Prazo (dias)" (aparece só quando o meio está marcado);
+        // o App SISDPU ganha também "Somente leitura". Extras ocultos enquanto o meio não é marcado.
+        const row = document.createElement('div');
+        // min-height reserva o espaço do input de prazo → sem "pulo" ao marcar/desmarcar.
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:42px;';
+        row.appendChild(lab);
+        const meioCb = lab.querySelector('input');
+        const extras = [];
+        let slCb = null;
         if (m.key === 'app_sisdpu') {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:4px;flex-wrap:wrap;';
-            row.appendChild(lab);
             const slWrap = document.createElement('label');
             slWrap.className = 'wa-opt';
             slWrap.innerHTML = '<input type="checkbox" id="grava-sl"><span style="font-size:13px;">Somente leitura</span>';
             row.appendChild(slWrap);
-            box.appendChild(row);
-            const appCb = lab.querySelector('input');
-            const slCb = slWrap.querySelector('input');
-            const syncSl = () => { slCb.disabled = !appCb.checked; if (slCb.disabled) slCb.checked = false; };
-            appCb.addEventListener('change', syncSl);
-            slCb.checked = appCb.checked && slRestore;
-            syncSl();
-        } else {
-            box.appendChild(lab);
+            slCb = slWrap.querySelector('input');
+            extras.push(slWrap);
         }
+        const przWrap = document.createElement('label');
+        przWrap.className = 'wa-opt';
+        przWrap.innerHTML = '<span style="font-size:13px;">Prazo (dias)</span>' +
+            '<input type="number" id="grava-prazo-' + m.key + '" min="0" value="' + prazoRestore[m.key] + '" ' +
+            'style="width:54px;padding:3px 6px;border-radius:6px;border:1px solid var(--stroke-strong);' +
+            'background:var(--layer-alt);color:var(--text);font-size:13px;">';
+        row.appendChild(przWrap);
+        extras.push(przWrap);
+        const przInput = przWrap.querySelector('input');
+        // Badges de prazos pré-definidos + "Urgente" (último); escondem junto com o meio.
+        PRAZOS_PREDEF.forEach(v => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'prazo-badge';
+            b.textContent = v + ' dias';
+            b.onclick = () => { przInput.value = v; };
+            row.appendChild(b);
+            extras.push(b);
+        });
+        const urg = document.createElement('button');
+        urg.type = 'button';
+        urg.className = 'prazo-badge urgente';
+        urg.textContent = '⚡ Urgente';
+        urg.title = 'Prioridade máxima na fila (prazo 0)';
+        urg.onclick = () => { przInput.value = 0; };
+        row.appendChild(urg);
+        extras.push(urg);
+        box.appendChild(row);
+        const sync = () => {
+            const on = meioCb.checked;
+            extras.forEach(el => el.style.display = on ? '' : 'none');
+            if (!on && slCb) slCb.checked = false;
+        };
+        meioCb.addEventListener('change', sync);
+        if (slCb) slCb.checked = meioCb.checked && slRestore;
+        sync();
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
@@ -389,13 +442,15 @@ async function gravarSalvar() {
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
     const slCb = document.getElementById('grava-sl');
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
+    const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo
+    const prazos = { app_sisdpu: prazoDe('app_sisdpu'), whatsapp: prazoDe('whatsapp'), email: prazoDe('email') };
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
         const url = (gravaTipo === 'conjunto')
             ? '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/conjunto/gravar'
             : '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
-        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura}) });
+        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }
