@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}Prontos para Envio{% endblock %}
+
+{% block content %}
+<div class="flex items-end justify-between gap-4 flex-wrap mb-6">
+    <div>
+        <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos para Envio</h1>
+        <p class="text-secondary mt-1" style="font-size: 13px;">
+            PAJs gravados para envio de <strong>todas as caixas</strong>. Dispare tudo de uma vez em "Enviar Agora".
+        </p>
+    </div>
+</div>
+
+<div class="section-head">
+    <span class="pill">{{ prontos|length }}</span>
+    {% if envio_modo == 'simulado' %}
+    <span class="badge-modo" title="Nenhuma mensagem será realmente enviada — apenas simulação para validar o fluxo.">MODO SIMULADO</span>
+    {% endif %}
+    {% if prontos %}
+    <div style="margin-left:auto;">
+        <button class="btn-accent" onclick="enviarTodos()">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+            </svg>
+            Enviar Agora ({{ prontos|length }})
+        </button>
+    </div>
+    {% endif %}
+</div>
+
+{% if prontos %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width: 11rem;">Caixa de origem</th>
+                <th style="width: 7rem;">PAJ</th>
+                <th style="width: 8rem;">Ofício</th>
+                <th style="width: 9rem;">Assistido</th>
+                <th style="min-width: 20rem;">Mensagem a enviar</th>
+                <th class="text-center" style="width: 8rem;">Meios</th>
+                <th style="width: 8rem;">Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in prontos %}
+            {% set c = paj.contatos or {} %}
+            <tr>
+                <td><span class="caixa-chip" title="Grupo: {{ paj.grupo }}">{{ paj.caixa_nome }}</span></td>
+                <td>
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
+                <td>{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;">
+                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
+                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
+                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
+                            title="Ver a mensagem completa">Ver mensagem</button>
+                </td>
+                <td class="text-center">
+                    <div style="font-size:12px;color:var(--text-secondary);">
+                        {% for m in paj.envio_meios %}{{ meio_labels.get(m, m) }}{% if not loop.last %}, {% endif %}{% endfor %}
+                        {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
+                    </div>
+                </td>
+                <td>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-slug="{{ paj.caixa_slug }}"
+                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                data-mensagem="{{ paj.envio_mensagem }}"
+                                data-meios='{{ paj.envio_meios|tojson }}'
+                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                data-email="{{ 1 if c.email else 0 }}"
+                                onclick="gravarAbrir(this)">Editar</button>
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-slug="{{ paj.caixa_slug }}"
+                                data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                onclick="removerDaFila(this)"
+                                title="Tirar da fila (volta a pendente na caixa de origem)">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">
+    Nenhum PAJ gravado para envio. Grave a partir de "Pendentes de contato" em cada caixa.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.section-head { display:flex; align-items:center; gap:10px; margin:0 0 12px; flex-wrap:wrap; }
+.badge-modo { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 8px; border-radius:6px;
+              background: color-mix(in srgb, #eab308 22%, transparent); color:#7a5c00; }
+@media (prefers-color-scheme: dark) { .badge-modo { color:#f5d878; } }
+.caixa-chip { display:inline-flex; align-items:center; font-size:11.5px; font-weight:600; padding:2px 8px;
+              border-radius:999px; background:var(--accent-soft); color:var(--accent); }
+.pill-conj-x { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
+               border-radius:999px; background:color-mix(in srgb, var(--c-addr) 20%, transparent); color:var(--c-addr); }
+.clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.mov-badge { display:inline-flex; align-items:center; gap:5px; margin-top:4px; padding:3px 9px; border-radius:999px;
+             border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+             background: var(--accent-soft); color: var(--accent);
+             font-size:11px; font-weight:600; cursor:pointer; transition:background .12s ease; }
+.mov-badge:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.btn-grava { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid transparent;
+             border-radius:6px; background:#16a34a; color:#fff; font-weight:600; font-size:14px;
+             cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
+.btn-grava:hover { filter:brightness(1.07); }
+.btn-grava svg { width:14px; height:14px; }
+.wa-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
+              justify-content:center; z-index:1000; padding:16px; }
+.wa-opt { display:flex; align-items:center; gap:10px; cursor:pointer; padding:8px 10px; border-radius:8px; }
+.wa-opt:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.wa-opt.opt-off { opacity:.55; cursor:not-allowed; }
+.wa-opt.opt-off:hover { background:none; }
+.wa-opt.opt-off input { cursor:not-allowed; }
+.sug-textarea { width:100%; min-height:170px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
+                background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
+.grava-dialog { width:100%; max-width:600px; padding:24px; max-height:88vh; overflow:auto; }
+.mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
+.msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
+.sync-dialog { width:100%; max-width:660px; padding:22px; }
+.sync-log { margin-top:14px; height:340px; overflow:auto; background:var(--layer-alt);
+            border:1px solid var(--stroke); border-radius:8px; padding:12px;
+            font-family:'Cascadia Code','Consolas',monospace; font-size:12.5px; line-height:1.7; }
+.sync-line { white-space:pre-wrap; }
+.sync-info { color:var(--text-secondary); }
+.sync-ok { color:var(--c-zap); }
+.sync-novo { color:var(--accent); font-weight:600; }
+.sync-erro { color:var(--c-red); }
+.sync-muted { color:var(--text-tertiary); }
+</style>
+
+<!-- Modal "Gravar/Editar para envio" -->
+<div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
+  <div class="fluent-card grava-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Editar envio</h3>
+    <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
+        PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+    </p>
+    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
+    <textarea id="grava-texto" class="sug-textarea" placeholder="Mensagem ao assistido…"></textarea>
+    <div style="margin-top:14px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de contato</div>
+        <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button class="btn-subtle" onclick="gravarFechar()">Cancelar</button>
+        <button class="btn-grava" onclick="gravarSalvar()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal "Ver mensagem" -->
+<div id="msg-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)msgFechar()">
+  <div class="fluent-card mov-dialog">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">
+            Mensagem — PAJ <span id="msg-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        </h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="msgFechar()">Fechar</button>
+    </div>
+    <div id="msg-corpo" class="msg-full"></div>
+  </div>
+</div>
+
+<!-- Modal de log do envio (SSE) -->
+<div id="sse-modal" class="wa-overlay" style="display:none;">
+  <div class="fluent-card sync-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">
+        Envio <span id="sse-status" class="text-secondary" style="font-size:13px;font-weight:400;"></span>
+    </h3>
+    <div id="sse-log" class="sync-log"></div>
+    <div style="text-align:right;margin-top:12px;">
+        <button class="btn-subtle" id="sse-fechar" onclick="sseFechar()" style="display:none;">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const MEIOS_ENVIO = {{ meios_envio|tojson }};
+
+function mostrarToast(msg) {
+    const cnt = document.getElementById('toast-container');
+    if (!cnt) { return; }
+    const t = document.createElement('div');
+    t.className = 'toast-msg';
+    t.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg><span></span>';
+    t.querySelector('span').textContent = msg;
+    cnt.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; }, 1600);
+    setTimeout(() => { t.remove(); }, 2000);
+}
+
+// ---------- Editar um gravado (modal) — usa o slug da PRÓPRIA linha ----------
+let gravaSlug = null, gravaPaj = null, gravaTramite = '', gravaTipo = 'tramite';
+function gravarAbrir(btn) {
+    gravaSlug = btn.dataset.slug;
+    gravaPaj = btn.dataset.paj;
+    gravaTramite = btn.dataset.tramite || '';
+    gravaTipo = btn.dataset.tipo || 'tramite';
+    document.getElementById('grava-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
+    let jaMeios = [];
+    try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
+    const disp = { app_sisdpu: btn.dataset.app === '1', whatsapp: btn.dataset.whats === '1', email: btn.dataset.email === '1' };
+    const AVISO = { app_sisdpu: 'assistido sem adesão ao aplicativo', whatsapp: 'cadastre um número de WhatsApp antes', email: 'sem e-mail cadastrado' };
+    const box = document.getElementById('grava-meios');
+    box.innerHTML = '';
+    MEIOS_ENVIO.forEach(m => {
+        const habil = disp[m.key];
+        const marcado = habil && jaMeios.includes(m.key);
+        const lab = document.createElement('label');
+        lab.className = 'wa-opt' + (habil ? '' : ' opt-off');
+        lab.innerHTML = '<input type="checkbox" value="' + m.key + '"' + (marcado ? ' checked' : '') + (habil ? '' : ' disabled') + '>' +
+            '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
+        lab.querySelectorAll('span')[0].textContent = m.label;
+        if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
+        box.appendChild(lab);
+    });
+    document.getElementById('grava-modal').style.display = 'flex';
+}
+function gravarFechar() { document.getElementById('grava-modal').style.display = 'none'; }
+async function gravarSalvar() {
+    const mensagem = document.getElementById('grava-texto').value.trim();
+    const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
+    if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
+    try {
+        const url = (gravaTipo === 'conjunto')
+            ? '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/conjunto/gravar'
+            : '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
+        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios}) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro ao gravar: ' + e); }
+}
+async function removerDaFila(btn) {
+    if (!confirm('Tirar da fila de envio? Volta para "pendentes" na caixa de origem.')) return;
+    try {
+        const slug = btn.dataset.slug;
+        const url = (btn.dataset.tipo === 'conjunto')
+            ? '/api/caixa/' + slug + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/conjunto/gravar/remover'
+            : '/api/caixa/' + slug + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/tramite/' + encodeURIComponent(btn.dataset.tramite || '') + '/gravar/remover';
+        const r = await fetch(url, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro: ' + e); }
+}
+
+// ---------- Ver mensagem ----------
+function msgAbrir(btn) {
+    document.getElementById('msg-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('msg-corpo').textContent = btn.dataset.msg || '';
+    document.getElementById('msg-modal').style.display = 'flex';
+}
+function msgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
+
+// ---------- Enviar Agora (global, SSE) ----------
+function enviarTodos() {
+    if (!confirm('Disparar o envio de TODOS os PAJs prontos, de todas as caixas?')) return;
+    const modal = document.getElementById('sse-modal');
+    const log = document.getElementById('sse-log');
+    const st = document.getElementById('sse-status');
+    const fechar = document.getElementById('sse-fechar');
+    log.innerHTML = ''; st.textContent = '— em andamento…'; fechar.style.display = 'none';
+    modal.style.display = 'flex';
+    const es = new EventSource('/api/prontos/enviar/stream');
+    es.onmessage = (e) => {
+        let d; try { d = JSON.parse(e.data); } catch (_) { return; }
+        if (d.done) { es.close(); st.textContent = '— concluído'; fechar.style.display = ''; return; }
+        const div = document.createElement('div');
+        div.className = 'sync-line sync-' + (d.level || 'info');
+        div.textContent = d.msg || '';
+        log.appendChild(div); log.scrollTop = log.scrollHeight;
+    };
+    es.onerror = () => { es.close(); st.textContent = '— erro de conexão'; fechar.style.display = ''; };
+}
+function sseFechar() { document.getElementById('sse-modal').style.display = 'none'; location.reload(); }
+</script>
+{% endblock %}

@@ -347,6 +347,14 @@
                 {% if cx.qtd is defined %}<span class="text-tertiary" style="font-size:12.5px;">({{ cx.qtd }})</span>{% endif %}
             </a>
             {% endfor %}
+            <a href="/prontos" class="nav-item {% if request.url.path == '/prontos' %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                </svg>
+                <span style="flex:1;min-width:0;">Prontos para Envio</span>
+                {% set _np = total_prontos() %}
+                {% if _np %}<span class="text-tertiary" style="font-size:12.5px;">({{ _np }})</span>{% endif %}
+            </a>
             <a href="/historico" class="nav-item {% if request.url.path == '/historico' %}active{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />

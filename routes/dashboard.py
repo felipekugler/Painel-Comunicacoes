@@ -60,6 +60,36 @@ async def sincronizar_stream(slug: str):
     )
 
 
+@router.get("/prontos", response_class=HTMLResponse)
+async def prontos_envio(request: Request):
+    """Página GLOBAL "Prontos para Envio": fila de envio de todas as caixas."""
+    meios = envio_service.meios_disponiveis()
+    template = request.app.state.jinja.get_template("prontos.html")
+    return HTMLResponse(template.render(
+        request=request,
+        prontos=divcom_service.listar_prontos_envio(),
+        meios_envio=meios,
+        meio_labels={m["key"]: m["label"] for m in meios},
+        envio_modo=config_service.get_envio_modo()))
+
+
+@router.get("/api/prontos/enviar/stream")
+async def prontos_enviar_stream():
+    async def gen():
+        try:
+            async for ev in divcom_service.enviar_todas_filas_stream():
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.get("/api/sincronizar-todas/stream")
 async def sincronizar_todas_stream():
     async def gen():

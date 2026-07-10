@@ -335,6 +335,24 @@ def listar_fila(slug: str) -> list[dict]:
     return montar_dashboard(slug)["fila"]
 
 
+def listar_prontos_envio() -> list[dict]:
+    """Fila de envio AGREGADA de TODAS as caixas habilitadas (página "Prontos para
+    Envio"). Cada item ganha a caixa de ORIGEM (caixa_slug/caixa_nome/grupo)."""
+    out: list[dict] = []
+    for c in config_service.listar_caixas_habilitadas():
+        for item in montar_dashboard(c["slug"])["fila"]:
+            out.append({**item, "caixa_slug": c["slug"],
+                        "caixa_nome": c["nome"], "grupo": c["grupo"]})
+    out.sort(key=lambda d: d.get("envio_gravado_em", ""))
+    return out
+
+
+def contar_prontos_envio() -> int:
+    """Total de itens gravados para envio somando todas as caixas (badge do menu)."""
+    return sum(len(montar_dashboard(c["slug"])["fila"])
+               for c in config_service.listar_caixas_habilitadas())
+
+
 # ==================== enriquecimento (merge caixa + contato) ====================
 def _fmt_endereco(e: dict) -> str:
     linha1 = ", ".join(p for p in [e.get("logradouro", ""), e.get("numero", "")] if p)
@@ -1310,6 +1328,34 @@ async def enviar_fila_stream(slug: str):
                "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
         yield {"done": True, "resumo": {"ok": True, "slug": slug, "enviados": enviados,
                                         "falhas": falhas, "modo": modo, "duracao": round(dur, 1)}}
+
+
+async def enviar_todas_filas_stream():
+    """"Enviar Agora" GLOBAL da página "Prontos para Envio": dispara a fila de TODAS
+    as caixas habilitadas, uma caixa por vez (cada uma via enviar_fila_stream, que
+    pega o _sync_lock em sua vez), com um cabeçalho por caixa e resumo agregado."""
+    caixas = config_service.listar_caixas_habilitadas()
+    tot_env = tot_falhas = 0
+    algum = False
+    for cx in caixas:
+        if not listar_fila(cx["slug"]):
+            continue
+        algum = True
+        yield {"level": "novo", "msg": f"══ {cx['nome']} ══"}
+        async for ev in enviar_fila_stream(cx["slug"]):
+            if ev.get("done"):
+                r = ev.get("resumo", {}) or {}
+                tot_env += r.get("enviados", 0)
+                tot_falhas += r.get("falhas", 0)
+                continue
+            yield ev
+    if not algum:
+        yield {"level": "info", "msg": "Nenhum PAJ gravado para envio."}
+    yield {"level": "ok",
+           "msg": f"Concluído — {tot_env} enviado(s)"
+                  + (f", {tot_falhas} com falha" if tot_falhas else "") + "."}
+    yield {"done": True, "resumo": {"ok": True, "enviados": tot_env, "falhas": tot_falhas,
+                                    "modo": config_service.get_envio_modo()}}
 
 
 # ==================== reset do painel ====================

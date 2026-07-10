@@ -326,79 +326,8 @@
 <div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">Nenhum PAJ pendente de contato.</div>
 {% endif %}
 
-{#- ===================== TABELA 2: gravados para envio ===================== -#}
-{% if fila %}
-<div class="section-head" style="margin-top:28px;">
-    <h2 class="font-display" style="font-size:18px;margin:0;">Gravados para envio</h2>
-    <span class="pill">{{ fila|length }}</span>
-    {% if envio_modo == 'simulado' %}
-    <span class="badge-modo" title="Nenhuma mensagem será realmente enviada — apenas simulação para validar o fluxo.">MODO SIMULADO</span>
-    {% endif %}
-    <div style="margin-left:auto;">
-        <button id="btn-enviar-agora" class="btn-accent" onclick="enviarAgora()">
-            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-            </svg>
-            Enviar Agora ({{ fila|length }})
-        </button>
-    </div>
-</div>
-<div class="fluent-card" style="overflow-x:auto;">
-    <table class="fluent-table">
-        <thead>
-            <tr>
-                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
-                <th style="min-width: 22rem;">Mensagem a enviar</th>
-                <th class="text-center" style="width: 9rem;">Meios</th>
-                <th style="width: 8rem;">Ações</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for paj in fila %}
-            <tr>
-                <td data-sort="{{ paj.paj }}">
-                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
-                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
-                </td>
-                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
-                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
-                <td class="text-secondary" style="font-size:12.5px;">
-                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
-                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
-                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
-                            title="Ver a mensagem completa">Ver mensagem</button>
-                </td>
-                <td class="text-center">
-                    <div style="display:inline-flex;gap:4px;">
-                        {% for m in paj.envio_meios %}{{ contato_icon(m, true) }}{% endfor %}
-                        {% if not paj.envio_meios %}<span class="text-tertiary" style="font-size:12px;">—</span>{% endif %}
-                    </div>
-                </td>
-                <td>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                data-mensagem="{{ paj.envio_mensagem }}"
-                                data-meios='{{ paj.envio_meios|tojson }}'
-                                data-app="{{ 1 if (paj.contatos or {}).app_sisdpu else 0 }}"
-                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                data-email="{{ 1 if (paj.contatos or {}).email else 0 }}"
-                                onclick="gravarAbrir(this)">Editar</button>
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                onclick="removerDaFila(this)"
-                                title="Tirar da fila (volta a pendente)">Remover</button>
-                    </div>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
+{#- (A seção "Gravados para envio" foi movida para a página GLOBAL "Prontos para
+    Envio" no menu — os gravados de todas as caixas ficam agrupados lá.) -#}
 
 {#- ===================== TABELA 3: já enviados nesta caixa ===================== -#}
 {% if enviados %}

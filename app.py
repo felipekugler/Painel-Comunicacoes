@@ -67,6 +67,7 @@ app.state.jinja.globals["oficio_descricao"] = OFICIO_DESCRICAO
 from services import divcom_service as _ds  # noqa: E402
 
 app.state.jinja.globals["menu_caixas"] = _ds.menu_caixas
+app.state.jinja.globals["total_prontos"] = _ds.contar_prontos_envio
 
 
 # Formatadores de data — datas exibidas ao usuario saem no padrao BR DD/MM/AAAA.
