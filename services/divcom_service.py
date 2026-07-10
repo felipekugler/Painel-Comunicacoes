@@ -24,6 +24,7 @@ import json
 import re
 import shutil
 import time
+import uuid
 from pathlib import Path
 
 from ingestao import sisdpu_client
@@ -250,6 +251,7 @@ def _solic_de_item(item: dict, anterior: dict | None = None) -> dict:
         "sugestao_tipo_editada": a.get("sugestao_tipo_editada", ""),  # classificação MANUAL (prevalece; não é sobrescrita por re-sync)
         "sugestao_editada": a.get("sugestao_editada", ""),
         "mov_seq": a.get("mov_seq", ""),  # movimentação vinculada (triagem separada)
+        "anexos": a.get("anexos", []) or [],  # documentos a enviar (por tramitação)
         # estado de envio POR TRÂMITE
         "envio": a.get("envio", {}) or {},
         "enviados": a.get("enviados", []) or [],
@@ -311,9 +313,11 @@ def definir_sugestao(slug: str, paj_norm: str, id_tramite: str, texto: str,
 
 
 # ==================== fila de envio (POR TRAMITAÇÃO) ====================
-def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str, meios: list[str]) -> dict:
+def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
+                      meios: list[str], somente_leitura: bool = False) -> dict:
     """Grava UMA tramitação na fila de envio (sai de "pendentes" e entra em
-    "gravados para envio"). Guarda a mensagem a disparar e os meios escolhidos."""
+    "gravados para envio"). Guarda a mensagem a disparar e os meios escolhidos.
+    `somente_leitura` (App SISDPU): o assistido só lê a notificação, não responde."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
     if not box:
@@ -326,6 +330,7 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str, 
         "status": "gravado",
         "mensagem": (mensagem or "").strip(),
         "meios": meios,
+        "somente_leitura": bool(somente_leitura),
         "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     _gravar_box(slug, box)
@@ -343,6 +348,93 @@ def remover_da_fila(slug: str, paj_norm: str, id_tramite: str) -> dict:
     s["envio"] = {}
     _gravar_box(slug, box)
     return box
+
+
+# ==================== anexos ====================
+# Documentos que serão enviados junto com a mensagem. Ficam vinculados à
+# TRAMITAÇÃO (sol["anexos"]) ou ao CONJUNTO (box["conjunto"]["anexos"]) e
+# persistem independentemente de gravar/remover da fila. Arquivos gravados em
+# dados/_anexos/<PAJ>/<id_tramite|conjunto>/ (fora do Projeto).
+ANEXOS_DIR = DADOS_DIR / "_anexos"
+_ANEXO_MAX = 25 * 1024 * 1024  # 25 MB por arquivo
+
+
+def _chave_anexo(tipo: str, id_tramite: str) -> str:
+    return "conjunto" if tipo == "conjunto" else (id_tramite or "sem-id")
+
+
+def _anexos_dir(paj_norm: str, chave: str) -> Path:
+    return ANEXOS_DIR / paj_norm / chave
+
+
+def _nome_seguro(nome: str) -> str:
+    base = Path(nome or "arquivo").name
+    base = re.sub(r"[^\w.\- ]+", "_", base).strip() or "arquivo"
+    return base[:120]
+
+
+def _anexos_do_alvo(box: dict, tipo: str, id_tramite: str):
+    """Retorna (alvo, lista_de_anexos). alvo = conjunto (dict) ou a solicitação."""
+    alvo = box.get("conjunto") if tipo == "conjunto" else _achar_solic(box, id_tramite)
+    if alvo is None:
+        return None, []
+    return alvo, alvo.setdefault("anexos", [])
+
+
+def caminho_anexo(paj_norm: str, tipo: str, id_tramite: str, arquivo: str) -> Path:
+    return _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite)) / arquivo
+
+
+def adicionar_anexos(slug: str, paj_norm: str, tipo: str, id_tramite: str,
+                     arquivos: list[tuple[str, bytes]]) -> dict:
+    """Salva `arquivos` [(nome_original, bytes)] no disco e registra os metadados
+    no alvo (tramitação ou conjunto). Retorna {ok, anexos} ou {ok:False, erro}."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
+    if alvo is None:
+        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+    dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
+    dest.mkdir(parents=True, exist_ok=True)
+    for nome, dados in arquivos:
+        if not dados:
+            continue
+        if len(dados) > _ANEXO_MAX:
+            return {"ok": False, "erro": f"'{nome}' excede o limite de 25 MB."}
+        aid = uuid.uuid4().hex[:12]
+        seguro = _nome_seguro(nome)
+        arquivo_salvo = f"{aid}__{seguro}"
+        with contextlib.suppress(Exception):
+            (dest / arquivo_salvo).write_bytes(dados)
+        anexos.append({
+            "id": aid, "nome": Path(nome or seguro).name, "arquivo": arquivo_salvo,
+            "tamanho": len(dados), "tipo": Path(seguro).suffix.lstrip(".").lower(),
+            "incluido_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        })
+    _gravar_box(slug, box)
+    return {"ok": True, "anexos": anexos}
+
+
+def remover_anexo(slug: str, paj_norm: str, tipo: str, id_tramite: str, anexo_id: str) -> dict:
+    """Remove um anexo (arquivo do disco + metadado). Retorna {ok, anexos}."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
+    if alvo is None:
+        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+    dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
+    restantes = []
+    for a in anexos:
+        if a.get("id") == anexo_id:
+            with contextlib.suppress(Exception):
+                (dest / a.get("arquivo", "")).unlink()
+        else:
+            restantes.append(a)
+    alvo["anexos"] = restantes
+    _gravar_box(slug, box)
+    return {"ok": True, "anexos": restantes}
 
 
 def listar_fila(slug: str) -> list[dict]:
@@ -452,7 +544,13 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["envio_status"] = envio.get("status", "")
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
+    d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
     d["envio_gravado_em"] = envio.get("gravado_em", "")
+    # anexos (documentos a enviar) por tramitação
+    anx = sol.get("anexos", []) or []
+    d["anexos"] = anx
+    d["n_anexos"] = len(anx)
+    d["tem_anexo"] = len(anx) > 0
     # já enviados por tramitação
     env = sol.get("enviados", []) or []
     d["enviados"] = env
@@ -462,6 +560,7 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["contato_meios"] = ult.get("meios", [])
     d["contato_mensagem"] = ult.get("mensagem", "")
     d["contato_em"] = ult.get("em", "")
+    d["contato_somente_leitura"] = bool(ult.get("somente_leitura"))
     return d
 
 
@@ -506,6 +605,19 @@ def _sol_pendente(s: dict) -> bool:
 
 def _sols_pendentes(box: dict) -> list[dict]:
     return [s for s in box.get("solicitacoes", []) if _sol_pendente(s)]
+
+
+def _chave_sol(chave_movs: str, com_rev: str, sol: dict) -> str:
+    """Chave de cache canônica de UMA tramitação (solicitação).
+
+    Inclui o vínculo de movimentação (`mov_seq`) do "tratamento separado" SÓ quando
+    houver — assim tramitações normais mantêm a chave sem `|m` (retrocompatível com
+    as análises já gravadas) e as tratadas em separado batem com a chave que a
+    triagem/reanálise gravou, evitando que o sync as reprocesse e sobrescreva o foco."""
+    mseq = str(sol.get("mov_seq", "") or "").strip()
+    m = f"|m{mseq}" if mseq else ""
+    return (f"{chave_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
+            f"{m}|d{_desc_hash(sol.get('descricao_tramite', ''))}")
 
 
 def _decisao_valida(box: dict, pend_ids: list[str]) -> str:
@@ -582,7 +694,12 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["envio_status"] = envio.get("status", "")
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
+    d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
     d["envio_gravado_em"] = envio.get("gravado_em", "")
+    anx = conj.get("anexos", []) or []
+    d["anexos"] = anx
+    d["n_anexos"] = len(anx)
+    d["tem_anexo"] = len(anx) > 0
     env = conj.get("enviados", []) or []
     d["enviados"] = env
     d["contato_enviado"] = len(env) > 0
@@ -591,6 +708,7 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["contato_meios"] = ult.get("meios", [])
     d["contato_mensagem"] = ult.get("mensagem", "")
     d["contato_em"] = ult.get("em", "")
+    d["contato_somente_leitura"] = bool(ult.get("somente_leitura"))
     return d
 
 
@@ -729,6 +847,7 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
                      "descricao_tramite": s.get("descricao_tramite", "")}
             if mov_foco:
                 tinfo["mov_foco"] = mov_foco
+            s["mov_seq"] = mseq  # definido ANTES da chave (que lê mov_seq via _chave_sol)
             if movs_ia and analise_service.disponivel():
                 ana = await asyncio.to_thread(
                     analise_service.analisar_paj, movs_ia, comunicados, caixa["nome"], tinfo)
@@ -736,9 +855,7 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
                     s["resumo_ia"] = ana.get("resumo", "")
                     s["sugestao_ia"] = ana.get("sugestao", "")
                     s["sugestao_tipo"] = ana.get("tipo", "")
-                    s["resumo_ia_chave"] = (f"{chave_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
-                                            f"|m{mseq}|d{_desc_hash(s.get('descricao_tramite', ''))}")
-            s["mov_seq"] = mseq
+                    s["resumo_ia_chave"] = _chave_sol(chave_movs, com_rev, s)
         box["triagem"] = {"decisao": "separado", "ids": pend_ids}
         box.pop("conjunto", None)
         _gravar_box(slug, box)
@@ -756,7 +873,8 @@ def desfazer_triagem(slug: str, paj_norm: str) -> dict:
     return {"ok": True}
 
 
-def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str]) -> dict:
+def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
+                    somente_leitura: bool = False) -> dict:
     """Grava o CONJUNTO de um PAJ na fila de envio."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
@@ -765,7 +883,8 @@ def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str]) -
     meios = [m for m in (meios or []) if m in envio_service.MEIOS]
     box["conjunto"]["envio"] = {
         "status": "gravado", "mensagem": (mensagem or "").strip(),
-        "meios": meios, "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "meios": meios, "somente_leitura": bool(somente_leitura),
+        "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
     _gravar_box(slug, box)
     return box
@@ -942,12 +1061,13 @@ async def sincronizar_stream(slug: str):
                            "msg": f"     {len(pend)} tramitações pendentes → análise adiada para a triagem "
                                   "(IA não chamada agora)."}
                 elif movs_ia:
-                    # Só agenda se ALGUMA tramitação está com o cache desatualizado.
+                    # Só agenda se ALGUMA tramitação PENDENTE está com o cache
+                    # desatualizado. NÃO reprocessa gravadas/enviadas (análise
+                    # congelada) nem tramitações tratadas em separado cuja chave (com
+                    # foco) já bate — evita desperdício e a sobrescrita do foco da triagem.
                     faltam = any(
-                        s.get("resumo_ia_chave")
-                        != f"{chave_movs}|c{com_rev}|t{s.get('id_tramite', '')}"
-                           f"|d{_desc_hash(s.get('descricao_tramite', ''))}"
-                        for s in box.get("solicitacoes", []))
+                        s.get("resumo_ia_chave") != _chave_sol(chave_movs, com_rev, s)
+                        for s in box.get("solicitacoes", []) if _sol_pendente(s))
                     if faltam:
                         trabalhos_ia.append({"paj_norm": paj_norm, "paj": paj,
                                              "movs": movs_ia, "chave_movs": chave_movs})
@@ -971,18 +1091,25 @@ async def sincronizar_stream(slug: str):
                     box = _ler_box(slug, job["paj_norm"])
                     if not box:
                         return logs
+                    cont = ler_contato(job["paj_norm"])
+                    movs_por_seq = {str(m.get("seq")): m
+                                    for m in (cont.get("movimentacoes") or [])}
                     mudou = False
                     for sol in box.get("solicitacoes", []):
-                        chave = (f"{job['chave_movs']}|c{com_rev}|t{sol.get('id_tramite', '')}"
-                                 f"|d{_desc_hash(sol.get('descricao_tramite', ''))}")
+                        if not _sol_pendente(sol):
+                            continue  # gravadas/enviadas: análise congelada, não tocar
+                        chave = _chave_sol(job["chave_movs"], com_rev, sol)
                         if sol.get("resumo_ia_chave") == chave:
                             continue
+                        tinfo = {"data_envio": sol.get("data_envio", ""),
+                                 "oficio_origem": sol.get("oficio_origem", ""),
+                                 "remetente": sol.get("remetente", ""),
+                                 "descricao_tramite": sol.get("descricao_tramite", "")}
+                        mf = movs_por_seq.get(str(sol.get("mov_seq", "") or "").strip())
+                        if mf:  # respeita o foco do "tratamento separado" (triagem)
+                            tinfo["mov_foco"] = mf
                         ana = await asyncio.to_thread(
-                            analise_service.analisar_paj, job["movs"], comunicados, nome_caixa,
-                            {"data_envio": sol.get("data_envio", ""),
-                             "oficio_origem": sol.get("oficio_origem", ""),
-                             "remetente": sol.get("remetente", ""),
-                             "descricao_tramite": sol.get("descricao_tramite", "")})
+                            analise_service.analisar_paj, job["movs"], comunicados, nome_caixa, tinfo)
                         dt = sol.get("data_envio", "")
                         if ana:
                             sol["resumo_ia"] = ana.get("resumo", "")
@@ -1157,8 +1284,7 @@ def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
         mf = movs_por_seq.get(mseq)
         if mf:
             tinfo["mov_foco"] = mf
-        chave = (f"{chave_movs}|c{com_rev}|t{sol.get('id_tramite', '')}"
-                 f"|m{mseq}|d{_desc_hash(sol.get('descricao_tramite', ''))}")
+        chave = _chave_sol(chave_movs, com_rev, sol)
         if limpar:
             for k in ("resumo_ia", "sugestao_ia", "sugestao_tipo",
                       "sugestao_tipo_editada", "sugestao_editada", "resumo_ia_chave"):
@@ -1273,16 +1399,25 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         yield {"_status": "falha"}
         return
 
+    n_anx = len(t.get("anexos", []) or [])
+    anx_txt = f" · 📎 {n_anx} anexo(s)" if n_anx else " · sem anexos"
     yield {"level": "novo",
            "msg": f"{rotulo}PAJ {t['paj']} — {etiqueta} — {nome} · "
-                  f"{', '.join(envio_service.label_meio(m) for m in meios)}"}
+                  f"{', '.join(envio_service.label_meio(m) for m in meios)}{anx_txt}"}
 
     cont = ler_contato(paj_norm)
+    anexos_meta = t.get("anexos", []) or []
+    tipo_alvo = "conjunto" if conjunto else "tramite"
+    anexos_ctx = [{**a, "caminho": str(caminho_anexo(paj_norm, tipo_alvo,
+                   "" if conjunto else ids[0], a.get("arquivo", "")))}
+                  for a in anexos_meta]
     ctx = {
         "paj": t["paj"], "paj_norm": paj_norm, "tramite_ids": ids,
         "assistido": t.get("assistido", ""),
         "mensagem": mensagem, "telefones": cont.get("telefones", []),
         "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
+        "somente_leitura": bool(t.get("envio_somente_leitura")),
+        "anexos": anexos_ctx,
     }
     resultados, res_por_meio = [], {}
     for meio in meios:
@@ -1301,14 +1436,18 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
         "tipo": t.get("sugestao_tipo", ""),  # classificação do texto padrão
         "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
-        "meios": meios, "mensagem": mensagem, "anexos": [],
+        "meios": meios, "mensagem": mensagem,
+        "anexos": anexos_meta,  # metadados completos (nome, arquivo, tamanho, tipo, incluido_em)
+        "anexo_tipo": tipo_alvo, "anexo_ref": ("" if conjunto else ids[0]),
+        "somente_leitura": bool(t.get("envio_somente_leitura")),
         "status": status, "resultado": res_por_meio,
     })
 
     if status != "falha":
         box = _ler_box(slug, paj_norm)
         registro = {"em": reg["ts"], "meios": meios, "mensagem": mensagem,
-                    "status": status, "resultado": res_por_meio, "historico_id": reg["id"]}
+                    "status": status, "resultado": res_por_meio, "historico_id": reg["id"],
+                    "anexos": anexos_meta, "somente_leitura": bool(t.get("envio_somente_leitura"))}
         if conjunto and box.get("conjunto"):
             box["conjunto"].setdefault("enviados", []).append({**registro, "tramite_ids": ids})
             box["conjunto"]["envio"] = {}
@@ -1473,6 +1612,9 @@ def resetar_painel(total: bool) -> dict:
     if hist_dir.exists():
         with contextlib.suppress(Exception):
             shutil.move(str(hist_dir), str(lixeira / "_historico"))
+    if ANEXOS_DIR.exists():
+        with contextlib.suppress(Exception):
+            shutil.move(str(ANEXOS_DIR), str(lixeira / "_anexos"))
 
     CONTATOS_DIR.mkdir(parents=True, exist_ok=True)  # recria vazio
 

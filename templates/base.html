@@ -301,6 +301,22 @@
         }
         .toast-msg svg { width: 16px; height: 16px; color: var(--c-zap); }
 
+        /* Clipe de anexos — cinza (sem anexo) / vermelho (com anexo) */
+        .anx-clip { display:inline-flex; align-items:center; gap:3px; background:none; border:none;
+                    cursor:pointer; color: var(--text-tertiary); padding:3px; border-radius:6px; }
+        .anx-clip:hover { background: var(--accent-soft); color: var(--accent); }
+        .anx-clip.tem { color:#dc2626; }
+        .anx-clip.tem:hover { background: rgba(220,38,38,0.12); color:#dc2626; }
+        .anx-clip svg { width:18px; height:18px; }
+        .anx-clip .anx-n { font-size:11px; font-weight:700; }
+        .anx-clip[disabled] { cursor:default; opacity:.45; }
+        .anx-clip[disabled]:hover { background:none; color: var(--text-tertiary); }
+
+        /* Selo "SL" (somente leitura) abaixo do ícone do App SISDPU */
+        .meio-sl { display:inline-flex; flex-direction:column; align-items:center; gap:1px; }
+        .sl-badge { font-size:9px; font-weight:800; line-height:1; letter-spacing:.03em; color:var(--c-app);
+                    border:1px solid currentColor; border-radius:4px; padding:1px 3px; }
+
         [x-cloak] { display: none !important; }
         .toggle-sidebar { display: none; }
         @media (min-width: 769px) { .toggle-sidebar { display: flex; } }
@@ -420,6 +436,107 @@
             if (typeof sincronizarTodas === 'function') { sincronizarTodas(); }
             else if (window.PRIMEIRA_CAIXA) { location.href = '/caixa/' + window.PRIMEIRA_CAIXA + '?sync=todas'; }
         }
+    </script>
+
+    <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->
+    <div id="anx-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)anxFechar()">
+      <div class="fluent-card" style="width:min(600px,92vw);max-height:86vh;overflow:auto;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">
+            Anexos — PAJ <span id="anx-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        </h3>
+        <p id="anx-hint" class="text-tertiary" style="font-size:12px;margin:4px 0 10px;">
+            Documentos que serão enviados junto com a mensagem ao assistido.</p>
+        <div id="anx-lista" style="margin-top:6px;"></div>
+        <div id="anx-add-box" style="margin-top:12px;">
+            <input type="file" id="anx-input" multiple style="display:none;" onchange="anxUpload(this)">
+            <button class="btn-accent" style="padding:6px 14px;font-size:12px;"
+                    onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
+            <span id="anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+            <button class="btn-subtle" style="padding:6px 14px;" onclick="anxFechar()">Fechar</button>
+        </div>
+      </div>
+    </div>
+    <script>
+    // ---------- Anexos (componente compartilhado) ----------
+    let anxCtx = null;      // {slug, paj_norm, pajnum, tipo, id_tramite, readonly}
+    let anxMudou = false;   // se houve alteração, recarrega ao fechar (reflete clipes/colunas)
+    function anxRaiz() {
+        const b = '/api/caixa/' + anxCtx.slug + '/paj/' + encodeURIComponent(anxCtx.paj_norm);
+        return anxCtx.tipo === 'conjunto'
+            ? b + '/conjunto'
+            : b + '/tramite/' + encodeURIComponent(anxCtx.id_tramite || '');
+    }
+    function anxAbrir(btn) {
+        anxCtx = { slug: btn.dataset.slug, paj_norm: btn.dataset.paj, pajnum: btn.dataset.pajnum || '',
+                   tipo: btn.dataset.tipo || 'tramite', id_tramite: btn.dataset.tramite || '',
+                   readonly: btn.dataset.readonly === '1' };
+        anxMudou = false;
+        document.getElementById('anx-paj').textContent = anxCtx.pajnum;
+        document.getElementById('anx-add-box').style.display = anxCtx.readonly ? 'none' : '';
+        document.getElementById('anx-hint').textContent = anxCtx.readonly
+            ? 'Documentos que foram enviados junto com a mensagem.'
+            : 'Documentos que serão enviados junto com a mensagem ao assistido.';
+        document.getElementById('anx-msg').textContent = '';
+        let anexos = [];
+        try { anexos = JSON.parse(btn.dataset.anexos || '[]'); } catch (e) {}
+        anxRender(anexos);
+        document.getElementById('anx-modal').style.display = 'flex';
+    }
+    function anxFechar() {
+        document.getElementById('anx-modal').style.display = 'none';
+        if (anxMudou) location.reload();
+    }
+    function anxEsc(s){ const d=document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
+    function anxTam(n){ n = +n||0; if (n<1024) return n+' B'; if (n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+    function anxRender(anexos) {
+        const box = document.getElementById('anx-lista');
+        if (!anexos || !anexos.length) {
+            box.innerHTML = '<div class="text-tertiary" style="font-size:13px;padding:8px 0;">Nenhum anexo.</div>';
+            return;
+        }
+        let h = '<table class="fluent-table" style="width:100%;font-size:12.5px;"><thead><tr>' +
+                '<th>Arquivo</th><th style="width:5rem;">Tamanho</th><th style="width:9rem;">Incluído em</th>' +
+                (anxCtx.readonly ? '' : '<th style="width:2.5rem;"></th>') + '</tr></thead><tbody>';
+        anexos.forEach(a => {
+            const dl = a.arquivo ? (anxRaiz() + '/anexo/' + encodeURIComponent(a.arquivo)) : '';
+            const nome = dl ? '<a class="accent-link" href="' + dl + '" target="_blank" rel="noopener">' + anxEsc(a.nome) + '</a>'
+                            : anxEsc(a.nome);
+            h += '<tr><td style="word-break:break-all;">' + nome + '</td>' +
+                 '<td>' + anxTam(a.tamanho) + '</td>' +
+                 '<td class="text-tertiary">' + anxEsc((a.incluido_em||'').replace('T',' ').slice(0,16)) + '</td>';
+            if (!anxCtx.readonly)
+                h += '<td><button class="btn-subtle" style="padding:2px 7px;color:#dc2626;" title="Remover anexo" ' +
+                     'onclick="anxRemover(\'' + a.id + '\')">✕</button></td>';
+            h += '</tr>';
+        });
+        box.innerHTML = h + '</tbody></table>';
+    }
+    async function anxUpload(input) {
+        if (!input.files || !input.files.length) return;
+        const fd = new FormData();
+        for (const f of input.files) fd.append('arquivos', f);
+        const msg = document.getElementById('anx-msg');
+        msg.textContent = 'Enviando…';
+        try {
+            const r = await fetch(anxRaiz() + '/anexos', { method: 'POST', body: fd });
+            const d = await r.json();
+            if (d.ok) { anxMudou = true; msg.textContent = ''; anxRender(d.anexos || []); }
+            else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
+        } catch (e) { msg.textContent = 'Erro: ' + e; }
+        input.value = '';
+    }
+    async function anxRemover(id) {
+        if (!confirm('Remover este anexo?')) return;
+        const msg = document.getElementById('anx-msg');
+        try {
+            const r = await fetch(anxRaiz() + '/anexos/' + encodeURIComponent(id) + '/remover', { method: 'POST' });
+            const d = await r.json();
+            if (d.ok) { anxMudou = true; anxRender(d.anexos || []); }
+            else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
+        } catch (e) { msg.textContent = 'Erro: ' + e; }
+    }
     </script>
 
     {% block scripts %}{% endblock %}

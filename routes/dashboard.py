@@ -9,8 +9,9 @@
 
 import json
 
-from fastapi import APIRouter, Body, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi import APIRouter, Body, File, Request, UploadFile
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               RedirectResponse, StreamingResponse)
 
 from services import config_service, divcom_service, envio_service
 
@@ -192,10 +193,12 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
     """Grava UMA tramitação na fila de envio da caixa (mensagem + meios)."""
     mensagem = payload.get("mensagem", "") if isinstance(payload, dict) else ""
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
+    somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."},
                             status_code=400)
-    dados = divcom_service.gravar_para_envio(slug, paj_norm, id_tramite, mensagem, meios)
+    dados = divcom_service.gravar_para_envio(slug, paj_norm, id_tramite, mensagem, meios,
+                                             somente_leitura=somente_leitura)
     if not dados:
         return JSONResponse({"ok": False, "erro": "tramitação não encontrada"}, status_code=404)
     return {"ok": True}
@@ -238,9 +241,11 @@ async def triar_desfazer(slug: str, paj_norm: str):
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/gravar", response_class=JSONResponse)
 async def gravar_conjunto(slug: str, paj_norm: str, payload: dict = Body(...)):
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
+    somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."}, status_code=400)
-    dados = divcom_service.gravar_conjunto(slug, paj_norm, payload.get("mensagem", ""), meios)
+    dados = divcom_service.gravar_conjunto(slug, paj_norm, payload.get("mensagem", ""), meios,
+                                           somente_leitura=somente_leitura)
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}
@@ -252,6 +257,63 @@ async def remover_conjunto(slug: str, paj_norm: str):
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}
+
+
+# ==================== anexos (documentos a enviar) ====================
+async def _ler_uploads(arquivos: list[UploadFile]) -> list[tuple[str, bytes]]:
+    out: list[tuple[str, bytes]] = []
+    for f in arquivos or []:
+        out.append((f.filename or "arquivo", await f.read()))
+    return out
+
+
+def _servir_anexo(paj_norm: str, tipo: str, id_tramite: str, arquivo: str):
+    p = divcom_service.caminho_anexo(paj_norm, tipo, id_tramite, arquivo).resolve()
+    base = divcom_service.ANEXOS_DIR.resolve()
+    if base not in p.parents or not p.is_file():
+        return JSONResponse({"ok": False, "erro": "arquivo não encontrado"}, status_code=404)
+    nome = arquivo.split("__", 1)[1] if "__" in arquivo else arquivo  # tira o prefixo uuid__
+    return FileResponse(str(p), filename=nome)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/anexos", response_class=JSONResponse)
+async def anexos_tramite_add(slug: str, paj_norm: str, id_tramite: str,
+                             arquivos: list[UploadFile] = File(default=[])):
+    res = divcom_service.adicionar_anexos(slug, paj_norm, "tramite", id_tramite,
+                                          await _ler_uploads(arquivos))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/anexos/{anexo_id}/remover",
+             response_class=JSONResponse)
+async def anexos_tramite_del(slug: str, paj_norm: str, id_tramite: str, anexo_id: str):
+    res = divcom_service.remover_anexo(slug, paj_norm, "tramite", id_tramite, anexo_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/anexo/{arquivo}")
+async def anexo_tramite_baixar(slug: str, paj_norm: str, id_tramite: str, arquivo: str):
+    return _servir_anexo(paj_norm, "tramite", id_tramite, arquivo)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/anexos", response_class=JSONResponse)
+async def anexos_conjunto_add(slug: str, paj_norm: str,
+                              arquivos: list[UploadFile] = File(default=[])):
+    res = divcom_service.adicionar_anexos(slug, paj_norm, "conjunto", "",
+                                          await _ler_uploads(arquivos))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/anexos/{anexo_id}/remover",
+             response_class=JSONResponse)
+async def anexos_conjunto_del(slug: str, paj_norm: str, anexo_id: str):
+    res = divcom_service.remover_anexo(slug, paj_norm, "conjunto", "", anexo_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/api/caixa/{slug}/paj/{paj_norm}/conjunto/anexo/{arquivo}")
+async def anexo_conjunto_baixar(slug: str, paj_norm: str, arquivo: str):
+    return _servir_anexo(paj_norm, "conjunto", "", arquivo)
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/sugestao", response_class=JSONResponse)

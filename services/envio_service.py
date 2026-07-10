@@ -11,7 +11,9 @@ Para ligar um meio real: implemente o handler `_enviar_<meio>` e faça-o retorna
 handler retornam status "nao_configurado" (não marcam como enviado).
 
 Assinatura dos handlers: async def _enviar_x(ctx) -> dict, onde ctx traz:
-  paj, paj_norm, assistido, mensagem, telefones[], emails[], whatsapp_numeros[].
+  paj, paj_norm, tramite_ids[], assistido, mensagem, telefones[], emails[],
+  whatsapp_numeros[], somente_leitura (bool — App SISDPU: só leitura, sem resposta),
+  anexos[] (cada um: nome, arquivo, tamanho, tipo, incluido_em, caminho=ABSOLUTO no disco).
 """
 
 from __future__ import annotations

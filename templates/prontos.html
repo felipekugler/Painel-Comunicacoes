@@ -66,6 +66,13 @@
             {% for m in meios_envio %}<option value="{{ m.key }}">{{ m.label }}</option>{% endfor %}
         </select>
     </label>
+    <label>Anexos
+        <select id="f-anexo" onchange="aplicarFiltros()">
+            <option value="">Todos</option>
+            <option value="com">Com anexo</option>
+            <option value="sem">Sem anexo</option>
+        </select>
+    </label>
     <span style="margin-left:auto;font-size:12px;">
         <a href="#" onclick="marcarVisiveis(true);return false;">marcar visíveis</a> ·
         <a href="#" onclick="marcarVisiveis(false);return false;">limpar</a>
@@ -84,6 +91,7 @@
                 <th style="width: 10rem;">Tipo</th>
                 <th style="min-width: 18rem;">Mensagem a enviar</th>
                 <th class="text-center" style="width: 7rem;">Meios</th>
+                <th class="text-center" style="width: 3rem;">Anexos</th>
                 <th style="width: 8rem;">Ações</th>
             </tr>
         </thead>
@@ -92,7 +100,8 @@
             {% set c = paj.contatos or {} %}
             <tr class="pr-row" data-caixa="{{ paj.caixa_slug }}"
                 data-tipoclass="{{ paj.sugestao_tipo or '' }}"
-                data-meios="{{ paj.envio_meios|join(',') }}">
+                data-meios="{{ paj.envio_meios|join(',') }}"
+                data-anexo="{{ 1 if paj.tem_anexo else 0 }}">
                 <td style="text-align:center;">
                     <input type="checkbox" class="pr-cb" checked onchange="atualizarContador()"
                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
@@ -121,10 +130,27 @@
                             title="Ver a mensagem completa">Ver mensagem</button>
                 </td>
                 <td class="text-center">
-                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;">
-                        {% for m in paj.envio_meios %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endfor %}
+                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:flex-start;">
+                        {% for m in paj.envio_meios %}
+                            {% if m == 'app_sisdpu' and paj.envio_somente_leitura %}
+                            <span class="meio-sl">{{ meio_icon(m, meio_labels.get(m, m)) }}<span class="sl-badge" title="Será enviado em modo Somente Leitura">SL</span></span>
+                            {% else %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endif %}
+                        {% endfor %}
                         {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
                     </div>
+                </td>
+                <td class="text-center">
+                    <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                            data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+                            onclick="anxAbrir(this)"
+                            title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                        </svg>
+                        {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+                    </button>
                 </td>
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -134,6 +160,7 @@
                                 data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                 data-mensagem="{{ paj.envio_mensagem }}"
                                 data-meios='{{ paj.envio_meios|tojson }}'
+                                data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
                                 data-app="{{ 1 if c.app_sisdpu else 0 }}"
                                 data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                                 data-email="{{ 1 if c.email else 0 }}"
@@ -275,6 +302,7 @@ function aplicarFiltros() {
     const fc = document.getElementById('f-caixa').value;
     const ft = document.getElementById('f-tipo').value;
     const fm = document.getElementById('f-meio').value;
+    const fa = document.getElementById('f-anexo').value;
     let visiveis = 0;
     document.querySelectorAll('tr.pr-row').forEach(row => {
         const okC = !fc || row.dataset.caixa === fc;
@@ -282,7 +310,9 @@ function aplicarFiltros() {
         const okT = !ft || (ft === '__none__' ? tc === '' : tc === ft);
         const meios = (row.dataset.meios || '').split(',').filter(Boolean);
         const okM = !fm || meios.includes(fm);
-        const mostra = okC && okT && okM;
+        const temAnexo = row.dataset.anexo === '1';
+        const okA = !fa || (fa === 'com' ? temAnexo : !temAnexo);
+        const mostra = okC && okT && okM && okA;
         row.style.display = mostra ? '' : 'none';
         const cb = row.querySelector('.pr-cb');
         if (!mostra && cb) cb.checked = false;   // oculto sai da seleção
@@ -317,6 +347,7 @@ function gravarAbrir(btn) {
     document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
+    const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido
     const disp = { app_sisdpu: btn.dataset.app === '1', whatsapp: btn.dataset.whats === '1', email: btn.dataset.email === '1' };
     const AVISO = { app_sisdpu: 'assistido sem adesão ao aplicativo', whatsapp: 'cadastre um número de WhatsApp antes', email: 'sem e-mail cadastrado' };
     const box = document.getElementById('grava-meios');
@@ -330,7 +361,25 @@ function gravarAbrir(btn) {
             '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
         lab.querySelectorAll('span')[0].textContent = m.label;
         if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
-        box.appendChild(lab);
+        // "Somente leitura" — sub-opção do App SISDPU, na MESMA linha (só habilita com o App marcado).
+        if (m.key === 'app_sisdpu') {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:4px;flex-wrap:wrap;';
+            row.appendChild(lab);
+            const slWrap = document.createElement('label');
+            slWrap.className = 'wa-opt';
+            slWrap.innerHTML = '<input type="checkbox" id="grava-sl"><span style="font-size:13px;">Somente leitura</span>';
+            row.appendChild(slWrap);
+            box.appendChild(row);
+            const appCb = lab.querySelector('input');
+            const slCb = slWrap.querySelector('input');
+            const syncSl = () => { slCb.disabled = !appCb.checked; if (slCb.disabled) slCb.checked = false; };
+            appCb.addEventListener('change', syncSl);
+            slCb.checked = appCb.checked && slRestore;
+            syncSl();
+        } else {
+            box.appendChild(lab);
+        }
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
@@ -338,13 +387,15 @@ function gravarFechar() { document.getElementById('grava-modal').style.display =
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    const slCb = document.getElementById('grava-sl');
+    const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
         const url = (gravaTipo === 'conjunto')
             ? '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/conjunto/gravar'
             : '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
-        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios}) });
+        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }

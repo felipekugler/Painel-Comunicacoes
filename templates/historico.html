@@ -75,8 +75,12 @@
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ r.meios_labels|join(',')|lower }}">
-                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;">
-                        {% for m in r.meios %}{{ meio_icon(m, r.meios_labels[loop.index0]) }}{% endfor %}
+                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:flex-start;">
+                        {% for m in r.meios %}
+                            {% if m == 'app_sisdpu' and r.somente_leitura %}
+                            <span class="meio-sl">{{ meio_icon(m, r.meios_labels[loop.index0]) }}<span class="sl-badge" title="Enviado em modo Somente Leitura">SL</span></span>
+                            {% else %}{{ meio_icon(m, r.meios_labels[loop.index0]) }}{% endif %}
+                        {% endfor %}
                         {% if not r.meios %}<span class="text-tertiary">—</span>{% endif %}
                     </div>
                 </td>
@@ -87,7 +91,18 @@
                     {% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ r.anexos|length }}">
-                    {% if r.anexos %}{{ r.anexos|length }}{% else %}<span class="text-tertiary">—</span>{% endif %}
+                    {% if r.anexos %}
+                    <button class="anx-clip tem"
+                            data-slug="{{ r.caixa_slug }}" data-paj="{{ r.paj_norm }}" data-pajnum="{{ r.paj }}"
+                            data-tipo="{{ r.anexo_tipo or 'tramite' }}" data-tramite="{{ r.anexo_ref or '' }}"
+                            data-anexos='{{ r.anexos|tojson }}' data-readonly="1"
+                            onclick="anxAbrir(this)" title="{{ r.anexos|length }} anexo(s) — ver">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                        </svg>
+                        <span class="anx-n">{{ r.anexos|length }}</span>
+                    </button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td data-sort="{{ r.status }}">
                     {%- set cor = {'enviado':'var(--c-zap)','simulado':'#a06d00','parcial':'var(--c-red)','falha':'var(--c-red)'}.get(r.status, 'var(--text-secondary)') -%}

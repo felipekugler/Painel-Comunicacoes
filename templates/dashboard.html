@@ -267,7 +267,22 @@
                             </div>
                             {% endif %}
                         </div>
-                        {#-- Ações (20%): sincronizar + gravar --#}
+                        {#-- Card Anexos (10%) --#}
+                        <div class="ia-anexos">
+                            <div class="card-label">Anexos</div>
+                            <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+                                    data-slug="{{ caixa.slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                    data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                    data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+                                    onclick="anxAbrir(this)"
+                                    title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                                </svg>
+                                {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+                            </button>
+                        </div>
+                        {#-- Ações (13%): sincronizar + gravar --#}
                         <div class="ia-actions">
                             {% if paj.tipo == 'conjunto' %}
                             <div style="text-align:center;margin-bottom:2px;"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
@@ -378,8 +393,12 @@
                     {% endif %}
                 </td>
                 <td class="text-center">
-                    <div style="display:inline-flex;gap:4px;">
-                        {% for m in paj.contato_meios %}{{ contato_icon(m, true) }}{% endfor %}
+                    <div style="display:inline-flex;gap:4px;align-items:flex-start;">
+                        {% for m in paj.contato_meios %}
+                            {% if m == 'app_sisdpu' and paj.contato_somente_leitura %}
+                            <span class="meio-sl">{{ contato_icon(m, true) }}<span class="sl-badge" title="Enviado em modo Somente Leitura">SL</span></span>
+                            {% else %}{{ contato_icon(m, true) }}{% endif %}
+                        {% endfor %}
                         {% if not paj.contato_meios %}<span class="text-tertiary" style="font-size:12px;">—</span>{% endif %}
                     </div>
                 </td>
@@ -476,9 +495,13 @@
 .pj-cards > td { border-bottom:1px solid var(--stroke); padding-top:2px; padding-bottom:16px; }
 .desc-tram { line-height:1.35; }
 .cards-row { display:flex; gap:12px; align-items:stretch; }
-/* Proporção: Resumo 43,5% · Sugestão 43,5% · Ações 13% (ratio 43.5:43.5:13, basis 0). */
-.cards-row .ia-card { flex:43.5 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
+/* Proporção: Resumo 38,5% · Sugestão 38,5% · Anexos 10% · Ações 13% (basis 0). */
+.cards-row .ia-card { flex:38.5 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
     padding:10px 12px; background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+.cards-row .ia-anexos { flex:10 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
+    padding:10px 8px; background:color-mix(in srgb, var(--accent) 4%, var(--card));
+    display:flex; flex-direction:column; align-items:center; text-align:center; }
+.cards-row .ia-anexos .anx-clip svg { width:30px; height:30px; }
 .cards-row .ia-actions { flex:13 1 0; min-width:0; display:flex; flex-direction:column; gap:8px; justify-content:flex-start; }
 .cards-row .ia-actions .btn-subtle, .cards-row .ia-actions .btn-grava { width:100%; justify-content:center; }
 .card-label { font-size:11px; font-weight:700; color:var(--accent); letter-spacing:.02em; margin-bottom:6px; }
@@ -605,12 +628,9 @@
 <!-- Modal das últimas movimentações -->
 <div id="mov-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)movFechar()">
   <div class="fluent-card mov-dialog">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <h3 class="font-display" style="font-size:18px;margin:0;">
-            Últimas movimentações — PAJ <span id="mov-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
-        </h3>
-        <button class="btn-subtle" style="padding:4px 10px;" onclick="movFechar()">Fechar</button>
-    </div>
+    <h3 class="font-display" style="font-size:18px;margin:0;">
+        Últimas movimentações — PAJ <span id="mov-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+    </h3>
     <div id="mov-lista" style="margin-top:8px;"></div>
     <div class="mov-mais">
         <div class="mov-mais-lbl">
@@ -625,6 +645,9 @@
             <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;"></span>
         </div>
         <p class="text-tertiary" style="font-size:11px;margin:8px 0 0;">Depois de salvar, clique em <strong>“Reanálise pela IA”</strong> na linha do PAJ para gerar a nova análise com a seleção.</p>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+        <button class="btn-subtle" style="padding:6px 14px;" onclick="movFechar()">Fechar</button>
     </div>
   </div>
 </div>
@@ -708,6 +731,7 @@ function gravarAbrir(btn) {
     document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
     let jaMeios = [];
     try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
+    const slRestore = btn.dataset.sl === '1';  // "somente leitura" já escolhido (ao editar)
     const disp = { app_sisdpu: btn.dataset.app === '1',
                    whatsapp: btn.dataset.whats === '1',
                    email: btn.dataset.email === '1' };
@@ -731,7 +755,25 @@ function gravarAbrir(btn) {
             '<span class="text-tertiary" style="font-size:11.5px;"></span>';
         lab.querySelectorAll('span')[0].textContent = m.label;
         if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
-        box.appendChild(lab);
+        // "Somente leitura" — sub-opção do App SISDPU, na MESMA linha (só habilita com o App marcado).
+        if (m.key === 'app_sisdpu') {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;align-items:center;gap:4px;flex-wrap:wrap;';
+            row.appendChild(lab);
+            const slWrap = document.createElement('label');
+            slWrap.className = 'wa-opt';
+            slWrap.innerHTML = '<input type="checkbox" id="grava-sl"><span style="font-size:13px;">Somente leitura</span>';
+            row.appendChild(slWrap);
+            box.appendChild(row);
+            const appCb = lab.querySelector('input');
+            const slCb = slWrap.querySelector('input');
+            const syncSl = () => { slCb.disabled = !appCb.checked; if (slCb.disabled) slCb.checked = false; };
+            appCb.addEventListener('change', syncSl);
+            slCb.checked = appCb.checked && slRestore;
+            syncSl();
+        } else {
+            box.appendChild(lab);
+        }
     });
     document.getElementById('grava-modal').style.display = 'flex';
 }
@@ -739,6 +781,8 @@ function gravarFechar() { document.getElementById('grava-modal').style.display =
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
     const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    const slCb = document.getElementById('grava-sl');
+    const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
@@ -746,7 +790,7 @@ async function gravarSalvar() {
             ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/conjunto/gravar'
             : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
         const r = await fetch(url,
-            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios}) });
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }
@@ -958,7 +1002,7 @@ function movAbrir(btn) {
     const ta = document.getElementById('mov-recorte');
     if (ta) ta.value = texto || '';
     const msg = document.getElementById('mov-mais-msg');
-    if (msg) msg.textContent = movs.length + ' movimentação(ões) disponível(is)';
+    if (msg) msg.textContent = '';  // limpa feedback anterior (sem texto redundante de contagem)
     document.getElementById('mov-modal').style.display = 'flex';
 }
 function movFechar() { document.getElementById('mov-modal').style.display = 'none'; }
