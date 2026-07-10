@@ -343,9 +343,10 @@
                 <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Tipo<span class="sort-arrow"></span></th>
                 <th style="min-width: 20rem;">Mensagem enviada</th>
                 <th class="text-center" style="width: 8rem;">Meios usados</th>
-                <th class="sortable" data-col="5" data-type="num" onclick="ordenarTabela(this)" style="width: 9rem;">Enviado em<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="6" data-type="num" onclick="ordenarTabela(this)" style="width: 9rem;">Enviado em<span class="sort-arrow"></span></th>
                 <th style="width: 8rem;">Ações</th>
             </tr>
         </thead>
@@ -365,6 +366,10 @@
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
                 <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
+                <td data-sort="{{ (paj.sugestao_tipo or '~')|lower }}">
+                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
+                </td>
                 <td class="text-secondary" style="font-size:12.5px;">
                     <div class="clamp3">{{ paj.contato_mensagem or "—" }}</div>
                     {% if paj.contato_mensagem %}

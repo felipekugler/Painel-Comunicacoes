@@ -49,10 +49,11 @@
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Caixa de origem<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Meios<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Tipo<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Meios<span class="sort-arrow"></span></th>
                 <th style="min-width:18rem;">Mensagem</th>
-                <th class="sortable text-center" data-col="6" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Anexos<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="7" data-type="text" onclick="ordenarTabela(this)" style="width:6.5rem;">Status<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Anexos<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="8" data-type="text" onclick="ordenarTabela(this)" style="width:6.5rem;">Status<span class="sort-arrow"></span></th>
             </tr>
         </thead>
         <tbody>
@@ -66,6 +67,10 @@
                 <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ (r.caixa_nome or '')|lower }}">
                     {{ r.caixa_nome or "—" }}
                     <div class="text-tertiary" style="font-size:11px;font-family:'Cascadia Code','Consolas',monospace;">{{ r.grupo }}</div>
+                </td>
+                <td data-sort="{{ (r.tipo or '~')|lower }}">
+                    {% if r.tipo %}<span class="pill" title="Texto padrão / classificação">{{ r.tipo }}</span>
+                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ r.meios_labels|join(',')|lower }}">
                     <div style="display:inline-flex;flex-wrap:wrap;gap:6px;">

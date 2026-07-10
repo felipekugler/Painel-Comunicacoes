@@ -64,12 +64,22 @@ async def sincronizar_stream(slug: str):
 async def prontos_envio(request: Request):
     """Página GLOBAL "Prontos para Envio": fila de envio de todas as caixas."""
     meios = envio_service.meios_disponiveis()
+    prontos = divcom_service.listar_prontos_envio()
+    # Opções de filtro: caixas e tipos (texto padrão) presentes na fila.
+    caixas_filtro, _vistos = [], set()
+    for p in prontos:
+        if p["caixa_slug"] not in _vistos:
+            _vistos.add(p["caixa_slug"])
+            caixas_filtro.append({"slug": p["caixa_slug"], "nome": p["caixa_nome"]})
+    tipos_filtro = sorted({p.get("sugestao_tipo", "") for p in prontos if p.get("sugestao_tipo")})
     template = request.app.state.jinja.get_template("prontos.html")
     return HTMLResponse(template.render(
         request=request,
-        prontos=divcom_service.listar_prontos_envio(),
+        prontos=prontos,
         meios_envio=meios,
         meio_labels={m["key"]: m["label"] for m in meios},
+        caixas_filtro=caixas_filtro,
+        tipos_filtro=tipos_filtro,
         envio_modo=config_service.get_envio_modo()))
 
 
@@ -78,6 +88,27 @@ async def prontos_enviar_stream():
     async def gen():
         try:
             async for ev in divcom_service.enviar_todas_filas_stream():
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/api/prontos/enviar-selecao")
+async def prontos_enviar_selecao(payload: dict = Body(default={})):
+    """Envia SOMENTE os itens selecionados (checkbox/filtro) na página Prontos.
+    Corpo: {selecao: [{slug, paj_norm, id_tramite, tipo}]}. Resposta SSE (via POST)."""
+    selecao = payload.get("selecao") or [] if isinstance(payload, dict) else []
+
+    async def gen():
+        try:
+            async for ev in divcom_service.enviar_selecao_stream(selecao):
                 yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
         except Exception as e:  # noqa: BLE001
             yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"

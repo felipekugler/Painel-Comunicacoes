@@ -1226,6 +1226,87 @@ def _status_geral(resultados: list[dict]) -> str:
     return "simulado" if any(r.get("status") == "simulado" for r in ok) else "enviado"
 
 
+def _achar_item_fila(fila: list[dict], paj_norm: str, tipo: str, id_tramite: str) -> dict | None:
+    """Localiza um item da fila por PAJ + tipo (tramite/conjunto) + id_tramite."""
+    for it in fila:
+        if it.get("paj_norm") != paj_norm:
+            continue
+        if tipo == "conjunto":
+            if it.get("tipo") == "conjunto":
+                return it
+        elif it.get("tipo") != "conjunto" and it.get("id_tramite") == id_tramite:
+            return it
+    return None
+
+
+async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
+    """Dispara UM item da fila (tramitação ou conjunto), por cada meio; registra no
+    histórico global + no box e o remove da fila. Yields eventos de log e, por
+    último, o sentinela {"_status": <status>}. Deve rodar DENTRO do _sync_lock."""
+    from services import envio_service, historico_service
+    paj_norm = t["paj_norm"]
+    conjunto = t.get("tipo") == "conjunto"
+    ids = t.get("tramite_ids", []) if conjunto else [t.get("id_tramite", "")]
+    meios = t.get("envio_meios", []) or []
+    mensagem = t.get("envio_mensagem", "")
+    nome = t.get("assistido") or "s/ nome"
+    etiqueta = (f"conjunto de {len(ids)} tramitações" if conjunto
+                else f"tramitação {t.get('data_envio', '')}")
+    if not meios:
+        yield {"level": "erro",
+               "msg": f"{rotulo}PAJ {t['paj']} ({nome}): sem meio selecionado — mantido na fila."}
+        yield {"_status": "falha"}
+        return
+
+    yield {"level": "novo",
+           "msg": f"{rotulo}PAJ {t['paj']} — {etiqueta} — {nome} · "
+                  f"{', '.join(envio_service.label_meio(m) for m in meios)}"}
+
+    cont = ler_contato(paj_norm)
+    ctx = {
+        "paj": t["paj"], "paj_norm": paj_norm, "tramite_ids": ids,
+        "assistido": t.get("assistido", ""),
+        "mensagem": mensagem, "telefones": cont.get("telefones", []),
+        "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
+    }
+    resultados, res_por_meio = [], {}
+    for meio in meios:
+        r = await envio_service.enviar(meio, ctx)
+        r["meio"] = meio
+        resultados.append(r)
+        res_por_meio[meio] = r.get("status", "falha")
+        nivel = "ok" if r.get("ok") else "erro"
+        yield {"level": nivel,
+               "msg": f"     {envio_service.label_meio(meio)}: {r.get('detalhe', r.get('status'))}"}
+
+    status = _status_geral(resultados)
+    reg = historico_service.registrar({
+        "paj_norm": paj_norm, "paj": t["paj"], "assistido": t.get("assistido", ""),
+        "id_tramite": ids[0] if len(ids) == 1 else "", "tramite_ids": ids,
+        "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
+        "tipo": t.get("sugestao_tipo", ""),  # classificação do texto padrão
+        "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
+        "meios": meios, "mensagem": mensagem, "anexos": [],
+        "status": status, "resultado": res_por_meio,
+    })
+
+    if status != "falha":
+        box = _ler_box(slug, paj_norm)
+        registro = {"em": reg["ts"], "meios": meios, "mensagem": mensagem,
+                    "status": status, "resultado": res_por_meio, "historico_id": reg["id"]}
+        if conjunto and box.get("conjunto"):
+            box["conjunto"].setdefault("enviados", []).append({**registro, "tramite_ids": ids})
+            box["conjunto"]["envio"] = {}
+        else:
+            sol = _achar_solic(box, ids[0]) if box else None
+            if sol:
+                sol.setdefault("enviados", []).append(registro)
+                sol["envio"] = {}
+        if box:
+            _gravar_box(slug, box)
+    yield {"_status": status}
+
+
 async def enviar_fila_stream(slug: str):
     """Dispara TODOS os PAJs gravados para envio da caixa, por cada meio, emitindo
     eventos de progresso. Ao final de cada PAJ: grava no histórico global + no
@@ -1258,70 +1339,14 @@ async def enviar_fila_stream(slug: str):
 
         enviados = falhas = 0
         for i, t in enumerate(fila, 1):
-            paj_norm = t["paj_norm"]
-            conjunto = t.get("tipo") == "conjunto"
-            ids = t.get("tramite_ids", []) if conjunto else [t.get("id_tramite", "")]
-            meios = t.get("envio_meios", []) or []
-            mensagem = t.get("envio_mensagem", "")
-            nome = t.get("assistido") or "s/ nome"
-            etiqueta = (f"conjunto de {len(ids)} tramitações" if conjunto
-                        else f"tramitação {t.get('data_envio', '')}")
-            if not meios:
-                falhas += 1
-                yield {"level": "erro",
-                       "msg": f"[{i}/{len(fila)}] PAJ {t['paj']} ({nome}): sem meio selecionado — mantido na fila."}
-                continue
-
-            yield {"level": "novo",
-                   "msg": f"[{i}/{len(fila)}] PAJ {t['paj']} — {etiqueta} — {nome} · "
-                          f"{', '.join(envio_service.label_meio(m) for m in meios)}"}
-
-            cont = ler_contato(paj_norm)
-            ctx = {
-                "paj": t["paj"], "paj_norm": paj_norm, "tramite_ids": ids,
-                "assistido": t.get("assistido", ""),
-                "mensagem": mensagem, "telefones": cont.get("telefones", []),
-                "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
-            }
-            resultados, res_por_meio = [], {}
-            for meio in meios:
-                r = await envio_service.enviar(meio, ctx)
-                r["meio"] = meio
-                resultados.append(r)
-                res_por_meio[meio] = r.get("status", "falha")
-                nivel = "ok" if r.get("ok") else "erro"
-                yield {"level": nivel,
-                       "msg": f"     {envio_service.label_meio(meio)}: {r.get('detalhe', r.get('status'))}"}
-
-            status = _status_geral(resultados)
-            if status == "falha":
-                falhas += 1
-            else:
-                enviados += 1
-
-            reg = historico_service.registrar({
-                "paj_norm": paj_norm, "paj": t["paj"], "assistido": t.get("assistido", ""),
-                "id_tramite": ids[0] if len(ids) == 1 else "", "tramite_ids": ids,
-                "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
-                "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
-                "meios": meios, "mensagem": mensagem, "anexos": [],
-                "status": status, "resultado": res_por_meio,
-            })
-
-            if status != "falha":
-                box = _ler_box(slug, paj_norm)
-                registro = {"em": reg["ts"], "meios": meios, "mensagem": mensagem,
-                            "status": status, "resultado": res_por_meio, "historico_id": reg["id"]}
-                if conjunto and box.get("conjunto"):
-                    box["conjunto"].setdefault("enviados", []).append({**registro, "tramite_ids": ids})
-                    box["conjunto"]["envio"] = {}
+            async for ev in _enviar_item_stream(slug, caixa, t, modo, rotulo=f"[{i}/{len(fila)}] "):
+                if "_status" in ev:
+                    if ev["_status"] == "falha":
+                        falhas += 1
+                    else:
+                        enviados += 1
                 else:
-                    sol = _achar_solic(box, ids[0]) if box else None
-                    if sol:
-                        sol.setdefault("enviados", []).append(registro)
-                        sol["envio"] = {}
-                if box:
-                    _gravar_box(slug, box)
+                    yield ev
 
         dur = time.monotonic() - t0
         yield {"level": "ok",
@@ -1356,6 +1381,55 @@ async def enviar_todas_filas_stream():
                   + (f", {tot_falhas} com falha" if tot_falhas else "") + "."}
     yield {"done": True, "resumo": {"ok": True, "enviados": tot_env, "falhas": tot_falhas,
                                     "modo": config_service.get_envio_modo()}}
+
+
+async def enviar_selecao_stream(selecao: list[dict]):
+    """"Enviar Agora" da página "Prontos para Envio" restrito a uma SELEÇÃO.
+    selecao: lista de {slug, paj_norm, id_tramite, tipo('tramite'|'conjunto')}.
+    Envia SOMENTE esses itens (de quaisquer caixas)."""
+    if _sync_lock.locked():
+        yield {"level": "erro", "msg": "Já existe uma operação em andamento."}
+        yield {"done": True, "resumo": {"ok": False, "erro": "em_andamento"}}
+        return
+    modo = config_service.get_envio_modo()
+    async with _sync_lock:
+        t0 = time.monotonic()
+        cache_fila: dict = {}
+        itens: list[tuple] = []
+        for s in (selecao or []):
+            slug = s.get("slug")
+            caixa = config_service.get_caixa(slug)
+            if not caixa:
+                continue
+            if slug not in cache_fila:
+                cache_fila[slug] = listar_fila(slug)
+            it = _achar_item_fila(cache_fila[slug], s.get("paj_norm"),
+                                  s.get("tipo", "tramite"), s.get("id_tramite", ""))
+            if it:
+                itens.append((slug, caixa, it))
+        if not itens:
+            yield {"level": "info", "msg": "Nada a enviar (seleção vazia ou já processada)."}
+            yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0}}
+            return
+
+        aviso = " (MODO SIMULADO — nada será realmente enviado)" if modo == "simulado" else ""
+        yield {"level": "info", "msg": f"Enviando {len(itens)} item(ns) selecionado(s){aviso}."}
+        enviados = falhas = 0
+        for i, (slug, caixa, t) in enumerate(itens, 1):
+            async for ev in _enviar_item_stream(slug, caixa, t, modo,
+                                                 rotulo=f"[{i}/{len(itens)}] {caixa['nome']} · "):
+                if "_status" in ev:
+                    if ev["_status"] == "falha":
+                        falhas += 1
+                    else:
+                        enviados += 1
+                else:
+                    yield ev
+        dur = time.monotonic() - t0
+        yield {"level": "ok",
+               "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
+        yield {"done": True, "resumo": {"ok": True, "enviados": enviados, "falhas": falhas,
+                                        "modo": modo, "duracao": round(dur, 1)}}
 
 
 # ==================== reset do painel ====================

@@ -6,46 +6,82 @@
     <div>
         <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos para Envio</h1>
         <p class="text-secondary mt-1" style="font-size: 13px;">
-            PAJs gravados para envio de <strong>todas as caixas</strong>. Dispare tudo de uma vez em "Enviar Agora".
+            PAJs gravados para envio de <strong>todas as caixas</strong>. Filtre e marque o que enviar; "Enviar Agora" dispara os <strong>marcados</strong>.
         </p>
     </div>
 </div>
 
 <div class="section-head">
-    <span class="pill">{{ prontos|length }}</span>
+    <span class="pill" id="pr-total">{{ prontos|length }}</span>
     {% if envio_modo == 'simulado' %}
     <span class="badge-modo" title="Nenhuma mensagem será realmente enviada — apenas simulação para validar o fluxo.">MODO SIMULADO</span>
     {% endif %}
     {% if prontos %}
     <div style="margin-left:auto;">
-        <button class="btn-accent" onclick="enviarTodos()">
+        <button class="btn-accent" id="btn-enviar" onclick="enviarSelecionados()">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
             </svg>
-            Enviar Agora ({{ prontos|length }})
+            Enviar Agora (<span id="btn-enviar-n">{{ prontos|length }}</span>)
         </button>
     </div>
     {% endif %}
 </div>
 
 {% if prontos %}
+<div class="pr-filtros">
+    <span class="text-tertiary" style="font-size:12px;">Filtrar:</span>
+    <label>Caixa
+        <select id="f-caixa" onchange="aplicarFiltros()">
+            <option value="">Todas</option>
+            {% for c in caixas_filtro %}<option value="{{ c.slug }}">{{ c.nome }}</option>{% endfor %}
+        </select>
+    </label>
+    <label>Texto padrão
+        <select id="f-tipo" onchange="aplicarFiltros()">
+            <option value="">Todos</option>
+            {% for t in tipos_filtro %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            <option value="__none__">(texto específico / sem classificação)</option>
+        </select>
+    </label>
+    <label>Meio
+        <select id="f-meio" onchange="aplicarFiltros()">
+            <option value="">Todos</option>
+            {% for m in meios_envio %}<option value="{{ m.key }}">{{ m.label }}</option>{% endfor %}
+        </select>
+    </label>
+    <span style="margin-left:auto;font-size:12px;">
+        <a href="#" onclick="marcarVisiveis(true);return false;">marcar visíveis</a> ·
+        <a href="#" onclick="marcarVisiveis(false);return false;">limpar</a>
+    </span>
+</div>
+
 <div class="fluent-card" style="overflow-x:auto;">
     <table class="fluent-table">
         <thead>
             <tr>
-                <th style="width: 11rem;">Caixa de origem</th>
+                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" checked onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar visíveis"></th>
+                <th style="width: 10rem;">Caixa de origem</th>
                 <th style="width: 7rem;">PAJ</th>
                 <th style="width: 8rem;">Ofício</th>
                 <th style="width: 9rem;">Assistido</th>
-                <th style="min-width: 20rem;">Mensagem a enviar</th>
-                <th class="text-center" style="width: 8rem;">Meios</th>
+                <th style="width: 10rem;">Tipo</th>
+                <th style="min-width: 18rem;">Mensagem a enviar</th>
+                <th class="text-center" style="width: 7rem;">Meios</th>
                 <th style="width: 8rem;">Ações</th>
             </tr>
         </thead>
         <tbody>
             {% for paj in prontos %}
             {% set c = paj.contatos or {} %}
-            <tr>
+            <tr class="pr-row" data-caixa="{{ paj.caixa_slug }}"
+                data-tipoclass="{{ paj.sugestao_tipo or '' }}"
+                data-meios="{{ paj.envio_meios|join(',') }}">
+                <td style="text-align:center;">
+                    <input type="checkbox" class="pr-cb" checked onchange="atualizarContador()"
+                           data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
+                           data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
+                </td>
                 <td><span class="caixa-chip" title="Grupo: {{ paj.grupo }}">{{ paj.caixa_nome }}</span></td>
                 <td>
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
@@ -54,6 +90,10 @@
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
                 <td>{{ paj.assistido or "—" }}</td>
+                <td>
+                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
+                </td>
                 <td class="text-secondary" style="font-size:12.5px;">
                     <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
                     <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
@@ -90,6 +130,7 @@
         </tbody>
     </table>
 </div>
+<p class="text-tertiary" style="font-size:11.5px;margin-top:8px;" id="pr-vazio-filtro" hidden>Nenhum item corresponde ao filtro.</p>
 {% else %}
 <div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">
     Nenhum PAJ gravado para envio. Grave a partir de "Pendentes de contato" em cada caixa.
@@ -136,14 +177,18 @@
             border:1px solid var(--stroke); border-radius:8px; padding:12px;
             font-family:'Cascadia Code','Consolas',monospace; font-size:12.5px; line-height:1.7; }
 .sync-line { white-space:pre-wrap; }
-.sync-info { color:var(--text-secondary); }
-.sync-ok { color:var(--c-zap); }
-.sync-novo { color:var(--accent); font-weight:600; }
-.sync-erro { color:var(--c-red); }
+.sync-info { color:var(--text-secondary); } .sync-ok { color:var(--c-zap); }
+.sync-novo { color:var(--accent); font-weight:600; } .sync-erro { color:var(--c-red); }
 .sync-muted { color:var(--text-tertiary); }
+.pr-filtros { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:12px;
+              padding:10px 14px; border:1px solid var(--stroke); border-radius:10px; background:var(--card); }
+.pr-filtros label { font-size:12px; color:var(--text-secondary); display:inline-flex; align-items:center; gap:6px; }
+.pr-filtros select { padding:5px 8px; border-radius:6px; border:1px solid var(--stroke-strong);
+                     background:var(--layer-alt); color:var(--text); font-size:12.5px; }
+.pr-filtros a { color:var(--accent); text-decoration:none; }
 </style>
 
-<!-- Modal "Gravar/Editar para envio" -->
+<!-- Modal "Editar envio" -->
 <div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
   <div class="fluent-card grava-dialog">
     <h3 class="font-display" style="font-size:18px;margin:0;">Editar envio</h3>
@@ -204,13 +249,49 @@ function mostrarToast(msg) {
     setTimeout(() => { t.remove(); }, 2000);
 }
 
+// ---------- Filtros + seleção ----------
+function aplicarFiltros() {
+    const fc = document.getElementById('f-caixa').value;
+    const ft = document.getElementById('f-tipo').value;
+    const fm = document.getElementById('f-meio').value;
+    let visiveis = 0;
+    document.querySelectorAll('tr.pr-row').forEach(row => {
+        const okC = !fc || row.dataset.caixa === fc;
+        const tc = row.dataset.tipoclass || '';
+        const okT = !ft || (ft === '__none__' ? tc === '' : tc === ft);
+        const meios = (row.dataset.meios || '').split(',').filter(Boolean);
+        const okM = !fm || meios.includes(fm);
+        const mostra = okC && okT && okM;
+        row.style.display = mostra ? '' : 'none';
+        const cb = row.querySelector('.pr-cb');
+        if (!mostra && cb) cb.checked = false;   // oculto sai da seleção
+        if (mostra) visiveis++;
+    });
+    const aviso = document.getElementById('pr-vazio-filtro');
+    if (aviso) aviso.hidden = visiveis > 0;
+    atualizarContador();
+}
+function marcarVisiveis(v) {
+    document.querySelectorAll('tr.pr-row').forEach(row => {
+        if (row.style.display === 'none') return;
+        const cb = row.querySelector('.pr-cb');
+        if (cb) cb.checked = v;
+    });
+    atualizarContador();
+}
+function atualizarContador() {
+    const n = document.querySelectorAll('tr.pr-row .pr-cb:checked').length;
+    const el = document.getElementById('btn-enviar-n');
+    if (el) el.textContent = n;
+    const btn = document.getElementById('btn-enviar');
+    if (btn) btn.disabled = n === 0;
+}
+
 // ---------- Editar um gravado (modal) — usa o slug da PRÓPRIA linha ----------
 let gravaSlug = null, gravaPaj = null, gravaTramite = '', gravaTipo = 'tramite';
 function gravarAbrir(btn) {
-    gravaSlug = btn.dataset.slug;
-    gravaPaj = btn.dataset.paj;
-    gravaTramite = btn.dataset.tramite || '';
-    gravaTipo = btn.dataset.tipo || 'tramite';
+    gravaSlug = btn.dataset.slug; gravaPaj = btn.dataset.paj;
+    gravaTramite = btn.dataset.tramite || ''; gravaTipo = btn.dataset.tipo || 'tramite';
     document.getElementById('grava-paj').textContent = btn.dataset.pajnum || '';
     document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
     let jaMeios = [];
@@ -268,25 +349,51 @@ function msgAbrir(btn) {
 }
 function msgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
 
-// ---------- Enviar Agora (global, SSE) ----------
-function enviarTodos() {
-    if (!confirm('Disparar o envio de TODOS os PAJs prontos, de todas as caixas?')) return;
+// ---------- Enviar Agora (só os MARCADOS) — SSE via POST ----------
+async function enviarSelecionados() {
+    const marcados = Array.from(document.querySelectorAll('tr.pr-row .pr-cb:checked'));
+    if (!marcados.length) { mostrarToast('Marque ao menos um PAJ'); return; }
+    const selecao = marcados.map(cb => ({
+        slug: cb.dataset.slug, paj_norm: cb.dataset.paj,
+        id_tramite: cb.dataset.tramite || '', tipo: cb.dataset.tipo || 'tramite'
+    }));
+    if (!confirm('Disparar o envio dos ' + selecao.length + ' PAJ(s) marcado(s)?')) return;
     const modal = document.getElementById('sse-modal');
     const log = document.getElementById('sse-log');
     const st = document.getElementById('sse-status');
     const fechar = document.getElementById('sse-fechar');
     log.innerHTML = ''; st.textContent = '— em andamento…'; fechar.style.display = 'none';
     modal.style.display = 'flex';
-    const es = new EventSource('/api/prontos/enviar/stream');
-    es.onmessage = (e) => {
-        let d; try { d = JSON.parse(e.data); } catch (_) { return; }
-        if (d.done) { es.close(); st.textContent = '— concluído'; fechar.style.display = ''; return; }
-        const div = document.createElement('div');
-        div.className = 'sync-line sync-' + (d.level || 'info');
-        div.textContent = d.msg || '';
-        log.appendChild(div); log.scrollTop = log.scrollHeight;
-    };
-    es.onerror = () => { es.close(); st.textContent = '— erro de conexão'; fechar.style.display = ''; };
+    try {
+        const resp = await fetch('/api/prontos/enviar-selecao', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selecao })
+        });
+        const reader = resp.body.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+                const linha = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                if (!linha.startsWith('data: ')) continue;
+                let d; try { d = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+                if (d.done) { st.textContent = '— concluído'; continue; }
+                const div = document.createElement('div');
+                div.className = 'sync-line sync-' + (d.level || 'info');
+                div.textContent = d.msg || '';
+                log.appendChild(div); log.scrollTop = log.scrollHeight;
+            }
+        }
+    } catch (e) {
+        const div = document.createElement('div'); div.className = 'sync-line sync-erro';
+        div.textContent = 'Erro: ' + e; log.appendChild(div);
+        st.textContent = '— erro';
+    }
+    fechar.style.display = '';
 }
 function sseFechar() { document.getElementById('sse-modal').style.display = 'none'; location.reload(); }
 </script>
