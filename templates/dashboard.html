@@ -164,136 +164,152 @@
 </div>
 {% if pendentes %}
 <div class="fluent-card" style="overflow-x:auto;">
-    <table class="fluent-table">
+    <table class="fluent-table pj-table">
         <thead>
             <tr>
-                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="num" onclick="ordenarTabela(this)" style="width: 5rem;">Envio<span class="sort-arrow"></span></th>
-                <th style="width: 16rem; min-width: 13rem;">Resumo</th>
-                <th style="width: 16rem; min-width: 13rem;">Sugestão IA</th>
-                <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
+                <th style="width: 7.5rem;">PAJ</th>
+                <th style="width: 8rem;">Ofício</th>
+                <th style="width: 9rem;">Assistido</th>
+                <th style="width: 5rem;">Envio</th>
+                <th style="width: 5rem;">Prazo</th>
+                <th style="width: 8rem;">Remetente</th>
+                <th style="min-width: 12rem;">Descrição do trâmite</th>
+                <th class="text-center" style="width: 11rem;">Contatos</th>
             </tr>
         </thead>
         <tbody>
             {% for paj in pendentes %}
             {% set c = paj.contatos or {} %}
-            <tr>
-                <td data-sort="{{ paj.paj }}">
+            <tr class="pj-head">
+                <td>
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
                     {% if paj.tipo == 'conjunto' %}
-                    <div class="mt-1"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} tramitações — conjunto</span></div>
+                    <div class="mt-1"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
                     {% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
-                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
-                <td class="text-secondary" data-sort="{{ paj.data_envio_key }}">
+                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
+                <td>{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
                     {% if paj.tipo == 'conjunto' %}
-                    {% for dt in paj.datas_tramites %}<div style="white-space:nowrap;">{{ dt | data_br }}</div>{% endfor %}
+                    {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
                     {% else %}
-                    <div style="white-space:nowrap;">{{ paj.envio_data | data_br }}</div>
-                    {% endif %}
-                    {% if paj.prazo %}<div class="mt-1"><span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ Prazo: {{ paj.prazo }}</span></div>{% endif %}
-                    {% if paj.remetente %}<div class="text-tertiary" style="font-size:11px;margin-top:3px;" title="Usuário que enviou a tramitação">{{ paj.remetente }}</div>{% endif %}
-                </td>
-                <td class="text-secondary">
-                    {# Descrição do trâmite (texto que o ofício de origem escreveu ao encaminhar):
-                       muitas vezes é a fonte mais direta do motivo. Vem antes do resumo da IA. #}
-                    {% if paj.tipo == 'conjunto' %}
-                        {% for dt in paj.descricoes_tramites %}{% if dt %}
-                        <div style="display:flex;gap:6px;margin-bottom:6px;">
-                            <span class="rlabel" title="Descrição do trâmite escrita pelo ofício de origem">Trâmite</span>
-                            <span class="clamp4" title="{{ dt }}">{{ dt }}</span>
-                        </div>
-                        {% endif %}{% endfor %}
-                    {% elif paj.descricao_tramite %}
-                        <div style="display:flex;gap:6px;margin-bottom:6px;">
-                            <span class="rlabel" title="Descrição do trâmite escrita pelo ofício de origem">Trâmite</span>
-                            <span class="clamp4" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</span>
-                        </div>
-                    {% endif %}
-                    {% if paj.resumo_ia %}
-                    <div style="display:flex;gap:6px;">
-                        <span class="rlabel" title="Resumo gerado por IA a partir das últimas movimentações">IA</span>
-                        <span class="clamp4" title="{{ paj.resumo_ia }}">{{ paj.resumo_ia }}</span>
-                    </div>
-                    {% elif not paj.descricao_tramite and paj.tipo != 'conjunto' %}
-                    <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
-                    {% endif %}
-                    {% if paj.movimentacoes %}
-                    <button class="mov-badge" onclick="movAbrir(this)"
-                            data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
-                            title="Ver a íntegra das últimas movimentações">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-                        </svg>
-                        {{ paj.movimentacoes|length }} últimas movimentações
-                    </button>
+                    <div>{{ paj.envio_data | data_br }}</div>
+                    {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
                     {% endif %}
                 </td>
                 <td>
-                    {% if paj.sugestao_atual %}
-                    {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
-                    {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
-                    <div class="clamp3 text-secondary" style="font-size:12.5px;">{{ paj.sugestao_atual }}</div>
+                    {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12px;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;">
+                    {# Descrição do trâmite: texto que o ofício de origem escreveu ao encaminhar —
+                       muitas vezes é a fonte mais direta do motivo do contato. #}
+                    {% if paj.tipo == 'conjunto' %}
+                        {% set _descs = paj.descricoes_tramites | select | list %}
+                        {% for dt in _descs %}<div class="desc-tram clamp3" title="{{ dt }}">{{ dt }}</div>{% endfor %}
+                        {% if not _descs %}<span class="text-tertiary">—</span>{% endif %}
+                    {% elif paj.descricao_tramite %}
+                        <div class="desc-tram clamp3" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>
                     {% else %}
-                    <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
+                        <span class="text-tertiary">—</span>
                     {% endif %}
-                    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
-                        {% if paj.sugestao_atual %}
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                data-sugestao="{{ paj.sugestao_atual }}"
-                                data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
-                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                data-email="{{ 1 if c.email else 0 }}"
-                                onclick="sugAbrir(this)">Ver / editar</button>
-                        {% endif %}
-                        {% if paj.tipo == 'conjunto' %}
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
-                                title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
-                        {% else %}
-                        <button class="btn-subtle sync-paj-btn" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                onclick="sincronizarPaj(this)" title="Sincronizar apenas este PAJ">
-                            <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
-                            <svg class="ic-sync" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                            </svg>
-                            Sincronizar
-                        </button>
-                        {% if paj.de_triagem_separado %}
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-paj="{{ paj.paj_norm }}" onclick="voltarTriagem(this)"
-                                title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
-                        {% endif %}
-                        {% endif %}
-                        <button class="btn-grava grava-btn" style="padding:3px 9px;font-size:12px;box-shadow:none;"
-                                data-tipo="{{ paj.tipo }}"
-                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                data-tramite="{{ paj.id_tramite }}"
-                                data-mensagem="{{ paj.sugestao_atual }}"
-                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                data-email="{{ 1 if c.email else 0 }}"
-                                onclick="gravarAbrir(this)" title="Gravar para envio em lote">
-                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-                            </svg>
-                            Gravar para envio
-                        </button>
+                </td>
+                <td>
+                    <div class="contatos-linha">
+                        {{ contato_icon('app_sisdpu', c.app_sisdpu) }}
+                        {{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}
+                        {{ whatsapp_cell(paj) }}
+                        {{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}
+                        {{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}
                     </div>
                 </td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
+            </tr>
+            <tr class="pj-cards">
+                <td colspan="8">
+                    <div class="cards-row">
+                        {#-- Card Resumo IA (40%) --#}
+                        <div class="ia-card">
+                            <div class="card-label">Resumo IA</div>
+                            {% if paj.resumo_ia %}
+                            <div class="clamp6 text-secondary" title="{{ paj.resumo_ia }}">{{ paj.resumo_ia }}</div>
+                            {% else %}
+                            <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
+                            {% endif %}
+                            {% if paj.movimentacoes %}
+                            <button class="mov-badge" onclick="movAbrir(this)"
+                                    data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+                                    title="Ver a íntegra das últimas movimentações">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                                </svg>
+                                {{ paj.movimentacoes|length }} últimas movimentações
+                            </button>
+                            {% endif %}
+                        </div>
+                        {#-- Card Sugestão IA (40%) + Ver/editar --#}
+                        <div class="ia-card">
+                            <div class="card-label">Sugestão IA</div>
+                            {% if paj.sugestao_atual %}
+                            {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
+                            {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
+                            <div class="clamp6 text-secondary" style="font-size:12.5px;" title="{{ paj.sugestao_atual }}">{{ paj.sugestao_atual }}</div>
+                            {% else %}
+                            <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
+                            {% endif %}
+                            {% if paj.sugestao_atual %}
+                            <div style="margin-top:8px;">
+                                <button class="btn-subtle" style="padding:4px 10px;font-size:12px;"
+                                        data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                        data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                        data-sugestao="{{ paj.sugestao_atual }}"
+                                        data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
+                                        data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                        data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                        data-email="{{ 1 if c.email else 0 }}"
+                                        onclick="sugAbrir(this)">Ver / editar</button>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {#-- Ações (20%): sincronizar + gravar --#}
+                        <div class="ia-actions">
+                            {% if paj.tipo == 'conjunto' %}
+                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+                                    data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
+                                    title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
+                            {% else %}
+                            <button class="btn-subtle sync-paj-btn" style="padding:5px 9px;font-size:12px;"
+                                    data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                    onclick="sincronizarPaj(this)" title="Sincronizar apenas este PAJ">
+                                <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+                                <svg class="ic-sync" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                                Sincronizar
+                            </button>
+                            {% if paj.de_triagem_separado %}
+                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+                                    data-paj="{{ paj.paj_norm }}" onclick="voltarTriagem(this)"
+                                    title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
+                            {% endif %}
+                            {% endif %}
+                            <button class="btn-grava grava-btn" style="padding:5px 9px;font-size:12px;box-shadow:none;"
+                                    data-tipo="{{ paj.tipo }}"
+                                    data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                    data-tramite="{{ paj.id_tramite }}"
+                                    data-mensagem="{{ paj.sugestao_atual }}"
+                                    data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                    data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                    data-email="{{ 1 if c.email else 0 }}"
+                                    onclick="gravarAbrir(this)" title="Gravar para envio em lote">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                                </svg>
+                                Gravar para envio
+                            </button>
+                        </div>
+                    </div>
+                </td>
             </tr>
             {% endfor %}
         </tbody>
@@ -511,9 +527,21 @@
 .sync-muted { color:var(--text-tertiary); }
 .clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .clamp4 { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
-/* Rótulo dos blocos da coluna Resumo (Trâmite / IA) — min-width alinha o início
-   do texto dos dois blocos. */
-.rlabel { color:var(--accent); flex:0 0 auto; font-size:11px; font-weight:600; min-width:3.6rem; }
+.clamp6 { display:-webkit-box; -webkit-line-clamp:6; -webkit-box-orient:vertical; overflow:hidden; }
+
+/* ===== Layout em cards por PAJ (tabela "Pendentes de contato") =====
+   Cada PAJ ocupa 2 linhas: (1) dados extraídos do PAJ, (2) cards da IA. */
+.pj-table th { white-space:nowrap; }
+.pj-head > td { border-bottom:none !important; vertical-align:top; padding-top:14px; padding-bottom:4px; }
+.pj-cards > td { border-bottom:1px solid var(--stroke); padding-top:2px; padding-bottom:16px; }
+.desc-tram { line-height:1.35; }
+.contatos-linha { display:flex; align-items:center; justify-content:center; gap:1px; flex-wrap:nowrap; }
+.cards-row { display:flex; gap:12px; align-items:stretch; }
+.cards-row .ia-card { flex:2 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
+    padding:10px 12px; background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+.cards-row .ia-actions { flex:1 1 0; min-width:0; display:flex; flex-direction:column; gap:8px; justify-content:flex-start; }
+.cards-row .ia-actions .btn-subtle, .cards-row .ia-actions .btn-grava { width:100%; justify-content:center; }
+.card-label { font-size:11px; font-weight:700; color:var(--accent); letter-spacing:.02em; margin-bottom:6px; }
 .sug-dialog { width:60vw; max-width:60vw; padding:24px; }
 .sug-textarea { width:100%; min-height:200px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
                 background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
