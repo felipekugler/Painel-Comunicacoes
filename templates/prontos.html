@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Prontos para Envio{% endblock %}
 
+{#- Ícone do meio de contato (sem texto; tooltip com o rótulo) — igual ao Histórico. -#}
+{% macro meio_icon(tipo, rotulo) %}
+    {%- set var = {'app_sisdpu':'--c-app','whatsapp':'--c-zap','email':'--c-mail'}.get(tipo, '--text-secondary') -%}
+    <span class="meio-ic" style="color:var({{ var }});" title="{{ rotulo }}">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+            {%- if tipo == 'app_sisdpu' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+            {%- elif tipo == 'whatsapp' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+            {%- elif tipo == 'email' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+            {%- endif -%}
+        </svg>
+    </span>
+{% endmacro %}
+
 {% block content %}
 <div class="flex items-end justify-between gap-4 flex-wrap mb-6">
     <div>
@@ -82,7 +98,11 @@
                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
                            data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
                 </td>
-                <td><span class="caixa-chip" title="Grupo: {{ paj.grupo }}">{{ paj.caixa_nome }}</span></td>
+                <td>
+                    {%- set _cor = caixa_cores.get(paj.caixa_slug, '') -%}
+                    <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
+                          {% if _cor %}style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};"{% endif %}>{{ paj.caixa_nome }}</span>
+                </td>
                 <td>
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
@@ -101,8 +121,8 @@
                             title="Ver a mensagem completa">Ver mensagem</button>
                 </td>
                 <td class="text-center">
-                    <div style="font-size:12px;color:var(--text-secondary);">
-                        {% for m in paj.envio_meios %}{{ meio_labels.get(m, m) }}{% if not loop.last %}, {% endif %}{% endfor %}
+                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;">
+                        {% for m in paj.envio_meios %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endfor %}
                         {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
                     </div>
                 </td>
@@ -146,7 +166,9 @@
               background: color-mix(in srgb, #eab308 22%, transparent); color:#7a5c00; }
 @media (prefers-color-scheme: dark) { .badge-modo { color:#f5d878; } }
 .caixa-chip { display:inline-flex; align-items:center; font-size:11.5px; font-weight:600; padding:2px 8px;
-              border-radius:999px; background:var(--accent-soft); color:var(--accent); }
+              border-radius:999px; background:var(--accent-soft); color:var(--accent); white-space:nowrap; }
+.meio-ic { display:inline-flex; }
+.meio-ic svg { width:19px; height:19px; }
 .pill-conj-x { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
                border-radius:999px; background:color-mix(in srgb, var(--c-addr) 20%, transparent); color:var(--c-addr); }
 .clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }

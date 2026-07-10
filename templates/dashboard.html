@@ -160,7 +160,7 @@
 
 {#- ===================== TABELA 1: pendentes de contato ===================== -#}
 <div class="section-head">
-    <h2 class="font-display" style="font-size:18px;margin:0;">Pendentes de contato</h2>
+    <h2 class="font-display" style="font-size:18px;margin:0;">Pendentes</h2>
     <span class="pill">{{ pendentes|length }}</span>
     <span class="text-tertiary" style="font-size:12px;">— sincronizados, aguardando tratamento</span>
 </div>
@@ -323,7 +323,7 @@
     </table>
 </div>
 {% else %}
-<div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">Nenhum PAJ pendente de contato.</div>
+<div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">Nenhuma tramitação nesta seção.</div>
 {% endif %}
 
 {#- (A seção "Gravados para envio" foi movida para a página GLOBAL "Prontos para
@@ -332,7 +332,7 @@
 {#- ===================== TABELA 3: já enviados nesta caixa ===================== -#}
 {% if enviados %}
 <div class="section-head" style="margin-top:28px;">
-    <h2 class="font-display" style="font-size:18px;margin:0;">Já enviados nesta caixa</h2>
+    <h2 class="font-display" style="font-size:18px;margin:0;">Enviados</h2>
     <span class="pill">{{ enviados|length }}</span>
     <span class="text-tertiary" style="font-size:12px;">— mensagem já disparada; aguardam a conclusão da tramitação no SISDPU</span>
 </div>

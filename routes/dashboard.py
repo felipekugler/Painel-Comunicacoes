@@ -72,6 +72,10 @@ async def prontos_envio(request: Request):
             _vistos.add(p["caixa_slug"])
             caixas_filtro.append({"slug": p["caixa_slug"], "nome": p["caixa_nome"]})
     tipos_filtro = sorted({p.get("sugestao_tipo", "") for p in prontos if p.get("sugestao_tipo")})
+    # Uma cor distinta por caixa (visual), atribuída na ordem de aparição.
+    _PALETA = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#0891b2",
+               "#db2777", "#ca8a04", "#dc2626", "#4f46e5", "#0d9488"]
+    caixa_cores = {c["slug"]: _PALETA[i % len(_PALETA)] for i, c in enumerate(caixas_filtro)}
     template = request.app.state.jinja.get_template("prontos.html")
     return HTMLResponse(template.render(
         request=request,
@@ -80,6 +84,7 @@ async def prontos_envio(request: Request):
         meio_labels={m["key"]: m["label"] for m in meios},
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
+        caixa_cores=caixa_cores,
         envio_modo=config_service.get_envio_modo()))
 
 
