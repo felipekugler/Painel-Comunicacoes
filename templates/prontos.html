@@ -99,9 +99,9 @@
                            data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
                 </td>
                 <td>
-                    {%- set _cor = caixa_cores.get(paj.caixa_slug, '') -%}
+                    {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
-                          {% if _cor %}style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};"{% endif %}>{{ paj.caixa_nome }}</span>
+                          style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
                 <td>
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"

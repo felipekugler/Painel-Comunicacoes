@@ -42,6 +42,21 @@ CONTATOS_KEYS = ["app_sisdpu", "telefone", "whatsapp", "email", "endereco"]
 # a ser apenas o CORTE de exibição/IA, não o limite de extração.
 MOVS_EXTRACAO_MAX = 30
 
+# Paleta de cores por caixa (identificação visual em Prontos, Histórico, etc.).
+_PALETA_CAIXAS = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#0891b2",
+                  "#db2777", "#ca8a04", "#dc2626", "#4f46e5", "#0d9488"]
+
+
+def cor_caixa(slug: str) -> str:
+    """Cor ESTÁVEL de uma caixa (mesma cor em qualquer tela). Atribuída pela ordem
+    da caixa na config; com fallback por hash do slug (para caixas fora da lista,
+    ex.: registros antigos do histórico)."""
+    for i, c in enumerate(config_service.listar_caixas_todas()):
+        if c.get("slug") == slug:
+            return _PALETA_CAIXAS[i % len(_PALETA_CAIXAS)]
+    h = int(hashlib.sha1((slug or "").encode("utf-8")).hexdigest(), 16)
+    return _PALETA_CAIXAS[h % len(_PALETA_CAIXAS)]
+
 # A concorrência das análises de IA (quantas rodam EM PARALELO no sync; 1 =
 # sequencial) é configurável na tela de Configurações e lida DINAMICAMENTE no
 # início da Fase 2 via config_service.get_analise_concorrencia() — sem restart.
