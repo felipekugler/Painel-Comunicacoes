@@ -72,22 +72,65 @@ _INSTRUCOES = (
     "   - Se \"tipo\" foi definido e todos os campos preenchidos, entregue o texto do comunicado "
     "já completo com os dados do caso. Se \"tipo\" for null e não for o caso do aviso acima, "
     "redija um texto específico e adequado a este caso concreto.\n\n"
+    "ATENÇÃO AO FORMATO: dentro dos VALORES de texto do JSON, NUNCA use aspas duplas "
+    "(\"). Se precisar citar algo (ex.: a descrição de um trâmite), use aspas simples "
+    "('') ou não use aspas. Aspas duplas não escapadas quebram o JSON.\n"
     "Responda APENAS com um objeto JSON válido, sem cercas de código, no formato: "
     '{"resumo": "...", "tipo": "..." ou null, "sugestao": "..."}\n\n'
 )
 
 
+def _desescapar_json(s: str) -> str:
+    """Converte as sequências de escape JSON mais comuns em um valor extraído
+    manualmente (usado só no fallback tolerante, quando json.loads falhou)."""
+    return (
+        s.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "")
+         .replace('\\"', '"').replace("\\/", "/").replace("\\\\", "\\")
+    ).strip()
+
+
+def _extrair_campos_tolerante(t: str) -> dict | None:
+    """Recupera resumo/tipo/sugestao de um JSON MALFORMADO — tipicamente quando o
+    modelo deixa aspas duplas NÃO escapadas dentro dos valores (ex.: ecoa
+    descrição: "Pedir documentos" dentro do resumo). Captura cada campo pelos
+    limites das chaves conhecidas, tolerando aspas internas."""
+    campos: dict = {}
+    # resumo: do abre-aspas até o fecha-aspas seguido de , "tipo" OU , "sugestao"
+    mr = re.search(r'"resumo"\s*:\s*"(.*?)"\s*,\s*"(?:tipo|sugestao)"\s*:', t, re.DOTALL)
+    if mr:
+        campos["resumo"] = _desescapar_json(mr.group(1))
+    # tipo: null ou "texto" (só existe na análise individual)
+    mt = re.search(r'"tipo"\s*:\s*(null|"(.*?)")\s*,\s*"sugestao"\s*:', t, re.DOTALL)
+    if mt:
+        campos["tipo"] = "" if mt.group(1) == "null" else _desescapar_json(mt.group(2) or "")
+    # sugestao: do abre-aspas até o último fecha-aspas antes do } final
+    ms = re.search(r'"sugestao"\s*:\s*"(.*)"\s*\}?\s*$', t, re.DOTALL)
+    if ms:
+        campos["sugestao"] = _desescapar_json(ms.group(1))
+    return campos if (campos.get("resumo") or campos.get("sugestao")) else None
+
+
 def _extrair_json(texto: str) -> dict | None:
-    """Extrai o primeiro objeto JSON do texto (tolera prosa/cercas ao redor)."""
+    """Extrai o objeto JSON da resposta do modelo (tolera prosa/cercas ao redor).
+    Se o JSON estiver malformado (erro comum: aspas duplas não escapadas dentro
+    dos valores), cai numa extração tolerante por chaves conhecidas — evitando
+    despejar o JSON cru no painel."""
     if not texto:
         return None
+    # Remove cercas de código ```json ... ``` (se houver).
+    t = texto.strip()
+    t = re.sub(r"^```(?:json)?\s*", "", t)
+    t = re.sub(r"\s*```\s*$", "", t).strip()
+    # 1) parse estrito do texto limpo.
     with contextlib.suppress(Exception):
-        return json.loads(texto)
-    m = re.search(r"\{.*\}", texto, re.DOTALL)
+        return json.loads(t)
+    # 2) parse estrito do primeiro { ... } encontrado.
+    m = re.search(r"\{.*\}", t, re.DOTALL)
     if m:
         with contextlib.suppress(Exception):
             return json.loads(m.group(0))
-    return None
+    # 3) fallback tolerante (aspas internas não escapadas etc.).
+    return _extrair_campos_tolerante(t)
 
 
 def analisar_paj(movimentacoes: list[dict], comunicados: list[dict] | None = None,
@@ -258,6 +301,9 @@ _INSTRUCOES_CONJUNTO = (
     "por linha em branco (\\n\\n). Se um comunicado padrão servir de base, use-o preenchendo "
     "seus [campos] com dados reais das movimentações; se faltar dado obrigatório, escreva no "
     "ponto \"[verificar: campo]\".\n\n"
+    "ATENÇÃO AO FORMATO: dentro dos VALORES de texto do JSON, NUNCA use aspas duplas "
+    "(\"). Se precisar citar a descrição de um trâmite, use aspas simples ('') ou não use "
+    "aspas — aspas duplas não escapadas quebram o JSON.\n"
     "Responda APENAS com JSON válido, sem cercas: {\"resumo\": \"...\", \"sugestao\": \"...\"}\n\n"
 )
 
