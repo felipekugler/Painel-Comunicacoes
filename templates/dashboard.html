@@ -174,7 +174,7 @@
                 <th style="width: 5rem;">Prazo</th>
                 <th style="width: 8rem;">Remetente</th>
                 <th style="min-width: 12rem;">Descrição do trâmite</th>
-                <th class="text-center" style="width: 11rem;">Contatos</th>
+                <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
             </tr>
         </thead>
         <tbody>
@@ -215,18 +215,14 @@
                         <span class="text-tertiary">—</span>
                     {% endif %}
                 </td>
-                <td>
-                    <div class="contatos-linha">
-                        {{ contato_icon('app_sisdpu', c.app_sisdpu) }}
-                        {{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}
-                        {{ whatsapp_cell(paj) }}
-                        {{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}
-                        {{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}
-                    </div>
-                </td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
             </tr>
             <tr class="pj-cards">
-                <td colspan="8">
+                <td colspan="12">
                     <div class="cards-row">
                         {#-- Card Resumo IA (40%) --#}
                         <div class="ia-card">
@@ -535,7 +531,6 @@
 .pj-head > td { border-bottom:none !important; vertical-align:top; padding-top:14px; padding-bottom:4px; }
 .pj-cards > td { border-bottom:1px solid var(--stroke); padding-top:2px; padding-bottom:16px; }
 .desc-tram { line-height:1.35; }
-.contatos-linha { display:flex; align-items:center; justify-content:center; gap:1px; flex-wrap:nowrap; }
 .cards-row { display:flex; gap:12px; align-items:stretch; }
 .cards-row .ia-card { flex:2 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
     padding:10px 12px; background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
