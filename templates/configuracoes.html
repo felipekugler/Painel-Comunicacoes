@@ -1,0 +1,517 @@
+{% extends "base.html" %}
+{% block title %}Configurações{% endblock %}
+
+{#- Macro: seção de uma caixa (ou geral) com Comunicado Padrão + Parágrafos padrão.
+    editavel=false deixa o conteúdo em SOMENTE LEITURA (botões de edição inativos). -#}
+{% macro tabela_comunicados(titulo, subtitulo, slug, lista, paragrafos, editavel=true) %}
+<div class="fluent-card" style="padding:22px;max-width:980px;margin-bottom:22px;">
+    <div style="display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+        <div>
+            <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">{{ titulo }}</h2>
+            <p class="text-secondary" style="font-size:13px;margin:0;max-width:660px;">{{ subtitulo }}</p>
+        </div>
+        <button class="btn-subtle" onclick="abrirComunicado('{{ slug }}')" {% if not editavel %}disabled{% endif %}>+ Novo Texto padrão</button>
+    </div>
+    <div class="fluent-card" style="overflow:hidden;">
+        <table class="fluent-table" data-slug="{{ slug }}">
+            <thead>
+                <tr><th style="width:15rem;">Tipo</th><th>Texto padrão</th><th style="width:8rem;text-align:right;">Ações</th></tr>
+            </thead>
+            <tbody>
+                {% for c in lista %}
+                <tr data-id="{{ c.id }}" data-tipo="{{ c.tipo }}">
+                    <td style="font-weight:600;">{{ c.tipo }}</td>
+                    <td class="text-secondary" style="font-size:13px;">{{ c.texto }}</td>
+                    <td style="text-align:right;white-space:nowrap;">
+                        <button class="btn-subtle" style="padding:4px 10px;" onclick="editarComunicado(this)" {% if not editavel %}disabled{% endif %}>Editar</button>
+                        <button class="btn-subtle" style="padding:4px 10px;color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                                onclick="excluirComunicado('{{ c.id }}','{{ slug }}',this)" {% if not editavel %}disabled{% endif %}>Excluir</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-tertiary" style="text-align:center;padding:20px;">Nenhum comunicado cadastrado.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Parágrafos padrão -->
+    <div style="display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:20px 0 10px;">
+        <div>
+            <h3 class="font-display" style="font-size:15px;margin:0 0 2px;">Parágrafos padrão</h3>
+            <p class="text-secondary" style="font-size:12.5px;margin:0;max-width:640px;">
+                Trechos que podem ser inseridos com um clique ao editar a sugestão (em "Ver / editar").
+            </p>
+        </div>
+        <button class="btn-subtle" onclick="abrirParagrafo('{{ slug }}')" {% if not editavel %}disabled{% endif %}>+ Novo parágrafo padrão</button>
+    </div>
+    <div class="fluent-card" style="overflow:hidden;">
+        <table class="fluent-table" data-slug="{{ slug }}">
+            <thead>
+                <tr><th style="width:15rem;">Título</th><th>Texto</th><th style="width:8rem;text-align:right;">Ações</th></tr>
+            </thead>
+            <tbody>
+                {% for p in paragrafos %}
+                <tr data-id="{{ p.id }}" data-titulo="{{ p.titulo }}">
+                    <td style="font-weight:600;">{{ p.titulo }}</td>
+                    <td class="text-secondary" style="font-size:13px;">{{ p.texto }}</td>
+                    <td style="text-align:right;white-space:nowrap;">
+                        <button class="btn-subtle" style="padding:4px 10px;" onclick="editarParagrafo(this)" {% if not editavel %}disabled{% endif %}>Editar</button>
+                        <button class="btn-subtle" style="padding:4px 10px;color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                                onclick="excluirParagrafo('{{ p.id }}','{{ slug }}',this)" {% if not editavel %}disabled{% endif %}>Excluir</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="3" class="text-tertiary" style="text-align:center;padding:16px;">Nenhum parágrafo cadastrado.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endmacro %}
+
+{% block content %}
+<h1 class="font-display" style="font-size:28px;margin:0 0 6px;">Configurações</h1>
+<p class="text-secondary" style="font-size:13px;margin:0 0 20px;">Ajustes do Painel de Comunicações</p>
+
+<!-- ===================== Barra de abas ===================== -->
+<div class="cfg-tabs" role="tablist">
+    <button class="cfg-tab" data-tab="geral" onclick="abrirTab('geral')">Configurações Gerais</button>
+    <button class="cfg-tab" data-tab="caixas" onclick="abrirTab('caixas')">Caixas para Sincronização</button>
+    <button class="cfg-tab" data-tab="gerais" onclick="abrirTab('gerais')">Mensagens Gerais</button>
+    {% for cx in caixas %}
+    <button class="cfg-tab {% if not cx.habilitada %}cfg-tab-off{% endif %}" data-tab="cx-{{ cx.slug }}"
+            onclick="abrirTab('cx-{{ cx.slug }}')"
+            {% if not cx.habilitada %}title="Caixa não sincronizada — configurações em somente leitura"{% endif %}>
+        {{ cx.nome }}{% if not cx.habilitada %} 🔒{% endif %}
+    </button>
+    {% endfor %}
+</div>
+
+<!-- ===================== Aba: Configurações Gerais ===================== -->
+<div class="cfg-panel" data-panel="geral">
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-bottom:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Aparência</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Tema do painel. "Sistema" acompanha o modo claro/escuro do Windows. A escolha vale
+            neste navegador.
+        </p>
+        <div id="tema-seg" class="tema-seg">
+            <button type="button" data-tema="system" onclick="definirTema('system')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" /></svg>
+                Sistema
+            </button>
+            <button type="button" data-tema="light" onclick="definirTema('light')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" /></svg>
+                Claro
+            </button>
+            <button type="button" data-tema="dark" onclick="definirTema('dark')">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" /></svg>
+                Escuro
+            </button>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Quantidade de movimentações a analisar</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas ao Claude.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-movs" style="font-size:14px;">Movimentações analisadas:</label>
+            <input type="number" id="n-movs" class="wa-input" style="width:90px;" min="1" max="30" value="{{ n_movimentacoes }}">
+            <button class="btn-accent" onclick="salvarMovs()">Salvar</button>
+            <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Análises de IA em paralelo</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
+            Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
+            Use <strong>1</strong> para análise sequencial (uma de cada vez). Recomendado: 4 a 6.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-conc" style="font-size:14px;">Análises simultâneas:</label>
+            <input type="number" id="n-conc" class="wa-input" style="width:90px;" min="1" max="{{ analise_concorrencia_max }}" value="{{ analise_concorrencia }}">
+            <button class="btn-accent" onclick="salvarConcorrencia()">Salvar</button>
+            <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Backups do histórico de mensagens</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Cópias de segurança do histórico geradas automaticamente (antes de cada limpeza e a cada gravação).
+            Restaurar substitui o histórico atual pelo backup escolhido — o estado atual é salvo antes, então dá para desfazer.
+        </p>
+        {% if backups %}
+        <div class="fluent-card" style="overflow:hidden;">
+            <table class="fluent-table">
+                <thead>
+                    <tr><th style="width:12rem;">Quando</th><th>Descrição</th><th style="width:6rem;text-align:center;">Mensagens</th><th style="width:8rem;text-align:right;">Ações</th></tr>
+                </thead>
+                <tbody>
+                    {% for b in backups %}
+                    <tr>
+                        <td style="white-space:nowrap;font-size:12.5px;">{{ b.quando or "—" }}</td>
+                        <td class="text-secondary" style="font-size:12.5px;">{{ b.rotulo }}</td>
+                        <td class="text-center">{{ b.registros }}</td>
+                        <td style="text-align:right;">
+                            <button class="btn-subtle" style="padding:4px 10px;"
+                                    data-nome="{{ b.nome }}" data-registros="{{ b.registros }}"
+                                    data-quando="{{ b.quando }}" onclick="restaurarBackup(this)">Restaurar</button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-tertiary" style="font-size:13px;padding:8px 2px;">Nenhum backup disponível ainda.</div>
+        {% endif %}
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;border:1px solid color-mix(in srgb,var(--c-red) 35%,transparent);">
+        <h2 class="font-display" style="font-size:18px;margin:0 0 4px;color:var(--c-red);">Resetar o Painel</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Limpa os dados do painel. Os dados removidos são movidos para uma lixeira interna
+            (<span style="font-family:monospace;">dados/_lixeira</span>) — reversível em caso de engano.
+        </p>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+            <div style="max-width:470px;">
+                <div style="font-weight:600;font-size:14px;">Reset parcial</div>
+                <div class="text-secondary" style="font-size:12.5px;">Apaga PAJs/tramitações sincronizados, contatos e histórico. <strong>Mantém</strong> os textos padrão, parágrafos padrão e as caixas.</div>
+            </div>
+            <button class="btn-subtle" style="white-space:nowrap;color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                    onclick="resetarPainel(false)">Reset parcial</button>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;border-top:1px solid var(--stroke);margin-top:14px;padding-top:14px;">
+            <div style="max-width:470px;">
+                <div style="font-weight:600;font-size:14px;">Reset total</div>
+                <div class="text-secondary" style="font-size:12.5px;">Apaga <strong>tudo</strong>, inclusive textos/parágrafos padrão e caixas — volta ao estado de primeiro uso.</div>
+            </div>
+            <button class="btn-subtle" style="white-space:nowrap;color:#fff;background:var(--c-red);border-color:transparent;"
+                    onclick="resetarPainel(true)">Reset total</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Aba: Caixas para Sincronização ===================== -->
+<div class="cfg-panel" data-panel="caixas">
+    <div class="fluent-card" style="padding:22px;max-width:980px;">
+        <div style="display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+            <div>
+                <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Caixas de Entrada de Grupo identificadas</h2>
+                <p class="text-secondary" style="font-size:13px;margin:0;max-width:660px;">
+                    Escolha quais caixas do SISDPU serão gerenciadas no painel. Cada caixa habilitada
+                    vira um item no menu (e uma aba de configuração aqui em cima) com seu próprio dashboard.
+                </p>
+            </div>
+            <button id="btn-atualizar-caixas" class="btn-subtle" onclick="atualizarCaixas()">Atualizar lista</button>
+        </div>
+        <div class="fluent-card" style="overflow:hidden;">
+            <table class="fluent-table">
+                <thead>
+                    <tr><th style="width:4rem;text-align:center;">Painel</th><th style="width:16rem;">Caixa (SISDPU)</th><th>Nome no menu</th></tr>
+                </thead>
+                <tbody>
+                    {% for cx in caixas_disponiveis %}
+                    <tr>
+                        <td style="text-align:center;">
+                            <input type="checkbox" {% if cx.habilitada %}checked{% endif %}
+                                   onchange="toggleCaixa('{{ cx.grupo }}', this.checked)">
+                        </td>
+                        <td style="font-family:'Cascadia Code','Consolas',monospace;font-size:12.5px;">{{ cx.grupo }}</td>
+                        <td>{{ cx.nome }}</td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="3" class="text-tertiary" style="text-align:center;padding:20px;">
+                        Nenhuma caixa listada ainda. Clique em <strong>Atualizar lista</strong> ou sincronize uma caixa.
+                    </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ===================== Abas por caixa ===================== -->
+{% for cx in caixas %}
+<div class="cfg-panel" data-panel="cx-{{ cx.slug }}">
+    {% if not cx.habilitada %}
+    <div class="aviso-ro" style="max-width:980px;">
+        <strong>Caixa não sincronizada.</strong> As configurações abaixo estão preservadas, mas em
+        <strong>somente leitura</strong>. Habilite a caixa em "Caixas para Sincronização" para editá-la.
+    </div>
+    {% endif %}
+    {{ tabela_comunicados(
+        "Comunicado Padrão da " ~ cx.nome,
+        "Modelos específicos desta caixa. Use [colchetes] para variáveis que o Claude deve preencher com os dados do caso (ex.: [processo], [chave], [juízo]). Se a caixa tiver comunicados próprios, os gerais NÃO se aplicam a ela.",
+        cx.slug, cx.comunicados, cx.paragrafos, cx.habilitada) }}
+    <div style="max-width:980px;display:flex;justify-content:flex-end;gap:8px;margin-top:-8px;">
+        <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="limparCaixa(this)">
+            Limpar configurações da caixa
+        </button>
+        {% if not cx.habilitada %}
+        <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="excluirAba(this)">
+            Excluir aba desta caixa
+        </button>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+<!-- ===================== Aba: Comunicados Gerais ===================== -->
+<div class="cfg-panel" data-panel="gerais">
+    {{ tabela_comunicados(
+        "Mensagens Gerais",
+        "Aplicam-se às caixas que NÃO possuem Comunicados Padrão próprios. Use [colchetes] para variáveis a preencher pelo Claude.",
+        "", comunicados, paragrafos) }}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.wa-input { width:100%; padding:8px 10px; border-radius:6px; border:1px solid var(--stroke-strong);
+            background: var(--layer-alt); color: var(--text); font-size:14px; }
+.cfg-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:center;
+               justify-content:center; z-index:1000; padding:16px; }
+.cfg-dialog { width:100%; max-width:560px; padding:24px; }
+.cfg-sec { color: var(--accent); }
+.tema-seg { display:inline-flex; gap:4px; padding:4px; border-radius:10px;
+            background: var(--layer-alt); border:1px solid var(--stroke); }
+.tema-seg button { display:inline-flex; align-items:center; gap:7px; padding:8px 16px; border:none;
+                   border-radius:7px; background:transparent; color:var(--text-secondary);
+                   font-size:13.5px; font-weight:600; cursor:pointer; transition:background .12s, color .12s; }
+.tema-seg button svg { width:17px; height:17px; }
+.tema-seg button:hover { color:var(--text); }
+.tema-seg button.ativo { background:var(--accent); color:var(--accent-fg); box-shadow:var(--shadow-sm); }
+.cfg-tabs { display:flex; gap:2px; flex-wrap:wrap; border-bottom:1px solid var(--stroke); margin-bottom:24px; }
+.cfg-tab { padding:9px 15px; border:none; background:transparent; color:var(--text-secondary);
+           font-size:14px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent;
+           margin-bottom:-1px; border-radius:6px 6px 0 0; transition:color .12s, background .12s; }
+.cfg-tab:hover:not(:disabled) { color:var(--text); background:color-mix(in srgb, var(--text) 5%, transparent); }
+.cfg-tab.ativa { color:var(--accent); border-bottom-color:var(--accent); }
+.cfg-tab-off { color:var(--text-tertiary); }
+.cfg-panel { display:none; }
+.cfg-panel.ativa { display:block; }
+.btn-subtle:disabled { opacity:.4; cursor:not-allowed; }
+.aviso-ro { background:color-mix(in srgb, #eab308 16%, transparent); border:1px solid color-mix(in srgb,#eab308 40%,transparent);
+            color:var(--text-secondary); font-size:13px; border-radius:8px; padding:12px 16px; margin-bottom:18px; }
+</style>
+
+<div id="com-modal" class="cfg-overlay" onclick="if(event.target===this)comFechar()">
+  <div class="fluent-card cfg-dialog">
+    <h3 class="font-display" id="com-modal-titulo" style="font-size:18px;margin:0 0 16px;">Novo comunicado</h3>
+    <input type="hidden" id="com-id"><input type="hidden" id="com-slug">
+    <label style="font-size:13px;display:block;margin-bottom:4px;">Tipo</label>
+    <input type="text" id="com-tipo" class="wa-input" placeholder="Ex.: Comunicado de perícia médica" style="margin-bottom:14px;">
+    <label style="font-size:13px;display:block;margin-bottom:4px;">Texto padrão (use [variáveis] entre colchetes)</label>
+    <textarea id="com-texto" class="wa-input" rows="6" placeholder="Ex.: Sua ação foi ajuizada. Processo [processo], chave [chave], no [juízo]."></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button class="btn-subtle" onclick="comFechar()">Cancelar</button>
+        <button class="btn-accent" onclick="comSalvar()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div id="par-modal" class="cfg-overlay" onclick="if(event.target===this)parFechar()">
+  <div class="fluent-card cfg-dialog">
+    <h3 class="font-display" id="par-modal-titulo" style="font-size:18px;margin:0 0 16px;">Novo parágrafo</h3>
+    <input type="hidden" id="par-id"><input type="hidden" id="par-slug">
+    <label style="font-size:13px;display:block;margin-bottom:4px;">Título (identificação curta)</label>
+    <input type="text" id="par-titulo" class="wa-input" placeholder="Ex.: Aviso sobre prazo de resposta" style="margin-bottom:14px;">
+    <label style="font-size:13px;display:block;margin-bottom:4px;">Texto do parágrafo</label>
+    <textarea id="par-texto" class="wa-input" rows="5" placeholder="Trecho a ser inserido na mensagem…"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button class="btn-subtle" onclick="parFechar()">Cancelar</button>
+        <button class="btn-accent" onclick="parSalvar()">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------- Abas (persistem a aba ativa entre recargas) ----------
+function abrirTab(id){
+    document.querySelectorAll('.cfg-tab').forEach(b => b.classList.toggle('ativa', b.dataset.tab === id));
+    document.querySelectorAll('.cfg-panel').forEach(p => p.classList.toggle('ativa', p.dataset.panel === id));
+    try { sessionStorage.setItem('cfg-tab', id); } catch(e){}
+}
+(function(){
+    let id = 'geral';
+    try { id = sessionStorage.getItem('cfg-tab') || 'geral'; } catch(e){}
+    const btn = document.querySelector('.cfg-tab[data-tab="' + id + '"]');
+    if (!btn || btn.disabled) id = 'geral';   // aba salva sumiu/inativou -> volta ao início
+    abrirTab(id);
+})();
+async function resetarPainel(total){
+    if(total){
+        if(!confirm('RESET TOTAL: apaga TODOS os dados E a parametrização (textos padrão, parágrafos, caixas), voltando ao estado de primeiro uso.\n\nOs dados vão para a lixeira interna (reversível). Continuar?')) return;
+        const t=prompt('Para confirmar o RESET TOTAL, digite: RESETAR');
+        if((t||'').trim().toUpperCase()!=='RESETAR'){ alert('Reset cancelado.'); return; }
+    } else {
+        if(!confirm('RESET PARCIAL: apaga PAJs/tramitações sincronizados, contatos e histórico — MANTÉM textos padrão, parágrafos e caixas.\n\nOs dados vão para a lixeira interna (reversível). Continuar?')) return;
+    }
+    try{
+        const r=await fetch('/api/config/resetar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({total})});
+        const d=await r.json();
+        if(d.ok){ alert('Painel resetado ('+d.modo+').\nDados movidos para: '+d.lixeira); location.href='/configuracoes'; }
+        else alert('Erro ao resetar: '+(d.erro||'falha'));
+    }catch(e){ alert('Erro ao resetar: '+e); }
+}
+async function restaurarBackup(btn){
+    const nome=btn.dataset.nome, n=btn.dataset.registros||'?', quando=btn.dataset.quando||'';
+    if(!confirm('Restaurar o histórico de mensagens com este backup'+(quando?(' de '+quando):'')+'?\n\n'+
+        'Ele passará a ter '+n+' mensagem(ns), substituindo o histórico atual. O estado atual é salvo antes (dá para desfazer).')) return;
+    try{
+        const r=await fetch('/api/historico/restaurar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome})});
+        const d=await r.json();
+        if(d.ok){ toast('Histórico restaurado ('+d.registros+' mensagens)'); }
+        else alert('Erro ao restaurar: '+(d.erro||'falha'));
+    }catch(e){ alert('Erro ao restaurar: '+e); }
+}
+async function limparCaixa(btn){
+    const slug=btn.dataset.slug, nome=btn.dataset.nome||'';
+    if(!confirm('Limpar TODOS os textos e parágrafos padrão da caixa "'+nome+'"?\n\nEsta ação não pode ser desfeita.')) return;
+    try{
+        const r=await fetch('/api/config/caixa/'+encodeURIComponent(slug)+'/limpar',{method:'POST'});
+        const d=await r.json();
+        if(d.ok){ toast('Configurações da caixa limpas'); location.reload(); } else alert('Erro ao limpar: '+(d.erro||'falha'));
+    }catch(e){ alert('Erro ao limpar: '+e); }
+}
+async function excluirAba(btn){
+    const slug=btn.dataset.slug, nome=btn.dataset.nome||'';
+    if(!confirm('Excluir a aba da caixa "'+nome+'"?\n\nIsto remove a aba e TODAS as configurações dela (textos e parágrafos padrão). Esta ação não pode ser desfeita.')) return;
+    try{
+        const r=await fetch('/api/config/caixa/'+encodeURIComponent(slug)+'/excluir',{method:'POST'});
+        const d=await r.json();
+        if(d.ok){ try{ sessionStorage.setItem('cfg-tab','caixas'); }catch(e){} toast('Aba da caixa excluída'); location.reload(); }
+        else alert('Erro ao excluir a aba: '+(d.erro||'a caixa precisa estar desabilitada'));
+    }catch(e){ alert('Erro: '+e); }
+}
+// ---------- Tema (Sistema / Claro / Escuro) — salvo neste navegador ----------
+function definirTema(t){
+    try { localStorage.setItem('painel-tema', t); } catch(e){}
+    document.documentElement.setAttribute('data-theme', t);
+    temaMarcarAtivo(t);
+}
+function temaMarcarAtivo(t){
+    document.querySelectorAll('#tema-seg button').forEach(b => {
+        b.classList.toggle('ativo', b.dataset.tema === t);
+    });
+}
+(function(){
+    let t = 'system';
+    try { t = localStorage.getItem('painel-tema') || 'system'; } catch(e){}
+    temaMarcarAtivo(t);
+})();
+function toast(msg){
+    const c=document.getElementById('toast-container'); if(!c) return;
+    const t=document.createElement('div'); t.className='toast-msg';
+    t.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg><span></span>';
+    t.querySelector('span').textContent=msg; c.appendChild(t);
+    setTimeout(()=>{t.style.opacity='0';},1600); setTimeout(()=>{t.remove();},2000);
+}
+async function salvarMovs(){
+    const n=parseInt(document.getElementById('n-movs').value,10);
+    const r=await fetch('/api/config/movimentacoes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({n})});
+    const d=await r.json();
+    if(d.ok){ document.getElementById('n-movs').value=d.n; document.getElementById('movs-status').textContent='salvo ✓'; toast('Configuração salva'); }
+    else alert('Erro: '+(d.erro||'falha'));
+}
+async function salvarConcorrencia(){
+    const n=parseInt(document.getElementById('n-conc').value,10);
+    const r=await fetch('/api/config/analise-concorrencia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({n})});
+    const d=await r.json();
+    if(d.ok){ document.getElementById('n-conc').value=d.n; document.getElementById('conc-status').textContent='salvo ✓'; toast('Configuração salva'); }
+    else alert('Erro: '+(d.erro||'falha'));
+}
+async function toggleCaixa(grupo, on){
+    const r=await fetch('/api/config/caixa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo,on})});
+    const d=await r.json();
+    if(d.ok){ toast(on?'Caixa habilitada':'Caixa desabilitada'); location.reload(); }
+    else alert('Erro ao alterar caixa');
+}
+async function atualizarCaixas(){
+    const b=document.getElementById('btn-atualizar-caixas'); b.disabled=true; b.textContent='Atualizando…';
+    try{
+        const r=await fetch('/api/config/caixas/atualizar',{method:'POST'});
+        const d=await r.json();
+        if(d.ok){ location.reload(); } else { alert('Erro: '+(d.erro||'falha')); }
+    }catch(e){ alert('Erro: '+e); }
+    finally{ b.disabled=false; b.textContent='Atualizar lista'; }
+}
+// ----- Comunicados (geral ou por caixa) -----
+function abrirComunicado(slug){
+    document.getElementById('com-modal-titulo').textContent='Novo comunicado';
+    document.getElementById('com-id').value=''; document.getElementById('com-slug').value=slug||'';
+    document.getElementById('com-tipo').value=''; document.getElementById('com-texto').value='';
+    document.getElementById('com-modal').style.display='flex';
+}
+function editarComunicado(btn){
+    const tr=btn.closest('tr'); const slug=btn.closest('table').dataset.slug||'';
+    document.getElementById('com-modal-titulo').textContent='Editar comunicado';
+    document.getElementById('com-id').value=tr.dataset.id; document.getElementById('com-slug').value=slug;
+    document.getElementById('com-tipo').value=tr.dataset.tipo;
+    document.getElementById('com-texto').value=tr.querySelector('td:nth-child(2)').textContent.trim();
+    document.getElementById('com-modal').style.display='flex';
+}
+function comFechar(){ document.getElementById('com-modal').style.display='none'; }
+async function comSalvar(){
+    const id=document.getElementById('com-id').value;
+    const slug=document.getElementById('com-slug').value;
+    const tipo=document.getElementById('com-tipo').value.trim();
+    const texto=document.getElementById('com-texto').value.trim();
+    if(!tipo||!texto){ alert('Preencha tipo e texto.'); return; }
+    const url = id ? '/api/config/comunicados/'+id : '/api/config/comunicados';
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tipo,texto,slug})});
+    const d=await r.json();
+    if(d.ok){ location.reload(); } else alert('Erro: '+(d.erro||'falha'));
+}
+async function excluirComunicado(id, slug, btn){
+    if(!confirm('Excluir este comunicado?')) return;
+    const r=await fetch('/api/config/comunicados/'+id+'/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})});
+    const d=await r.json();
+    if(d.ok){ btn.closest('tr').remove(); toast('Comunicado excluído'); } else alert('Erro ao excluir');
+}
+// ----- Parágrafos padrão -----
+function abrirParagrafo(slug){
+    document.getElementById('par-modal-titulo').textContent='Novo parágrafo';
+    document.getElementById('par-id').value=''; document.getElementById('par-slug').value=slug||'';
+    document.getElementById('par-titulo').value=''; document.getElementById('par-texto').value='';
+    document.getElementById('par-modal').style.display='flex';
+}
+function editarParagrafo(btn){
+    const tr=btn.closest('tr'); const slug=btn.closest('table').dataset.slug||'';
+    document.getElementById('par-modal-titulo').textContent='Editar parágrafo';
+    document.getElementById('par-id').value=tr.dataset.id; document.getElementById('par-slug').value=slug;
+    document.getElementById('par-titulo').value=tr.dataset.titulo;
+    document.getElementById('par-texto').value=tr.querySelector('td:nth-child(2)').textContent.trim();
+    document.getElementById('par-modal').style.display='flex';
+}
+function parFechar(){ document.getElementById('par-modal').style.display='none'; }
+async function parSalvar(){
+    const id=document.getElementById('par-id').value;
+    const slug=document.getElementById('par-slug').value;
+    const titulo=document.getElementById('par-titulo').value.trim();
+    const texto=document.getElementById('par-texto').value.trim();
+    if(!titulo||!texto){ alert('Preencha título e texto.'); return; }
+    const url = id ? '/api/config/paragrafos/'+id : '/api/config/paragrafos';
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({titulo,texto,slug})});
+    const d=await r.json();
+    if(d.ok){ location.reload(); } else alert('Erro: '+(d.erro||'falha'));
+}
+async function excluirParagrafo(id, slug, btn){
+    if(!confirm('Excluir este parágrafo?')) return;
+    const r=await fetch('/api/config/paragrafos/'+id+'/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})});
+    const d=await r.json();
+    if(d.ok){ btn.closest('tr').remove(); toast('Parágrafo excluído'); } else alert('Erro ao excluir');
+}
+</script>
+{% endblock %}

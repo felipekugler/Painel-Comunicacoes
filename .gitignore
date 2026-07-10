@@ -1,0 +1,41 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.env.local
+*.egg-info/
+dist/
+build/
+.server.pid
+
+# IDEs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Tooling caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Conversas do chat livre — historico local do usuario, nao versionar
+data/
+
+# Claude Code — configuracoes locais especificas da maquina (paths reais, PAJs, etc.)
+.claude/settings.local.json
+
+# Estado de runtime / config mutavel (tem seu proprio backup .bak)
+config_divcom.json
+config_divcom.json.bak
+
+# Backups locais deste projeto
+backups/
+*.bak
+*.bak.jsonl

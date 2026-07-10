@@ -1,0 +1,1177 @@
+{% extends "base.html" %}
+{% block title %}Caixa DIVCOM{% endblock %}
+
+{#- Macro: icone de metodo de contato (chip). Colorido se cadastrado, apagado se nao. -#}
+{% macro contato_icon(tipo, ativo, detalhe='', copiavel=false) %}
+    {%- set meta = {
+        'app_sisdpu': {'label': 'App SISDPU', 'var': '--c-app'},
+        'telefone':   {'label': 'Telefone',   'var': '--c-tel'},
+        'whatsapp':   {'label': 'WhatsApp',    'var': '--c-zap'},
+        'email':      {'label': 'E-mail',      'var': '--c-mail'},
+        'endereco':   {'label': 'Endereço',    'var': '--c-addr'}
+    }[tipo] -%}
+    {%- set pode_copiar = ativo and copiavel and detalhe -%}
+    <span class="contato-ic {% if ativo %}contato-on{% else %}contato-off{% endif %}"
+          style="{% if ativo %}color: var({{ meta.var }});{% endif %}{% if pode_copiar %}cursor:pointer;{% endif %}"
+          {% if pode_copiar %}onclick="copiarDe(this)" data-copy="{{ detalhe }}" data-rotulo="{{ meta.label }}"{% endif %}
+          title="{% if pode_copiar %}{{ meta.label }} (clique para copiar):&#10;{{ detalhe }}{% elif ativo and detalhe %}{{ meta.label }}:&#10;{{ detalhe }}{% else %}{{ meta.label }}{% if not ativo %} — não cadastrado{% endif %}{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+             stroke-width="1.7" stroke="currentColor">
+            {%- if tipo == 'app_sisdpu' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3" />
+            {%- elif tipo == 'telefone' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+            {%- elif tipo == 'whatsapp' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+            {%- elif tipo == 'email' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+            {%- elif tipo == 'endereco' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+            {%- endif -%}
+        </svg>
+    </span>
+{% endmacro %}
+
+{#- Macro: celula do WhatsApp — vermelho+"Editar" quando ha telefones e falta
+    decidir; verde quando ha numeros escolhidos; cinza quando dispensado/sem tel. -#}
+{% macro whatsapp_cell(paj) %}
+    {%- set estado = paj.whatsapp_estado -%}
+    {% if estado == 'sem_telefone' %}
+        {{ contato_icon('whatsapp', false) }}
+    {% else %}
+        {%- set cor = {'pendente': 'var(--c-red)', 'ativo': 'var(--c-zap)', 'dispensado': 'var(--text-tertiary)'}[estado] -%}
+        <div class="wa-btn"
+             data-paj="{{ paj.paj_norm }}"
+             data-pajnum="{{ paj.paj }}"
+             data-telefones='{{ paj.telefones|tojson }}'
+             data-whatsapp='{{ paj.whatsapp_numeros|tojson }}'>
+            <span class="contato-ic" style="color:{{ cor }};cursor:pointer;{% if estado=='ativo' %}background:color-mix(in srgb, currentColor 14%, transparent);{% endif %}"
+                  onclick="waIconClick(this.closest('.wa-btn'), event)"
+                  title="{% if estado=='ativo' %}WhatsApp (clique para copiar):&#10;{{ paj.whatsapp_txt }}{% elif estado=='pendente' %}Definir número de WhatsApp{% else %}WhatsApp não cadastrado — clique para editar{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
+                </svg>
+            </span>
+            <span class="wa-badge {% if estado=='pendente' %}wa-badge-red{% endif %}"
+                  style="cursor:pointer;" onclick="waAbrir(this.closest('.wa-btn'))">Editar</span>
+        </div>
+    {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="flex items-end justify-between gap-4 flex-wrap mb-6">
+    <div>
+        <h1 class="font-display" style="font-size: 28px; margin: 0;">{{ caixa.nome }}</h1>
+        <p class="text-secondary mt-1" style="font-size: 13px;">
+            PAJs da caixa de grupo <span style="font-family: 'Cascadia Code','Consolas',monospace;">{{ caixa.grupo }}</span>
+            aguardando tratamento
+        </p>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button id="btn-sync" class="btn-accent" onclick="sincronizar()">
+            <span id="sync-spinner" style="display:none;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+            <svg id="sync-icon" xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+            </svg>
+            <span id="sync-label">Sincronizar caixa</span>
+        </button>
+    </div>
+</div>
+
+{% if not pendentes and not fila and not enviados and not triagem %}
+<div class="fluent-card flex flex-col items-center justify-center text-center" style="padding: 64px 24px;">
+    <span class="inline-flex items-center justify-center rounded-2xl mb-4"
+          style="width:56px;height:56px;background:var(--accent-soft);color:var(--accent);">
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
+        </svg>
+    </span>
+    <h2 class="font-display" style="font-size:18px;margin:0;">Nenhum PAJ na caixa</h2>
+    <p class="text-secondary mt-2" style="font-size:13px;max-width:28rem;">
+        Clique em <strong>Sincronizar caixa</strong> para ler os PAJs da caixa
+        <span style="font-family:'Cascadia Code','Consolas',monospace;">{{ caixa.grupo }}</span> no SISDPU.
+    </p>
+</div>
+{% else %}
+
+{#- ===================== TRIAGEM: PAJs com 2+ tramitações pendentes ===================== -#}
+{% if triagem %}
+<div class="section-head">
+    <h2 class="font-display" style="font-size:18px;margin:0;color:var(--c-addr);">⚠️ Tramitações múltiplas — triagem</h2>
+    <span class="pill">{{ triagem|length }}</span>
+    <span class="text-tertiary" style="font-size:12px;">— PAJs com 2+ tramitações pendentes; decida se dá para tratar em conjunto</span>
+</div>
+<div class="fluent-card" style="overflow-x:auto;margin-bottom:8px;border:1px solid color-mix(in srgb,#dc2626 35%,transparent);background:color-mix(in srgb,#dc2626 6%,var(--card));">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width:7rem;">PAJ</th>
+                <th>Tramitações pendentes <span class="text-tertiary" style="font-weight:400;font-size:11px;">→ vincule a movimentação (para tratar separadamente) ou clique em tratar em conjunto (para unificar o tratamento das tramitações num único contato com o assistido)</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in triagem %}
+            <tr>
+                <td>
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                </td>
+                <td style="font-size:12.5px;">
+                    {% for tr in paj.tramites %}
+                    <div class="tri-item">
+                        <div class="tri-info">• <strong>{{ tr.data_envio }}</strong>{% if tr.descricao_tramite %} · “{{ tr.descricao_tramite }}”{% endif %}{% if tr.prazo %} · <span class="pill-prazo">⏱ {{ tr.prazo }}</span>{% endif %}{% if tr.remetente %} · <span class="text-tertiary">{{ tr.remetente }}</span>{% endif %}</div>
+                        <div class="tri-vinc">
+                            <span class="tri-arrow" aria-hidden="true">↳</span>
+                            <select class="tri-sel" data-tramite="{{ tr.id_tramite }}" title="Movimentação vinculada (usada no 'Tratar separadamente')">
+                                <option value="">— automático (por data) —</option>
+                                {% for m in paj.movimentacoes %}
+                                <option value="{{ m.seq }}"{% if (m.seq|string) == (tr.mov_sugerida|string) %} selected{% endif %}>[{{ m.seq }}] {{ m.data }} — {{ (m.descricao or '')|replace('\n',' ') }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    {% endfor %}
+                    <div class="tri-actions-row">
+                        {% if paj.movimentacoes %}
+                        <button class="mov-badge" onclick="movAbrir(this)"
+                                data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+                                title="Ver a íntegra das últimas movimentações">
+                            {{ paj.movimentacoes|length }} movimentações (ver íntegra)
+                        </button>
+                        {% endif %}
+                        <div class="tri-actions">
+                            <button class="btn-subtle" style="padding:4px 10px;font-size:12px;"
+                                    data-paj="{{ paj.paj_norm }}" onclick="tratarSeparado(this)"
+                                    title="Analisa cada tramitação focada na movimentação vinculada">Tratar separadamente</button>
+                            <button class="btn-grava tri-btn" style="padding:4px 10px;font-size:12px;box-shadow:none;"
+                                    data-paj="{{ paj.paj_norm }}" onclick="tratarConjunto(this)">Tratar em conjunto</button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{#- ===================== TABELA 1: pendentes de contato ===================== -#}
+<div class="section-head">
+    <h2 class="font-display" style="font-size:18px;margin:0;">Pendentes de contato</h2>
+    <span class="pill">{{ pendentes|length }}</span>
+    <span class="text-tertiary" style="font-size:12px;">— sincronizados, aguardando tratamento</span>
+</div>
+{% if pendentes %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="num" onclick="ordenarTabela(this)" style="width: 5rem;">Envio<span class="sort-arrow"></span></th>
+                <th style="width: 16rem; min-width: 13rem;">Resumo</th>
+                <th style="width: 16rem; min-width: 13rem;">Sugestão IA</th>
+                <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in pendentes %}
+            {% set c = paj.contatos or {} %}
+            <tr>
+                <td data-sort="{{ paj.paj }}">
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.tipo == 'conjunto' %}
+                    <div class="mt-1"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} tramitações — conjunto</span></div>
+                    {% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
+                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" data-sort="{{ paj.data_envio_key }}">
+                    {% if paj.tipo == 'conjunto' %}
+                    {% for dt in paj.datas_tramites %}<div style="white-space:nowrap;">{{ dt | data_br }}</div>{% endfor %}
+                    {% else %}
+                    <div style="white-space:nowrap;">{{ paj.envio_data | data_br }}</div>
+                    {% endif %}
+                    {% if paj.prazo %}<div class="mt-1"><span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ Prazo: {{ paj.prazo }}</span></div>{% endif %}
+                    {% if paj.remetente %}<div class="text-tertiary" style="font-size:11px;margin-top:3px;" title="Usuário que enviou a tramitação">{{ paj.remetente }}</div>{% endif %}
+                </td>
+                <td class="text-secondary">
+                    {# Descrição do trâmite (texto que o ofício de origem escreveu ao encaminhar):
+                       muitas vezes é a fonte mais direta do motivo. Vem antes do resumo da IA. #}
+                    {% if paj.tipo == 'conjunto' %}
+                        {% for dt in paj.descricoes_tramites %}{% if dt %}
+                        <div style="display:flex;gap:6px;margin-bottom:6px;">
+                            <span class="rlabel" title="Descrição do trâmite escrita pelo ofício de origem">Trâmite</span>
+                            <span class="clamp4" title="{{ dt }}">{{ dt }}</span>
+                        </div>
+                        {% endif %}{% endfor %}
+                    {% elif paj.descricao_tramite %}
+                        <div style="display:flex;gap:6px;margin-bottom:6px;">
+                            <span class="rlabel" title="Descrição do trâmite escrita pelo ofício de origem">Trâmite</span>
+                            <span class="clamp4" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</span>
+                        </div>
+                    {% endif %}
+                    {% if paj.resumo_ia %}
+                    <div style="display:flex;gap:6px;">
+                        <span class="rlabel" title="Resumo gerado por IA a partir das últimas movimentações">IA</span>
+                        <span class="clamp4" title="{{ paj.resumo_ia }}">{{ paj.resumo_ia }}</span>
+                    </div>
+                    {% elif not paj.descricao_tramite and paj.tipo != 'conjunto' %}
+                    <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
+                    {% endif %}
+                    {% if paj.movimentacoes %}
+                    <button class="mov-badge" onclick="movAbrir(this)"
+                            data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+                            title="Ver a íntegra das últimas movimentações">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                        </svg>
+                        {{ paj.movimentacoes|length }} últimas movimentações
+                    </button>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if paj.sugestao_atual %}
+                    {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
+                    {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
+                    <div class="clamp3 text-secondary" style="font-size:12.5px;">{{ paj.sugestao_atual }}</div>
+                    {% else %}
+                    <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
+                    {% endif %}
+                    <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap;">
+                        {% if paj.sugestao_atual %}
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                data-sugestao="{{ paj.sugestao_atual }}"
+                                data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
+                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                data-email="{{ 1 if c.email else 0 }}"
+                                onclick="sugAbrir(this)">Ver / editar</button>
+                        {% endif %}
+                        {% if paj.tipo == 'conjunto' %}
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
+                                title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
+                        {% else %}
+                        <button class="btn-subtle sync-paj-btn" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                onclick="sincronizarPaj(this)" title="Sincronizar apenas este PAJ">
+                            <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+                            <svg class="ic-sync" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                            </svg>
+                            Sincronizar
+                        </button>
+                        {% if paj.de_triagem_separado %}
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" onclick="voltarTriagem(this)"
+                                title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
+                        {% endif %}
+                        {% endif %}
+                        <button class="btn-grava grava-btn" style="padding:3px 9px;font-size:12px;box-shadow:none;"
+                                data-tipo="{{ paj.tipo }}"
+                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                data-tramite="{{ paj.id_tramite }}"
+                                data-mensagem="{{ paj.sugestao_atual }}"
+                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                data-email="{{ 1 if c.email else 0 }}"
+                                onclick="gravarAbrir(this)" title="Gravar para envio em lote">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                            </svg>
+                            Gravar para envio
+                        </button>
+                    </div>
+                </td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">Nenhum PAJ pendente de contato.</div>
+{% endif %}
+
+{#- ===================== TABELA 2: gravados para envio ===================== -#}
+{% if fila %}
+<div class="section-head" style="margin-top:28px;">
+    <h2 class="font-display" style="font-size:18px;margin:0;">Gravados para envio</h2>
+    <span class="pill">{{ fila|length }}</span>
+    {% if envio_modo == 'simulado' %}
+    <span class="badge-modo" title="Nenhuma mensagem será realmente enviada — apenas simulação para validar o fluxo.">MODO SIMULADO</span>
+    {% endif %}
+    <div style="margin-left:auto;">
+        <button id="btn-enviar-agora" class="btn-accent" onclick="enviarAgora()">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+            </svg>
+            Enviar Agora ({{ fila|length }})
+        </button>
+    </div>
+</div>
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th style="min-width: 22rem;">Mensagem a enviar</th>
+                <th class="text-center" style="width: 9rem;">Meios</th>
+                <th style="width: 8rem;">Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in fila %}
+            <tr>
+                <td data-sort="{{ paj.paj }}">
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
+                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;">
+                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
+                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
+                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
+                            title="Ver a mensagem completa">Ver mensagem</button>
+                </td>
+                <td class="text-center">
+                    <div style="display:inline-flex;gap:4px;">
+                        {% for m in paj.envio_meios %}{{ contato_icon(m, true) }}{% endfor %}
+                        {% if not paj.envio_meios %}<span class="text-tertiary" style="font-size:12px;">—</span>{% endif %}
+                    </div>
+                </td>
+                <td>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                data-mensagem="{{ paj.envio_mensagem }}"
+                                data-meios='{{ paj.envio_meios|tojson }}'
+                                data-app="{{ 1 if (paj.contatos or {}).app_sisdpu else 0 }}"
+                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                data-email="{{ 1 if (paj.contatos or {}).email else 0 }}"
+                                onclick="gravarAbrir(this)">Editar</button>
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                onclick="removerDaFila(this)"
+                                title="Tirar da fila (volta a pendente)">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{#- ===================== TABELA 3: já enviados nesta caixa ===================== -#}
+{% if enviados %}
+<div class="section-head" style="margin-top:28px;">
+    <h2 class="font-display" style="font-size:18px;margin:0;">Já enviados nesta caixa</h2>
+    <span class="pill">{{ enviados|length }}</span>
+    <span class="text-tertiary" style="font-size:12px;">— mensagem já disparada; aguardam a conclusão da tramitação no SISDPU</span>
+</div>
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">PAJ<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th style="min-width: 20rem;">Mensagem enviada</th>
+                <th class="text-center" style="width: 8rem;">Meios usados</th>
+                <th class="sortable" data-col="5" data-type="num" onclick="ordenarTabela(this)" style="width: 9rem;">Enviado em<span class="sort-arrow"></span></th>
+                <th style="width: 8rem;">Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in enviados %}
+            {% set c = paj.contatos or {} %}
+            <tr>
+                <td data-sort="{{ paj.paj }}">
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.remetente %}<div class="text-tertiary" style="font-size:11px;margin-top:2px;" title="Remetente da tramitação">{{ paj.remetente }}</div>{% endif %}
+                    {% if paj.n_contatos %}
+                    <div class="mt-1"><a class="pill-ok" href="/historico?q={{ paj.paj|urlencode }}"
+                        title="Ver as mensagens deste PAJ no histórico">
+                        Histórico de {{ paj.n_contatos }} mensage{{ 'm' if paj.n_contatos == 1 else 'ns' }}</a></div>
+                    {% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
+                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;">
+                    <div class="clamp3">{{ paj.contato_mensagem or "—" }}</div>
+                    {% if paj.contato_mensagem %}
+                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
+                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.contato_mensagem }}"
+                            title="Ver a mensagem completa">Ver mensagem</button>
+                    {% endif %}
+                </td>
+                <td class="text-center">
+                    <div style="display:inline-flex;gap:4px;">
+                        {% for m in paj.contato_meios %}{{ contato_icon(m, true) }}{% endfor %}
+                        {% if not paj.contato_meios %}<span class="text-tertiary" style="font-size:12px;">—</span>{% endif %}
+                    </div>
+                </td>
+                <td class="text-secondary" style="white-space:nowrap;font-size:12.5px;" data-sort="{{ paj.contato_em }}">{{ paj.contato_em | data_hora_br }}</td>
+                <td>
+                    <button class="btn-grava" style="padding:3px 9px;font-size:12px;box-shadow:none;"
+                            data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                            data-mensagem="{{ paj.contato_mensagem }}"
+                            data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                            data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                            data-email="{{ 1 if c.email else 0 }}"
+                            onclick="gravarAbrir(this)" title="Gravar novamente para envio">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                        </svg>
+                        Enviar de novo
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+.wa-btn { display:inline-flex; flex-direction:column; align-items:center; gap:3px; background:none; border:none; cursor:pointer; padding:0; }
+.wa-badge { font-size:9px; font-weight:700; line-height:1; padding:2px 6px; border-radius:6px;
+            background: color-mix(in srgb, var(--text) 10%, transparent); color: var(--text-secondary); }
+.wa-badge-red { background: color-mix(in srgb, var(--c-red) 18%, transparent); color: var(--c-red); }
+.btn-wa { display:inline-flex; align-items:center; gap:6px; border:1px solid transparent;
+          border-radius:6px; background:var(--c-zap); color:#fff; font-weight:600;
+          cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
+.btn-wa:hover { filter:brightness(1.06); }
+.btn-wa:active { transform:translateY(0.5px); }
+.btn-wa svg { width:14px; height:14px; }
+.btn-grava { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid transparent;
+             border-radius:6px; background:#16a34a; color:#fff; font-weight:600; font-size:14px;
+             cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
+.btn-grava:hover { filter:brightness(1.07); }
+.btn-grava:active { transform:translateY(0.5px); }
+.btn-grava:disabled { opacity:.55; cursor:default; }
+.btn-grava svg { width:14px; height:14px; }
+.pill-ok { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
+           border-radius:999px; background:color-mix(in srgb, var(--c-zap) 18%, transparent); color:var(--c-zap);
+           cursor:pointer; text-decoration:none; transition:background .12s; }
+.pill-ok:hover { background:color-mix(in srgb, var(--c-zap) 30%, transparent); }
+.pill-prazo { display:inline-flex; align-items:center; gap:3px; font-size:10.5px; font-weight:700; padding:2px 7px;
+              border-radius:999px; background:color-mix(in srgb, var(--c-red) 18%, transparent); color:var(--c-red);
+              white-space:nowrap; }
+.pill-conj { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
+             border-radius:999px; background:color-mix(in srgb, var(--c-addr) 20%, transparent); color:var(--c-addr); }
+.tri-item { margin-bottom:12px; }
+.tri-vinc { display:flex; align-items:center; gap:6px; margin:4px 0 0 16px; }
+.tri-arrow { color:var(--text-tertiary); font-size:15px; line-height:1; flex:0 0 auto; }
+.tri-sel { flex:1 1 auto; width:100%; min-width:0; padding:5px 8px; border-radius:6px;
+           border:1px solid var(--stroke-strong); background:var(--layer-alt); color:var(--text); font-size:12px; }
+.tri-actions-row { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin-top:8px; }
+.tri-actions { display:flex; align-items:center; gap:8px; margin-left:auto; }
+.wa-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
+              justify-content:center; z-index:1000; padding:16px; }
+.wa-dialog { width:100%; max-width:520px; padding:24px; max-height:85vh; overflow:auto; }
+.wa-opt { display:flex; align-items:center; gap:10px; cursor:pointer; padding:8px 10px; border-radius:8px; }
+.wa-opt:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.wa-opt.opt-off { opacity:.55; cursor:not-allowed; }
+.wa-opt.opt-off:hover { background:none; }
+.wa-opt.opt-off input { cursor:not-allowed; }
+.wa-input { width:100%; padding:8px 10px; border-radius:6px; border:1px solid var(--stroke-strong);
+            background: var(--layer-alt); color: var(--text); font-size:14px; }
+.sync-dialog { width:100%; max-width:660px; padding:22px; }
+.sync-log { margin-top:14px; height:340px; overflow:auto; background:var(--layer-alt);
+            border:1px solid var(--stroke); border-radius:8px; padding:12px;
+            font-family:'Cascadia Code','Consolas',monospace; font-size:12.5px; line-height:1.7; }
+.sync-line { white-space:pre-wrap; }
+.sync-ts { color:var(--text-tertiary); margin-right:4px; }
+.sync-info { color:var(--text-secondary); }
+.sync-ok { color:var(--c-zap); }
+.sync-novo { color:var(--accent); font-weight:600; }
+.sync-erro { color:var(--c-red); }
+.sync-muted { color:var(--text-tertiary); }
+.clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
+.clamp4 { display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden; }
+/* Rótulo dos blocos da coluna Resumo (Trâmite / IA) — min-width alinha o início
+   do texto dos dois blocos. */
+.rlabel { color:var(--accent); flex:0 0 auto; font-size:11px; font-weight:600; min-width:3.6rem; }
+.sug-dialog { width:60vw; max-width:60vw; padding:24px; }
+.sug-textarea { width:100%; min-height:200px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
+                background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
+.mov-badge { display:inline-flex; align-items:center; gap:5px; margin-top:8px; padding:3px 9px; border-radius:999px;
+             border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+             background: var(--accent-soft); color: var(--accent);
+             font-size:11px; font-weight:600; cursor:pointer; transition:background .12s ease; }
+.mov-badge:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
+/* Movimentações abrem POR CIMA do modal de triagem separada (z-index maior). */
+#mov-modal { z-index:1100; }
+.mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
+.mov-item:first-child { border-top:none; }
+.mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
+.mov-desc { font-size:13px; color:var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
+.section-head { display:flex; align-items:center; gap:10px; margin:0 0 12px; flex-wrap:wrap; }
+.badge-modo { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 8px; border-radius:6px;
+              background: color-mix(in srgb, #eab308 22%, transparent); color:#7a5c00; }
+@media (prefers-color-scheme: dark) { .badge-modo { color:#f5d878; } }
+.grava-dialog { width:100%; max-width:600px; padding:24px; max-height:88vh; overflow:auto; }
+.msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
+</style>
+
+<!-- Modal de log da sincronizacao (SSE em tempo real) -->
+<div id="sync-modal" class="wa-overlay" style="display:none;">
+  <div class="fluent-card sync-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">
+        <span id="sync-title-prefix">Sincronização</span> — <span id="sync-title-nome" data-nome="{{ caixa.nome }}">{{ caixa.nome }}</span>
+        <span id="sync-title-status" class="text-secondary" style="font-size:13px;font-weight:400;"></span>
+    </h3>
+    <div id="sync-log" class="sync-log"></div>
+    <div id="sync-foot" style="display:flex;justify-content:flex-end;margin-top:16px;gap:8px;"></div>
+  </div>
+</div>
+
+<!-- Modal de cadastro de WhatsApp -->
+<div id="wa-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)waFechar()">
+  <div class="fluent-card wa-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Contato via WhatsApp</h3>
+    <p class="text-secondary" style="font-size:13px;margin:4px 0 0;">
+        PAJ <span id="wa-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+    </p>
+    <p style="font-size:14px;margin:14px 0 10px;">
+        Identificamos os seguintes números de telefone no cadastro.
+        Deseja cadastrar algum deles para contatos via WhatsApp?
+    </p>
+    <div id="wa-lista" style="display:flex;flex-direction:column;gap:2px;"></div>
+    <div style="margin-top:12px;border-top:1px solid var(--stroke);padding-top:12px;">
+        <label class="wa-opt" style="padding-left:0;">
+            <input type="radio" name="wa-num" id="wa-outro-chk" value="__outro__" onchange="waSyncOutro()">
+            Cadastrar outro número
+        </label>
+        <input type="text" id="wa-outro-num" class="wa-input" placeholder="(DDD) número"
+               style="display:none;margin-top:8px;">
+    </div>
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:22px;flex-wrap:wrap;">
+        <button class="btn-subtle" onclick="waNaoCadastrar()">Não cadastrar nenhum</button>
+        <div style="display:flex;gap:8px;">
+            <button class="btn-subtle" onclick="waFechar()">Cancelar</button>
+            <button class="btn-accent" onclick="waSalvar()">Salvar</button>
+        </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de edicao da Sugestao IA -->
+<div id="sug-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)sugFechar()">
+  <div class="fluent-card sug-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Sugestão de mensagem ao assistido</h3>
+    <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
+        PAJ <span id="sug-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        <span id="sug-tipo" class="pill" style="margin-left:6px;display:none;"></span>
+    </p>
+    <div id="sug-modelo-box" style="display:none;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
+        <label for="sug-modelo" style="font-size:12.5px;color:var(--text-secondary);white-space:nowrap;">Aplicar texto padrão:</label>
+        <select id="sug-modelo" class="tri-sel" style="flex:1;min-width:220px;" onchange="sugAplicarModelo(this)">
+            <option value="">— escolher um modelo —</option>
+        </select>
+    </div>
+    <textarea id="sug-texto" class="sug-textarea" placeholder="Texto da mensagem…"></textarea>
+    <div id="sug-par-box" style="margin-top:12px;display:none;">
+        <button type="button" onclick="sugTogglePar()"
+                style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;color:var(--text-secondary);font-size:12px;font-weight:600;">
+            <svg id="sug-par-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                 stroke-width="2.4" stroke="currentColor" style="width:12px;height:12px;transition:transform .15s ease;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            Parágrafos padrão (marque para inserir)
+        </button>
+        <div id="sug-paragrafos" style="display:none;flex-direction:column;gap:4px;margin-top:8px;"></div>
+    </div>
+    <p class="text-tertiary" style="font-size:11.5px;margin-top:8px;">
+        Você pode editar livremente. A edição é salva no PAJ e prevalece sobre a sugestão da IA.
+    </p>
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:16px;flex-wrap:wrap;">
+        <button class="btn-subtle" onclick="sugCopiar()">Copiar texto</button>
+        <div style="display:flex;gap:8px;">
+            <button class="btn-subtle" onclick="sugFechar()">Cancelar</button>
+            <button class="btn-accent" onclick="sugSalvar()">Salvar</button>
+            <button class="btn-grava" onclick="sugParaEnvio()" title="Gravar esta mensagem para envio em lote">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+                </svg>
+                Gravar para envio
+            </button>
+        </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal das últimas movimentações -->
+<div id="mov-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)movFechar()">
+  <div class="fluent-card mov-dialog">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">
+            Últimas movimentações — PAJ <span id="mov-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        </h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="movFechar()">Fechar</button>
+    </div>
+    <div id="mov-lista" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- Modal "Gravar para envio" (mensagem + meios) -->
+<div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
+  <div class="fluent-card grava-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Gravar para envio</h3>
+    <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
+        PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        — o PAJ sai de "pendentes" e entra na fila; o disparo ocorre em "Enviar Agora".
+    </p>
+    <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:170px;" placeholder="Mensagem ao assistido…"></textarea>
+    <div style="margin-top:14px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de contato</div>
+        <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+        <button class="btn-subtle" onclick="gravarFechar()">Cancelar</button>
+        <button class="btn-grava" onclick="gravarSalvar()">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+            </svg>
+            Gravar para envio
+        </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal "Ver mensagem" (íntegra da mensagem gravada) -->
+<div id="msg-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)msgFechar()">
+  <div class="fluent-card mov-dialog">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">
+            Mensagem — PAJ <span id="msg-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+        </h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="msgFechar()">Fechar</button>
+    </div>
+    <div id="msg-corpo" class="msg-full"></div>
+  </div>
+</div>
+
+<script>
+const CAIXA_SLUG = "{{ caixa.slug }}";
+const PARAGRAFOS = {{ paragrafos|tojson }};
+const COMUNICADOS = {{ comunicados|tojson }};
+const MEIOS_ENVIO = {{ meios_envio|tojson }};
+// ---------- Copiar para a area de transferencia + toast ----------
+function mostrarToast(msg) {
+    const c = document.getElementById('toast-container');
+    if (!c) return;
+    const t = document.createElement('div');
+    t.className = 'toast-msg';
+    t.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12.75l6 6 9-13.5"/></svg><span></span>';
+    t.querySelector('span').textContent = msg;
+    c.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; }, 1600);
+    setTimeout(() => { t.remove(); }, 2000);
+}
+async function copiarTexto(txt, rotulo) {
+    if (!txt) return;
+    try {
+        await navigator.clipboard.writeText(txt);
+        mostrarToast((rotulo || 'Conteúdo') + ' copiado');
+    } catch (e) {
+        mostrarToast('Não foi possível copiar');
+    }
+}
+function copiarDe(el) { copiarTexto(el.dataset.copy || '', el.dataset.rotulo || 'Conteúdo'); }
+
+// ---------- Gravar para envio (fila) — por TRÂMITE ----------
+let gravaPajAtual = null;
+let gravaTramite = null;
+let gravaTipo = 'tramite';
+function gravarAbrir(btn) {
+    gravaPajAtual = btn.dataset.paj;
+    gravaTramite = btn.dataset.tramite || '';
+    gravaTipo = btn.dataset.tipo || 'tramite';
+    document.getElementById('grava-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('grava-texto').value = btn.dataset.mensagem || '';
+    let jaMeios = [];
+    try { jaMeios = JSON.parse(btn.dataset.meios || '[]'); } catch (e) {}
+    const disp = { app_sisdpu: btn.dataset.app === '1',
+                   whatsapp: btn.dataset.whats === '1',
+                   email: btn.dataset.email === '1' };
+    const edicao = jaMeios.length > 0;
+    // Aviso quando o meio não pode ser usado (sem habilitação/dado).
+    const AVISO = { app_sisdpu: 'assistido sem adesão ao aplicativo',
+                    whatsapp: 'cadastre um número de WhatsApp antes',
+                    email: 'sem e-mail cadastrado' };
+    const box = document.getElementById('grava-meios');
+    box.innerHTML = '';
+    MEIOS_ENVIO.forEach(m => {
+        const habil = disp[m.key];
+        // Nunca pré-marca por disponibilidade. Só ao EDITAR um gravado é que
+        // restaura os meios que já haviam sido escolhidos; no resto, desmarcado.
+        const marcado = habil && edicao && jaMeios.includes(m.key);
+        const lab = document.createElement('label');
+        lab.className = 'wa-opt' + (habil ? '' : ' opt-off');
+        lab.innerHTML = '<input type="checkbox" value="' + m.key + '"' +
+            (marcado ? ' checked' : '') + (habil ? '' : ' disabled') + '>' +
+            '<span style="font-size:14px;"></span>' +
+            '<span class="text-tertiary" style="font-size:11.5px;"></span>';
+        lab.querySelectorAll('span')[0].textContent = m.label;
+        if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
+        box.appendChild(lab);
+    });
+    document.getElementById('grava-modal').style.display = 'flex';
+}
+function gravarFechar() { document.getElementById('grava-modal').style.display = 'none'; }
+async function gravarSalvar() {
+    const mensagem = document.getElementById('grava-texto').value.trim();
+    const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
+    if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
+    try {
+        const url = (gravaTipo === 'conjunto')
+            ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/conjunto/gravar'
+            : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
+        const r = await fetch(url,
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios}) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro ao gravar: ' + e); }
+}
+async function removerDaFila(btn) {
+    if (!confirm('Tirar da fila de envio? Volta para "pendentes".')) return;
+    try {
+        const url = (btn.dataset.tipo === 'conjunto')
+            ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/conjunto/gravar/remover'
+            : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/tramite/' + encodeURIComponent(btn.dataset.tramite || '') + '/gravar/remover';
+        const r = await fetch(url, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro: ' + e); }
+}
+function enviarAgora() {
+    if (!confirm('Disparar o envio de TODOS os PAJs gravados nesta caixa?')) return;
+    iniciarSync('/api/caixa/' + CAIXA_SLUG + '/enviar-fila/stream',
+                document.getElementById('sync-title-nome').dataset.nome || '', 'Envio');
+}
+
+// ---------- Triagem (múltiplas tramitações no mesmo PAJ) ----------
+async function tratarConjunto(btn) {
+    if (!confirm('Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?')) return;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Analisando…';
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/conjunto', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = orig; }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = orig; }
+}
+async function desfazerConjunto(btn) {
+    if (!confirm('Desfazer o tratamento em conjunto e voltar este PAJ à triagem?')) return;
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/desfazer', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro: ' + e); }
+}
+async function voltarTriagem(btn) {
+    if (!confirm('Desfazer o tratamento separado e voltar TODAS as tramitações deste PAJ à triagem?')) return;
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/desfazer', { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro: ' + e); }
+}
+// ---------- Tratar separadamente (one-click): lê os dropdowns da própria linha ----------
+async function tratarSeparado(btn) {
+    const tr = btn.closest('tr');
+    const mapeamento = {};
+    tr.querySelectorAll('.tri-sel').forEach(s => { mapeamento[s.dataset.tramite] = s.value; });
+    btn.disabled = true; const o = btn.textContent; btn.textContent = 'Analisando…';
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/separado',
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mapeamento}) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = o; }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = o; }
+}
+
+// ---------- Ver mensagem (íntegra) ----------
+function msgAbrir(btn) {
+    document.getElementById('msg-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('msg-corpo').textContent = btn.dataset.msg || '(sem mensagem)';
+    document.getElementById('msg-modal').style.display = 'flex';
+}
+function msgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
+
+// ---------- Sugestão IA (ver / editar / salvar) ----------
+let sugPajAtual = null;
+let sugMeta = {};
+function sugAbrir(btn) {
+    sugPajAtual = btn.dataset.paj;
+    sugMeta = { paj: btn.dataset.paj, pajnum: btn.dataset.pajnum || '', tramite: btn.dataset.tramite || '',
+                tipo: btn.dataset.tipo || 'tramite',
+                app: btn.dataset.app || '0', whats: btn.dataset.whats || '0', email: btn.dataset.email || '0' };
+    document.getElementById('sug-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('sug-texto').value = btn.dataset.sugestao || '';
+    const tr = btn.closest('tr');
+    const pill = tr ? tr.querySelector('td:nth-child(6) .pill') : null;
+    const tipoEl = document.getElementById('sug-tipo');
+    if (pill) { tipoEl.textContent = pill.textContent; tipoEl.style.display = 'inline-flex'; }
+    else { tipoEl.style.display = 'none'; }
+    sugMontarModelos();
+    sugMontarParagrafos();
+    document.getElementById('sug-modal').style.display = 'flex';
+}
+// Popular o dropdown de textos padrão da caixa (uma vez por abertura; reseta a seleção).
+function sugMontarModelos() {
+    const box = document.getElementById('sug-modelo-box');
+    const sel = document.getElementById('sug-modelo');
+    if (!COMUNICADOS || !COMUNICADOS.length) { box.style.display = 'none'; return; }
+    sel.innerHTML = '<option value="">— escolher um modelo —</option>';
+    COMUNICADOS.forEach((c, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i);
+        opt.textContent = c.tipo || ('Modelo ' + (i + 1));
+        sel.appendChild(opt);
+    });
+    sel.value = '';
+    box.style.display = 'flex';
+}
+// Aplica o texto de um modelo escolhido, SUBSTITUINDO o texto atual (com confirmação).
+function sugAplicarModelo(sel) {
+    const i = parseInt(sel.value, 10);
+    if (isNaN(i) || !COMUNICADOS[i]) return;
+    const c = COMUNICADOS[i];
+    const ta = document.getElementById('sug-texto');
+    if (ta.value.trim() && !confirm('Substituir o texto atual pelo modelo “' + (c.tipo || '') + '”?\n\n(Os [campos] entre colchetes precisarão ser preenchidos manualmente.)')) {
+        sel.value = '';
+        return;
+    }
+    ta.value = c.texto || '';
+    // Registra a classificação MANUAL escolhida — será persistida ao Salvar
+    // (prevalece sobre a da IA) e atualiza o selo de tipo na hora.
+    sugMeta.tipoManual = c.tipo || '';
+    const tipoEl = document.getElementById('sug-tipo');
+    if (c.tipo) { tipoEl.textContent = c.tipo; tipoEl.style.display = 'inline-flex'; }
+    else { tipoEl.style.display = 'none'; }
+    sel.value = '';
+    sugMontarParagrafos();  // recomputa os checkboxes de parágrafos sobre o novo texto
+}
+function sugMontarParagrafos() {
+    const box = document.getElementById('sug-par-box');
+    const lista = document.getElementById('sug-paragrafos');
+    lista.innerHTML = '';
+    if (!PARAGRAFOS || !PARAGRAFOS.length) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    // Abre sempre recolhido.
+    lista.style.display = 'none';
+    const chev = document.getElementById('sug-par-chevron');
+    if (chev) chev.style.transform = 'rotate(0deg)';
+    const ta = document.getElementById('sug-texto').value;
+    PARAGRAFOS.forEach((p, i) => {
+        const jaTem = ta.includes(p.texto);
+        const lab = document.createElement('label');
+        lab.className = 'wa-opt';
+        lab.style.cssText = 'align-items:flex-start;';
+        lab.innerHTML = '<input type="checkbox" style="margin-top:3px;">' +
+            '<span><span style="font-weight:600;font-size:13px;"></span>' +
+            '<span class="text-tertiary" style="font-size:11.5px;display:block;"></span></span>';
+        const cb = lab.querySelector('input');
+        cb.checked = jaTem;
+        cb.dataset.texto = p.texto;
+        cb.onchange = () => sugParagrafoToggle(cb);
+        lab.querySelectorAll('span span')[0].textContent = p.titulo;
+        lab.querySelectorAll('span span')[1].textContent = p.texto;
+        lista.appendChild(lab);
+    });
+}
+function sugTogglePar() {
+    const lista = document.getElementById('sug-paragrafos');
+    const chev = document.getElementById('sug-par-chevron');
+    const abrir = lista.style.display === 'none';
+    lista.style.display = abrir ? 'flex' : 'none';
+    if (chev) chev.style.transform = abrir ? 'rotate(90deg)' : 'rotate(0deg)';
+}
+function sugParagrafoToggle(cb) {
+    const ta = document.getElementById('sug-texto');
+    const txt = cb.dataset.texto;
+    if (cb.checked) {
+        if (!ta.value.includes(txt)) {
+            ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' : '') + txt;
+        }
+    } else {
+        ta.value = ta.value.replace('\n\n' + txt, '').split(txt).join('').replace(/\n{3,}/g, '\n\n').trim();
+    }
+}
+function sugFechar() { document.getElementById('sug-modal').style.display = 'none'; }
+
+// ---------- Últimas movimentações (badge → modal) ----------
+function movAbrir(btn) {
+    document.getElementById('mov-paj').textContent = btn.dataset.pajnum || '';
+    let movs = [];
+    try { movs = JSON.parse(btn.dataset.movs || '[]'); } catch (e) {}
+    const lista = document.getElementById('mov-lista');
+    lista.innerHTML = movs.length ? '' : '<div class="text-tertiary" style="font-size:13px;padding:12px 0;">Sem movimentações.</div>';
+    movs.forEach(m => {
+        const cab = '[' + (m.seq ?? '') + '] ' + waEsc(m.data || '') +
+            (m.tipo ? ' · ' + waEsc(m.tipo) : '') + (m.fases ? ' · ' + waEsc(m.fases) : '');
+        const div = document.createElement('div');
+        div.className = 'mov-item';
+        div.innerHTML = '<div class="mov-cab"></div><div class="mov-desc"></div>';
+        div.querySelector('.mov-cab').textContent = cab;
+        div.querySelector('.mov-desc').textContent = m.descricao || '(sem descrição)';
+        lista.appendChild(div);
+    });
+    document.getElementById('mov-modal').style.display = 'flex';
+}
+function movFechar() { document.getElementById('mov-modal').style.display = 'none'; }
+
+// ---------- Sincronizar apenas um PAJ ----------
+async function sincronizarPaj(btn) {
+    const paj = btn.dataset.paj;
+    const spin = btn.querySelector('.spin-mini');
+    const ic = btn.querySelector('.ic-sync');
+    btn.disabled = true;
+    if (spin) spin.style.display = 'inline-block';
+    if (ic) ic.style.display = 'none';
+    const restaura = () => {
+        btn.disabled = false;
+        if (spin) spin.style.display = 'none';
+        if (ic) ic.style.display = '';
+    };
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(paj) + '/sincronizar',
+            { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); }
+        else { alert('Falha ao sincronizar o PAJ: ' + (d.erro || 'erro')); restaura(); }
+    } catch (e) { alert('Erro ao sincronizar o PAJ: ' + e); restaura(); }
+}
+function sugCopiar() { copiarTexto(document.getElementById('sug-texto').value, 'Mensagem'); }
+// Do modal de edição direto para "Gravar para envio": PERSISTE antes (texto +
+// classificação manual, como o "Salvar") e então abre o modal de gravar.
+async function sugParaEnvio() {
+    const texto = document.getElementById('sug-texto').value;
+    try { await sugPersistir(); } catch (e) { /* best-effort: segue para o gravar mesmo assim */ }
+    sugFechar();
+    gravarAbrir({ dataset: {
+        paj: sugMeta.paj, pajnum: sugMeta.pajnum, tramite: sugMeta.tramite, tipo: sugMeta.tipo, mensagem: texto,
+        app: sugMeta.app, whats: sugMeta.whats, email: sugMeta.email, meios: '[]'
+    }});
+}
+// Persiste a sugestão (texto + classificação manual, se aplicada) SEM recarregar.
+// Reutilizado pelo "Salvar" (que depois recarrega) e pelo "Gravar para envio"
+// (que depois abre o modal de gravar) — assim ambos atualizam a classificação.
+async function sugPersistir() {
+    const texto = document.getElementById('sug-texto').value;
+    const body = { texto };
+    if (sugMeta.tipoManual !== undefined) body.tipo = sugMeta.tipoManual;  // só se aplicou um modelo
+    const url = (sugMeta.tipo === 'conjunto')
+        ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(sugPajAtual) + '/conjunto/sugestao'
+        : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(sugPajAtual) + '/tramite/' + encodeURIComponent(sugMeta.tramite || '') + '/sugestao';
+    const r = await fetch(url,
+        { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    return d.ok;
+}
+async function sugSalvar() {
+    try {
+        if (await sugPersistir()) location.reload();
+        else alert('Erro ao salvar.');
+    } catch (e) { alert('Erro ao salvar: ' + e); }
+}
+
+// ---------- WhatsApp ----------
+let waPajAtual = null;
+function waEsc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Clique no icone do WhatsApp: se ha numero cadastrado, copia; senao abre o editor.
+function waIconClick(btn, ev) {
+    if (ev) ev.stopPropagation();
+    let nums = [];
+    try { nums = JSON.parse(btn.dataset.whatsapp || '[]'); } catch(e) {}
+    if (nums.length) copiarTexto(nums.join('\n'), 'WhatsApp');
+    else waAbrir(btn);
+}
+
+// Mostra o campo "outro numero" so quando a opcao dele estiver marcada.
+function waSyncOutro() {
+    const outroSel = document.getElementById('wa-outro-chk').checked;
+    document.getElementById('wa-outro-num').style.display = outroSel ? 'block' : 'none';
+}
+
+function waAbrir(btn) {
+    waPajAtual = btn.dataset.paj;
+    document.getElementById('wa-paj').textContent = btn.dataset.pajnum || '';
+    let tels = [], sel = [];
+    try { tels = JSON.parse(btn.dataset.telefones || '[]'); } catch(e) {}
+    try { sel  = JSON.parse(btn.dataset.whatsapp  || '[]'); } catch(e) {}
+    const lista = document.getElementById('wa-lista');
+    lista.innerHTML = '';
+    if (!tels.length) {
+        lista.innerHTML = '<div class="text-tertiary" style="font-size:13px;">Nenhum telefone no cadastro.</div>';
+    }
+    // Apenas UM numero pode ser WhatsApp -> radios (grupo wa-num).
+    tels.forEach(t => {
+        const checked = sel.includes(t.numero) ? 'checked' : '';
+        const obs = t.obs ? ' <span class="text-tertiary" style="font-size:12px;">— ' + waEsc(t.obs) + '</span>' : '';
+        lista.insertAdjacentHTML('beforeend',
+            '<label class="wa-opt"><input type="radio" name="wa-num" class="wa-radio" value="' + waEsc(t.numero) + '" ' + checked + ' onchange="waSyncOutro()">' +
+            '<span style="font-family:monospace;">' + waEsc(t.numero) + '</span>' + obs + '</label>');
+    });
+    document.getElementById('wa-outro-chk').checked = false;
+    const on = document.getElementById('wa-outro-num'); on.value = ''; on.style.display = 'none';
+    document.getElementById('wa-modal').style.display = 'flex';
+}
+function waFechar(){ document.getElementById('wa-modal').style.display = 'none'; }
+function waColeta(){
+    const sel = document.querySelector('input[name="wa-num"]:checked');
+    if (!sel) return [];
+    if (sel.value === '__outro__') {
+        const v = document.getElementById('wa-outro-num').value.trim();
+        return v ? [v] : [];
+    }
+    return [sel.value];
+}
+async function waEnviar(nums){
+    try {
+        const r = await fetch('/api/paj/' + encodeURIComponent(waPajAtual) + '/whatsapp',
+            { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({numeros:nums}) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch(e) { alert('Erro ao salvar: ' + e); }
+}
+function waSalvar(){ waEnviar(waColeta()); }
+function waNaoCadastrar(){ waEnviar([]); }
+</script>
+<script>
+function ordenarTabela(th) {
+    const table = th.closest('table');
+    const tbody = table.tBodies[0];
+    const col = parseInt(th.dataset.col, 10);
+    const tipo = th.dataset.type || 'text';
+    const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+
+    // Limpa indicadores dos outros cabecalhos
+    table.querySelectorAll('th.sortable').forEach(h => {
+        h.removeAttribute('data-dir');
+        const a = h.querySelector('.sort-arrow');
+        if (a) a.textContent = '';
+    });
+    th.dataset.dir = dir;
+    th.querySelector('.sort-arrow').textContent = dir === 'asc' ? '▲' : '▼';
+
+    const val = (tr) => {
+        const cell = tr.cells[col];
+        return (cell.getAttribute('data-sort') ?? cell.textContent).trim();
+    };
+    const rows = Array.from(tbody.rows);
+    rows.sort((a, b) => {
+        let av = val(a), bv = val(b), cmp;
+        if (tipo === 'num') {
+            cmp = (parseFloat(av) || 0) - (parseFloat(bv) || 0);
+        } else {
+            cmp = av.localeCompare(bv, 'pt-BR', { numeric: true, sensitivity: 'base' });
+        }
+        return dir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(r => tbody.appendChild(r));
+}
+
+let syncES = null;
+function syncBtnEstado(rodando) {
+    const btn = document.getElementById('btn-sync');
+    document.getElementById('sync-spinner').style.display = rodando ? 'inline-block' : 'none';
+    document.getElementById('sync-icon').style.display = rodando ? 'none' : '';
+    document.getElementById('sync-label').textContent = rodando ? 'Sincronizando…' : 'Sincronizar caixa';
+    btn.disabled = rodando;
+    const btnTodas = document.getElementById('btn-sync-todas');
+    if (btnTodas) btnTodas.disabled = rodando;
+    const btnEnviar = document.getElementById('btn-enviar-agora');
+    if (btnEnviar) btnEnviar.disabled = rodando;
+}
+function syncAppend(level, msg) {
+    const log = document.getElementById('sync-log');
+    const line = document.createElement('div');
+    line.className = 'sync-line sync-' + (level || 'info');
+    const ts = new Date().toLocaleTimeString('pt-BR');
+    line.innerHTML = '<span class="sync-ts">' + ts + '</span>' +
+        (msg || '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+}
+function syncFechar(reload) {
+    if (syncES) { syncES.close(); syncES = null; }
+    document.getElementById('sync-modal').style.display = 'none';
+    if (reload) location.reload();
+}
+function sincronizar() {
+    iniciarSync('/api/caixa/' + CAIXA_SLUG + '/sincronizar/stream', document.getElementById('sync-title-nome').dataset.nome || '');
+}
+function sincronizarTodas() {
+    iniciarSync('/api/sincronizar-todas/stream', 'Todas as caixas');
+}
+function iniciarSync(url, nome, prefixo) {
+    const log = document.getElementById('sync-log');
+    const foot = document.getElementById('sync-foot');
+    log.innerHTML = '';
+    foot.innerHTML = '';
+    document.getElementById('sync-title-prefix').textContent = prefixo || 'Sincronização';
+    if (nome) document.getElementById('sync-title-nome').textContent = nome;
+    document.getElementById('sync-title-status').textContent = '· em andamento…';
+    document.getElementById('sync-modal').style.display = 'flex';
+    syncBtnEstado(true);
+
+    if (syncES) syncES.close();
+    syncES = new EventSource(url);
+    syncES.onmessage = (e) => {
+        let d; try { d = JSON.parse(e.data); } catch (_) { return; }
+        if (d.done) {
+            syncES.close(); syncES = null;
+            const ok = d.resumo && d.resumo.ok;
+            document.getElementById('sync-title-status').textContent = ok ? '· concluída ✓' : '· falhou';
+            foot.innerHTML = ok
+                ? '<button class="btn-accent" onclick="syncFechar(true)">Fechar e atualizar</button>'
+                : '<button class="btn-subtle" onclick="syncFechar(false)">Fechar</button>';
+            syncBtnEstado(false);
+            return;
+        }
+        syncAppend(d.level, d.msg);
+    };
+    syncES.onerror = () => {
+        if (!syncES) return;   // ja fechamos no 'done' — fim normal do stream
+        syncAppend('erro', 'Conexão interrompida.');
+        syncES.close(); syncES = null;
+        foot.innerHTML = '<button class="btn-subtle" onclick="syncFechar(false)">Fechar</button>';
+        syncBtnEstado(false);
+    };
+}
+
+// Auto-início ao chegar de outra página via "Sincronizar todas" (?sync=todas).
+if (new URLSearchParams(location.search).get('sync') === 'todas') {
+    history.replaceState(null, '', location.pathname);  // limpa o parâmetro
+    sincronizarTodas();
+}
+</script>
+{% endblock %}

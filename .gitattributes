@@ -1,0 +1,15 @@
+# Normaliza fim de linha: LF no repositório e na árvore de trabalho.
+# Evita que editores/transferências com perfil Windows reintroduzam CRLF.
+* text=auto eol=lf
+
+# Garantias explícitas para os tipos do projeto
+*.py    text eol=lf
+*.js    text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.env   text eol=lf

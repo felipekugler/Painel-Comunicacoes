@@ -1,0 +1,11 @@
+/* Ajustes minimos sobre DaisyUI dark theme */
+
+/* Transicoes suaves em hover de linhas */
+.table tbody tr {
+    transition: background-color 0.15s ease;
+}
+
+/* Scroll suave global */
+html {
+    scroll-behavior: smooth;
+}

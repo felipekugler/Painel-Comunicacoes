@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Painel de Comunicações{% endblock %} — DPU</title>
+
+    <!-- Tema: aplica a escolha salva (Sistema/Claro/Escuro) ANTES de pintar. -->
+    <script>
+    (function () {
+        try {
+            var t = localStorage.getItem('painel-tema') || 'system';
+            document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {}
+    })();
+    </script>
+
+    <!-- Tailwind (utilitarios de layout) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- HTMX + Alpine.js -->
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.8/dist/cdn.min.js"></script>
+
+    <style>
+        /* ============================================================
+           Tema Fluent (Windows 11) — segue o tema claro/escuro do sistema.
+           Paleta em variaveis para light (default) e dark (@media).
+           ============================================================ */
+        :root {
+            --accent: #005FB8;
+            --accent-hover: #1a6fc0;
+            --accent-fg: #ffffff;
+            --accent-soft: rgba(0, 95, 184, 0.12);
+
+            --bg: #f3f3f3;
+            --bg-tint: rgba(0, 95, 184, 0.05);
+            --sidebar-bg: rgba(255, 255, 255, 0.65);
+            --card: #ffffff;
+            --card-hover: #fafafa;
+            --layer-alt: #f6f6f6;
+
+            --stroke: rgba(0, 0, 0, 0.07);
+            --stroke-strong: rgba(0, 0, 0, 0.12);
+            --shadow: 0 2px 6px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+
+            --text: #1a1a1a;
+            --text-secondary: rgba(0, 0, 0, 0.62);
+            --text-tertiary: rgba(0, 0, 0, 0.40);
+
+            --c-app: #005FB8;
+            --c-tel: #0f7b6c;
+            --c-zap: #1faa55;
+            --c-mail: #8a4fc7;
+            --c-addr: #b8730a;
+            --c-red: #c42b1c;
+        }
+        /* Paleta escura — reutilizada em dois seletores:
+           1) automático: @media dark, exceto quando o tema foi FIXADO manualmente
+              (data-theme="light"/"dark" via seletor em Configurações);
+           2) manual: :root[data-theme="dark"] (sempre escuro, ignora o SO). */
+        :root[data-theme="dark"] {
+            --accent: #4cc2ff;
+            --accent-hover: #63cbff;
+            --accent-fg: #003354;
+            --accent-soft: rgba(76, 194, 255, 0.14);
+
+            --bg: #1f1f1f;
+            --bg-tint: rgba(76, 194, 255, 0.05);
+            --sidebar-bg: rgba(43, 43, 43, 0.60);
+            --card: #2b2b2b;
+            --card-hover: #313131;
+            --layer-alt: #272727;
+
+            --stroke: rgba(255, 255, 255, 0.07);
+            --stroke-strong: rgba(255, 255, 255, 0.12);
+            --shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.30);
+            --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.30);
+
+            --text: #ffffff;
+            --text-secondary: rgba(255, 255, 255, 0.74);
+            --text-tertiary: rgba(255, 255, 255, 0.45);
+
+            --c-app: #4cc2ff;
+            --c-tel: #4fd1b8;
+            --c-zap: #40d873;
+            --c-mail: #c295ee;
+            --c-addr: #e0a44a;
+            --c-red: #ff6b6b;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme="light"]):not([data-theme="dark"]) {
+                --accent: #4cc2ff;
+                --accent-hover: #63cbff;
+                --accent-fg: #003354;
+                --accent-soft: rgba(76, 194, 255, 0.14);
+
+                --bg: #1f1f1f;
+                --bg-tint: rgba(76, 194, 255, 0.05);
+                --sidebar-bg: rgba(43, 43, 43, 0.60);
+                --card: #2b2b2b;
+                --card-hover: #313131;
+                --layer-alt: #272727;
+
+                --stroke: rgba(255, 255, 255, 0.07);
+                --stroke-strong: rgba(255, 255, 255, 0.12);
+                --shadow: 0 2px 8px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.30);
+                --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.30);
+
+                --text: #ffffff;
+                --text-secondary: rgba(255, 255, 255, 0.74);
+                --text-tertiary: rgba(255, 255, 255, 0.45);
+
+                --c-app: #4cc2ff;
+                --c-tel: #4fd1b8;
+                --c-zap: #40d873;
+                --c-mail: #c295ee;
+                --c-addr: #e0a44a;
+                --c-red: #ff6b6b;
+            }
+        }
+
+        * { box-sizing: border-box; }
+        html, body { overflow-x: hidden; max-width: 100%; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            color: var(--text);
+            font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Inter", sans-serif;
+            font-size: 14px;
+            line-height: 1.5;
+            /* Mica: fundo com leve tinte de acento nos cantos */
+            background:
+                radial-gradient(1200px 600px at 100% 0%, var(--bg-tint), transparent 60%),
+                radial-gradient(1000px 500px at 0% 100%, var(--bg-tint), transparent 55%),
+                var(--bg);
+            background-attachment: fixed;
+        }
+        h1, h2, h3, .font-display {
+            font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        /* ---------- Sidebar (NavigationView) ---------- */
+        .sidebar {
+            width: 264px;
+            min-height: 100vh;
+            background: var(--sidebar-bg);
+            backdrop-filter: saturate(160%) blur(24px);
+            -webkit-backdrop-filter: saturate(160%) blur(24px);
+            border-right: 1px solid var(--stroke);
+            transition: transform 0.25s cubic-bezier(0.1, 0.9, 0.2, 1), margin-left 0.25s ease;
+        }
+        .sidebar.hidden {
+            transform: translateX(-100%);
+            position: fixed;
+            top: 0; left: 0;
+            z-index: 50;
+        }
+        .main-content {
+            margin-left: 264px;
+            transition: margin-left 0.25s ease;
+        }
+        .main-content.expanded { margin-left: 0; }
+
+        /* Nav item estilo Fluent: retangulo arredondado + pill de acento na ativa */
+        .nav-item {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 9px 12px;
+            margin: 2px 0;
+            border-radius: 6px;
+            color: var(--text);
+            text-decoration: none;
+            font-weight: 500;
+            transition: background 0.12s ease;
+        }
+        .nav-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+        .nav-item.active { background: color-mix(in srgb, var(--text) 8%, transparent); }
+        .nav-item.active::before {
+            content: "";
+            position: absolute;
+            left: -6px; top: 50%;
+            transform: translateY(-50%);
+            width: 3px; height: 16px;
+            border-radius: 3px;
+            background: var(--accent);
+        }
+        .nav-item svg { width: 20px; height: 20px; flex: 0 0 auto; }
+
+        /* ---------- Cartao / superficie ---------- */
+        .fluent-card {
+            background: var(--card);
+            border: 1px solid var(--stroke);
+            border-radius: 10px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* ---------- Botao de acento ---------- */
+        .btn-accent {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: var(--accent);
+            color: var(--accent-fg);
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            box-shadow: var(--shadow-sm);
+            transition: background 0.12s ease, filter 0.12s ease, transform 0.05s ease;
+        }
+        .btn-accent:hover { background: var(--accent-hover); }
+        .btn-accent:active { transform: translateY(0.5px); filter: brightness(0.96); }
+        .btn-accent:disabled { opacity: 0.55; cursor: default; }
+        .btn-subtle {
+            display: inline-flex; align-items: center; gap: 8px;
+            padding: 7px 12px; border-radius: 6px;
+            border: 1px solid var(--stroke-strong);
+            background: transparent; color: var(--text);
+            font-weight: 500; cursor: pointer;
+            transition: background 0.12s ease;
+        }
+        .btn-subtle:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+        .btn-amarelo {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            width: 100%; padding: 9px 12px; border-radius: 6px; border: 1px solid transparent;
+            background: #eab308; color: #3a2e00; font-weight: 600; font-size: 13px;
+            cursor: pointer; box-shadow: var(--shadow-sm); transition: filter 0.12s ease;
+        }
+        .btn-amarelo:hover { filter: brightness(1.06); }
+        .btn-amarelo:disabled { opacity: 0.55; cursor: default; }
+        .btn-amarelo svg { width: 16px; height: 16px; }
+
+        /* ---------- Pill / chip ---------- */
+        .pill {
+            display: inline-flex; align-items: center;
+            min-width: 22px; height: 22px; padding: 0 8px;
+            border-radius: 999px;
+            background: var(--accent-soft); color: var(--accent);
+            font-size: 12px; font-weight: 600;
+        }
+
+        /* ---------- Tabela estilo lista Fluent ---------- */
+        .fluent-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        .fluent-table thead th {
+            text-align: left;
+            padding: 12px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--stroke);
+            white-space: nowrap;
+        }
+        .fluent-table tbody td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--stroke);
+            vertical-align: top;
+        }
+        .fluent-table th.sortable { cursor: pointer; user-select: none; }
+        .fluent-table th.sortable:hover { color: var(--text); }
+        .fluent-table th .sort-arrow {
+            display: inline-block; width: 12px; margin-left: 2px;
+            font-size: 10px; color: var(--accent);
+        }
+        .fluent-table tbody tr { transition: background 0.1s ease; }
+        .fluent-table tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
+        .fluent-table tbody tr:last-child td { border-bottom: none; }
+
+        .text-secondary { color: var(--text-secondary); }
+        .text-tertiary  { color: var(--text-tertiary); }
+        .accent-link { color: var(--accent); text-decoration: none; }
+        .accent-link:hover { text-decoration: underline; }
+
+        /* ---------- Icones de contato ---------- */
+        .contato-ic {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 34px; height: 34px; border-radius: 8px;
+        }
+        .contato-ic svg { width: 18px; height: 18px; }
+        .contato-on  { background: color-mix(in srgb, currentColor 14%, transparent); }
+        .contato-off { color: var(--text-tertiary); opacity: 0.5; }
+
+        /* ---------- Toast ---------- */
+        .toast-container {
+            position: fixed; bottom: 1.5rem; right: 1.5rem; z-index: 9999;
+            display: flex; flex-direction: column; gap: 0.5rem;
+        }
+        .toast-msg {
+            background: var(--card); border: 1px solid var(--stroke); color: var(--text);
+            padding: 9px 15px; border-radius: 8px; box-shadow: var(--shadow); font-size: 13px;
+            display: flex; align-items: center; gap: 8px; transition: opacity 0.3s ease;
+        }
+        .toast-msg svg { width: 16px; height: 16px; color: var(--c-zap); }
+
+        [x-cloak] { display: none !important; }
+        .toggle-sidebar { display: none; }
+        @media (min-width: 769px) { .toggle-sidebar { display: flex; } }
+        @media (max-width: 768px) {
+            .sidebar { width: 100%; min-height: auto; position: relative; transform: none !important; }
+            .sidebar.hidden { transform: none !important; }
+            .main-content, .main-content.expanded { margin-left: 0; }
+        }
+    </style>
+
+    {% block head %}{% endblock %}
+</head>
+<body>
+
+    <!-- Sidebar (NavigationView) -->
+    <aside class="sidebar flex flex-col fixed top-0 left-0 z-40"
+           x-data="{ sidebarOpen: (localStorage.getItem('sidebarOpen') ?? 'true') === 'true' }"
+           :class="{ 'hidden': !sidebarOpen }"
+           @sidebar-toggle.window="sidebarOpen = !sidebarOpen; localStorage.setItem('sidebarOpen', sidebarOpen)">
+        <!-- Header -->
+        <div class="px-5 pt-6 pb-4">
+            <div class="flex items-center gap-2.5">
+                <span class="inline-flex items-center justify-center w-8 h-8 rounded-lg"
+                      style="background: var(--accent); color: var(--accent-fg);">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" />
+                    </svg>
+                </span>
+                <div>
+                    <div class="font-display text-lg leading-tight">Painel de Comunicações</div>
+                </div>
+            </div>
+            <p class="text-tertiary mt-2" style="font-size: 12px;">{{ oficio_descricao }}</p>
+        </div>
+
+        <!-- Nav -->
+        <nav class="flex-1 px-3">
+            {% for cx in menu_caixas() %}
+            <a href="/caixa/{{ cx.slug }}" class="nav-item {% if request.url.path == '/caixa/' ~ cx.slug %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859m-19.5.338V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H6.911a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661Z" />
+                </svg>
+                <span style="flex:1;min-width:0;">{{ cx.nome }}</span>
+                {% if cx.qtd is defined %}<span class="text-tertiary" style="font-size:12.5px;">({{ cx.qtd }})</span>{% endif %}
+            </a>
+            {% endfor %}
+            <a href="/historico" class="nav-item {% if request.url.path == '/historico' %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                Histórico de mensagens
+            </a>
+            <a href="/configuracoes" class="nav-item {% if request.url.path == '/configuracoes' %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.241.437-.613.43-.992a7.723 7.723 0 0 1 0-.255c.007-.378-.138-.75-.43-.991l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                </svg>
+                Configurações
+            </a>
+        </nav>
+
+        <!-- Sincronizar todas -->
+        <div class="px-3 pb-1">
+            <button id="btn-sync-todas" class="btn-amarelo" onclick="sincronizarTodasMenu()">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                Sincronizar todas
+            </button>
+        </div>
+
+        <!-- Footer -->
+        <div class="px-5 py-4 text-tertiary" style="font-size: 11px;">
+            <p>Defensoria Pública da União</p>
+            <p class="mt-0.5">Painel de Comunicações · v{{ app_version }}</p>
+        </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="main-content flex-1 min-w-0 min-h-screen flex flex-col"
+          x-data="{ sidebarOpen: (localStorage.getItem('sidebarOpen') ?? 'true') === 'true' }"
+          :class="{ 'expanded': !sidebarOpen }"
+          @sidebar-toggle.window="sidebarOpen = !sidebarOpen">
+
+        <!-- Barra superior com o hamburguer -->
+        <div class="toggle-sidebar items-center px-6 h-12 shrink-0">
+            <button class="btn-subtle" style="padding: 6px 10px;" @click="$dispatch('sidebar-toggle')" title="Alternar menu">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </button>
+        </div>
+
+        <div class="{% block content_class %}px-6 lg:px-10 pt-2 pb-10 w-full{% endblock %} flex-1 min-w-0">
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <!-- Toast container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        {% set _cx = menu_caixas() %}
+        window.PRIMEIRA_CAIXA = "{{ _cx[0].slug if _cx else '' }}";
+        // Botão "Sincronizar todas" da sidebar: se a página tiver a função (dashboard),
+        // executa direto; caso contrário (ex: Configurações), vai para a 1ª caixa e
+        // dispara automaticamente via ?sync=todas.
+        function sincronizarTodasMenu() {
+            if (typeof sincronizarTodas === 'function') { sincronizarTodas(); }
+            else if (window.PRIMEIRA_CAIXA) { location.href = '/caixa/' + window.PRIMEIRA_CAIXA + '?sync=todas'; }
+        }
+    </script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
