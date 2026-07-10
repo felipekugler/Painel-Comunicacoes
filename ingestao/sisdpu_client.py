@@ -12,9 +12,11 @@ Credenciais vem das env vars SISDPU_USERNAME e SISDPU_PASSWORD (carregadas do
 from __future__ import annotations
 
 import datetime as _dt
+import html as _html
 import logging
 import os
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Callable
 
@@ -730,6 +732,316 @@ def parse_item_caixa(item_raw: str) -> dict | None:
         "desc": descricao,
         "etiqueta": etiqueta[:80],
     }
+
+
+# ---------------------------------------------------------------------------
+# ENVIO de NOTIFICACAO pelo Aplicativo SISDPU (tela "Notificar Assistido").
+# Seletores confirmados ao vivo (PAJ de teste 2023/029-00839, id=3498632):
+#   form ........ formInclusaoNotificacao
+#   assistidos .. formInclusaoNotificacao:dataTableListaAssistidos
+#                 (1 checkbox .ui-chkbox-box por linha; NAO vem pre-marcado)
+#   prazo ....... formInclusaoNotificacao:valorProcesso_input  (text, default 5)
+#   so-leitura .. formInclusaoNotificacao:isSomenteLeituraSelect_input (checkbox)
+#   texto ....... formInclusaoNotificacao:rteTextoNotificacao
+#                 (editor QUILL: .ql-editor contenteditable + input escondido _input)
+#   Enviar ...... <button> texto "Enviar" (id volatil ...:j_idtNNN -> achamos por texto)
+# Modais que bloqueiam/avisam (tratados): sessao assumida em outra estacao,
+# "notificacao pendente nao respondida", "PAJ sem assistido pelo App".
+# ---------------------------------------------------------------------------
+_NOTIF_FORM = "formInclusaoNotificacao"
+# Tipos de anexo aceitos pelo SISDPU na tela Notificar Assistido.
+_TIPOS_ANEXO_OK = {"doc", "docx", "odt", "png", "jpg", "jpeg", "gif", "pdf"}
+
+
+def _norm_nome(s: str) -> str:
+    """Normaliza nome p/ comparar: sem acentos, MAIUSCULO, sem '(N PAJ'S)', 1 espaco."""
+    s = unicodedata.normalize("NFKD", s or "")
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = re.sub(r"\(\s*\d+\s*paj.*?\)", "", s, flags=re.I)  # remove sufixo "(1 PAJ'S)"
+    return re.sub(r"\s+", " ", s).strip().upper()
+
+
+_JS_ESTADO_NOTIFICACAO = r"""
+() => {
+    const body = document.body.innerText || '';
+    const growls = [...document.querySelectorAll('.ui-growl-item, .ui-growl-message, .ui-messages-info, .ui-messages')]
+        .map(g => (g.innerText || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+    const dialogVis = (frag) => [...document.querySelectorAll('.ui-dialog')].some(d =>
+        d.offsetParent !== null && new RegExp(frag, 'i').test(d.textContent || ''));
+    return {
+        url: location.href,
+        growls,
+        sucesso: /Notifica[çc][ãa]o enviada com sucesso/i.test(body)
+                 || growls.some(g => /enviada com sucesso/i.test(g)),
+        pendente: dialogVis('notifica[çc][ãa]o nova n[ãa]o respondida')
+                  || dialogVis('possuem notifica[çc][ãa]o'),
+        takeover: dialogVis('outra esta[çc][ãa]o') || dialogVis('efetuado em outra'),
+        semApp: dialogVis('n[ãa]o possui assistido sendo acompanhado'),
+    };
+}
+"""
+
+
+async def _eval_seguro(page: Page, js: str, tentativas: int = 5) -> dict:
+    """page.evaluate tolerante a navegacao: a tela Notificar re-navega (postback
+    JSF no load; e o clique em Enviar redireciona ao detalhamento) — quando isso
+    ocorre no meio do evaluate o Chromium destroi o contexto. Aqui re-tentamos
+    apos a navegacao assentar, em vez de estourar."""
+    ultimo: Exception | None = None
+    for _ in range(tentativas):
+        try:
+            return await page.evaluate(js)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if "context was destroyed" in msg or "navigation" in msg or "execution context" in msg:
+                ultimo = e
+                with contextlib.suppress(Exception):
+                    await page.wait_for_load_state("domcontentloaded", timeout=8000)
+                await page.wait_for_timeout(500)
+                continue
+            raise
+    if ultimo:
+        raise ultimo
+    return await page.evaluate(js)
+
+
+async def _anexar_documentos(page: Page, anexos: list[dict]) -> list[str]:
+    """Anexa cada documento na tela Notificar Assistido (popup 'Novo documento').
+
+    Preserva o NOME ORIGINAL do arquivo (upload por buffer — o disco guarda um nome
+    'aid__seguro') e usa esse nome como Descrição. Retorna os nomes efetivamente
+    anexados. Best-effort: um anexo que falhe é pulado (logado), sem abortar os demais.
+    Tipos aceitos pelo SISDPU: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.
+    """
+    import mimetypes
+
+    anexados: list[str] = []
+    for a in (anexos or []):
+        caminho = a.get("caminho") or ""
+        nome = a.get("nome") or (Path(caminho).name if caminho else "documento")
+        if not caminho or not Path(caminho).exists():
+            _log.warning("anexo ausente no disco, pulado: %s (%s)", nome, caminho)
+            continue
+        ext = (a.get("tipo") or Path(nome).suffix).lstrip(".").lower()
+        if ext not in _TIPOS_ANEXO_OK:
+            # SISDPU só aceita DOC/DOCX/ODT/PNG/JPEG/GIF/PDF — tipo diferente trava
+            # o popup; pulamos (best-effort) para não abortar os demais anexos.
+            _log.warning("anexo de tipo não permitido pelo SISDPU, pulado: %s (.%s)", nome, ext)
+            continue
+        try:
+            data = Path(caminho).read_bytes()
+            mime = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+            # abre o popup "Novo documento"
+            await page.locator(f'[id="{_NOTIF_FORM}"] button', has_text="Incluir novo anexo").first.click()
+            await page.wait_for_selector('[id="dialogoInclusaoForm:arquivosAnexo_input"]', timeout=10000)
+            # seleciona o arquivo preservando o nome original (buffer)
+            await page.locator('[id="dialogoInclusaoForm:arquivosAnexo_input"]').set_input_files(
+                [{"name": nome, "mimeType": mime, "buffer": data}])
+            # aguarda a linha "Arquivos para salvar" e ajusta a Descrição = nome
+            desc = page.locator(
+                'input[type="text"][name^="dialogoInclusaoForm:tableArquivosSalvar"]').first
+            await desc.wait_for(timeout=10000)
+            with contextlib.suppress(Exception):
+                await desc.fill(nome)
+            # "Anexar" -> mensagem "Arquivo incluído ao processo"
+            await page.locator(
+                'button[name^="dialogoInclusaoForm:tableArquivosSalvar"]', has_text="Anexar").first.click()
+            with contextlib.suppress(Exception):
+                await page.wait_for_function(
+                    r"""() => /inclu[íi]do ao processo/i.test(document.body.innerText || '')""",
+                    timeout=8000)
+            await page.wait_for_timeout(400)
+            # fecha o popup (se ainda aberto) p/ voltar à tela Notificar
+            with contextlib.suppress(Exception):
+                fechar = page.locator('button[name^="dialogoInclusaoForm:"]', has_text="Fechar").first
+                if await fechar.is_visible():
+                    await fechar.click()
+                    await page.wait_for_timeout(400)
+            anexados.append(nome)
+            _log.info("anexo incluído: %s", nome)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("falha ao anexar %s: %r", nome, e)
+    return anexados
+
+
+async def notificar_assistido(
+    id_processo: str,
+    mensagem: str,
+    prazo_dias: int = 5,
+    somente_leitura: bool = False,
+    aderidos: list[str] | None = None,
+    anexos: list[dict] | None = None,
+    dry_run: bool = False,
+    screenshot_path: str | None = None,
+) -> dict:
+    """Envia uma notificacao ao assistido pelo Aplicativo SISDPU.
+
+    Retorna {ok, status, detalhe}. status: 'enviado' | 'dry_run' | 'falha'.
+    Qualquer condicao que impeca o envio (sessao assumida em outra estacao,
+    assistido nao identificado, notificacao anterior pendente) devolve
+    ok=False/status='falha' — assim o trâmite PERMANECE na fila para reenvio.
+    """
+    aderidos = aderidos or []
+    # prazo 0 no painel = "urgente" (prioridade na fila), NAO um prazo real de 0
+    # dias — para a notificacao do App usamos o default 5 nesse caso.
+    try:
+        prazo = int(prazo_dias)
+    except (TypeError, ValueError):
+        prazo = 5
+    if prazo <= 0:
+        prazo = 5
+
+    await _ensure_logged_in()
+    page = await _get_page()
+    url = f"{SISDPU_URL}/pages/movimentacao/notificarAssistido.xhtml?id={id_processo}"
+    _log.info("notificar_assistido(id=%s prazo=%s SL=%s dry=%s aderidos=%s)",
+              id_processo, prazo, somente_leitura, dry_run, aderidos)
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    # A tela pode re-navegar (postback JSF) logo apos o load — deixa assentar.
+    with contextlib.suppress(Exception):
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    await page.wait_for_timeout(400)
+
+    est = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+    if est.get("takeover"):
+        return {"ok": False, "status": "falha",
+                "detalhe": "Sessão do SISDPU assumida em outra estação — envio não realizado."}
+    if est.get("semApp"):
+        return {"ok": False, "status": "falha",
+                "detalhe": "PAJ sem assistido acompanhado pelo App — envio não realizado."}
+
+    try:
+        await page.wait_for_selector(f'[id="{_NOTIF_FORM}:rteTextoNotificacao"]', timeout=15000)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "status": "falha",
+                "detalhe": f"Tela Notificar Assistido não carregou: {e}"}
+
+    # ---------- 1) selecionar assistido(s) ----------
+    # A datatable de assistidos popula um tique DEPOIS do editor — espera as linhas
+    # aparecerem antes de contar (senao da' "0 assistidos" por corrida de tempo).
+    tbl_sel = f'[id="{_NOTIF_FORM}:dataTableListaAssistidos"]'
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector(tbl_sel, timeout=8000)
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector(f'{tbl_sel} tbody > tr[data-rk]', timeout=5000)
+    await page.wait_for_timeout(300)
+    linhas = page.locator(f'{tbl_sel} tbody > tr[data-rk]')
+    n = await linhas.count()
+    if n == 0:
+        # A tela SO lista assistidos aptos (aderiram ao App E sem notificacao
+        # pendente nao respondida). Zero = ninguem apto agora -> mantem na fila.
+        return {"ok": False, "status": "falha",
+                "detalhe": ("Nenhum assistido disponível para notificar (todos com notificação "
+                            "pendente não respondida, ou sem adesão ao App) — mantido na fila.")}
+    alvos: list[int] = []
+    if n == 1:
+        alvos = [0]  # assistido unico: seleciona o unico
+    else:
+        adr = [_norm_nome(a) for a in aderidos if a]
+        for i in range(n):
+            nome = await linhas.nth(i).locator("td").nth(1).inner_text()
+            nn = _norm_nome(nome)
+            if any(a and (a in nn or nn in a) for a in adr):
+                alvos.append(i)
+        if not alvos:
+            return {"ok": False, "status": "falha",
+                    "detalhe": ("PAJ multi-assistido: não identifiquei quem aderiu ao App "
+                                f"(aderidos={aderidos or '—'}) — envio não realizado.")}
+    nomes_sel: list[str] = []
+    for i in alvos:
+        nomes_sel.append((await linhas.nth(i).locator("td").nth(1).inner_text()).strip())
+        box = linhas.nth(i).locator(".ui-chkbox-box").first
+        cls = await box.get_attribute("class") or ""
+        if "ui-state-active" not in cls:
+            await box.click()
+            await page.wait_for_timeout(150)
+
+    # ---------- 2) prazo da notificacao ----------
+    # O spinner PrimeFaces desfaz um `fill()` normal (reverte p/ o valor anterior);
+    # setar value + disparar input/change diretamente e' o que "pega".
+    prazo_sel = f'[id="{_NOTIF_FORM}:valorProcesso_input"]'
+    if await page.locator(prazo_sel).count():
+        await page.evaluate(
+            """([sel, v]) => {
+                const el = document.querySelector(sel);
+                if (el) {
+                    el.value = String(v);
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }
+            }""", [prazo_sel, prazo])
+
+    # ---------- 3) somente leitura ----------
+    sl_inp = page.locator(f'[id="{_NOTIF_FORM}:isSomenteLeituraSelect_input"]')
+    if await sl_inp.count():
+        atual = await sl_inp.is_checked()
+        if bool(somente_leitura) != atual:
+            await page.locator(
+                f'[id="{_NOTIF_FORM}:isSomenteLeituraSelect"] .ui-chkbox-box').first.click()
+            await page.wait_for_timeout(150)
+
+    # ---------- 4) texto da notificacao (editor Quill) ----------
+    ed = page.locator(f'[id="{_NOTIF_FORM}:rteTextoNotificacao"] .ql-editor').first
+    await ed.click()
+    await page.keyboard.press("Control+A")
+    await page.keyboard.press("Delete")
+    linhas_txt = (mensagem or "").split("\n")
+    for idx, ln in enumerate(linhas_txt):
+        if idx:
+            await page.keyboard.press("Enter")
+        if ln:
+            await page.keyboard.type(ln)
+    # valida/sincroniza o input escondido do editor; fallback injeta o HTML
+    val = await page.locator(f'[id="{_NOTIF_FORM}:rteTextoNotificacao_input"]').input_value()
+    if not (val or "").strip():
+        html_corpo = "".join(
+            f"<p>{_html.escape(ln)}</p>" if ln.strip() else "<p><br></p>"
+            for ln in linhas_txt) or "<p><br></p>"
+        await page.evaluate(
+            """([html]) => {
+                const ed = document.querySelector('[id="formInclusaoNotificacao:rteTextoNotificacao"] .ql-editor');
+                const hid = document.getElementById('formInclusaoNotificacao:rteTextoNotificacao_input');
+                if (ed) ed.innerHTML = html;
+                if (hid) { hid.value = html; hid.dispatchEvent(new Event('change', {bubbles: true})); }
+            }""", [html_corpo])
+
+    # ---------- 5) anexos (documentos) ----------
+    # No REAL, anexa cada documento (o clique em "Anexar" já inclui o arquivo ao
+    # processo); no dry_run NÃO anexa (evita efeito colateral) — só sinaliza.
+    if anexos and not dry_run:
+        anexados = await _anexar_documentos(page, anexos)
+        nota_anx = f" · {len(anexados)}/{len(anexos)} anexo(s) incluído(s)"
+    elif anexos:
+        nota_anx = f" · {len(anexos)} anexo(s) (anexados só no envio real)"
+    else:
+        nota_anx = ""
+    resumo = f"{', '.join(nomes_sel)} · prazo {prazo}d · somente_leitura={somente_leitura}{nota_anx}"
+
+    # ---------- DRY RUN: preenche tudo mas NAO clica em Enviar ----------
+    if dry_run:
+        if screenshot_path:
+            with contextlib.suppress(Exception):
+                await page.screenshot(path=screenshot_path, full_page=True)
+        return {"ok": True, "status": "dry_run", "detalhe": f"[dry_run] pronto p/ enviar → {resumo}"}
+
+    # ---------- 5) Enviar ----------
+    await page.locator(f'[id="{_NOTIF_FORM}"] button', has_text="Enviar").first.click()
+
+    for _ in range(40):  # aguarda ate ~20s pelo desfecho
+        await page.wait_for_timeout(500)
+        est = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+        if est.get("takeover"):
+            return {"ok": False, "status": "falha",
+                    "detalhe": "Sessão assumida em outra estação durante o envio — não confirmado."}
+        if est.get("pendente"):
+            return {"ok": False, "status": "falha",
+                    "detalhe": ("Assistido com notificação anterior não respondida — "
+                                "envio não realizado (tratar manualmente).")}
+        if est.get("sucesso") or "detalhamentoProcesso.xhtml" in est.get("url", ""):
+            return {"ok": True, "status": "enviado",
+                    "detalhe": f"Notificação enviada com sucesso → {resumo}"}
+    return {"ok": False, "status": "falha",
+            "detalhe": "Não confirmei o envio (timeout aguardando 'enviada com sucesso')."}
 
 
 async def movimentacoes_paj(numero: str, ano: str, unidade: str = "44") -> dict:

@@ -333,6 +333,32 @@ def _prazos_envio(prazos: dict | None) -> dict:
     }
 
 
+# Regex das movimentações de ADESÃO ao App (fase "Gerado pelo aplicativo sisdpu";
+# descrição "Adesão ao Termo... Assistido: NOME CPF Acompanhante: ..."). Usado para
+# saber QUEM aderiu e marcar o assistido certo na tela Notificar Assistido (App)
+# quando o PAJ tem mais de um assistido/representante.
+_RE_ADESAO_APP = re.compile(
+    r"Ades[ãa]o ao Termo de Responsabilidade do Aplicativo do SISDPU", re.I)
+# O texto extraído do SISDPU vem SEM espaços nas junções (ex.: "...SISDPUAssistido:
+# MARIA AMELIA C DCPF Acompanhante:..."), então NÃO exigir espaço nem \b antes de CPF.
+_RE_ADESAO_ASSISTIDO = re.compile(r"Assistido:\s*(.+?)\s*CPF", re.I)
+
+
+def _aderidos_app(cont: dict) -> list[str]:
+    """Nomes dos assistidos que aderiram ao App SISDPU (das movimentações de adesão)."""
+    nomes: list[str] = []
+    for m in (cont.get("movimentacoes") or []):
+        desc = str(m.get("descricao") or "")
+        if not _RE_ADESAO_APP.search(desc):
+            continue
+        mo = _RE_ADESAO_ASSISTIDO.search(desc)
+        if mo:
+            nome = mo.group(1).strip()
+            if nome and nome not in nomes:
+                nomes.append(nome)
+    return nomes
+
+
 def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
                       meios: list[str], somente_leitura: bool = False,
                       prazos: dict | None = None) -> dict:
@@ -381,6 +407,10 @@ def remover_da_fila(slug: str, paj_norm: str, id_tramite: str) -> dict:
 # dados/_anexos/<PAJ>/<id_tramite|conjunto>/ (fora do Projeto).
 ANEXOS_DIR = DADOS_DIR / "_anexos"
 _ANEXO_MAX = 25 * 1024 * 1024  # 25 MB por arquivo
+# Formatos aceitos pelo Aplicativo SISDPU (envio de anexos). Outros são rejeitados
+# aqui para não quebrar o envio pelo app. DOC/DOCX/ODT/PNG/JPEG/GIF/PDF.
+_ANEXO_EXTS = {"doc", "docx", "odt", "png", "jpg", "jpeg", "gif", "pdf"}
+ANEXO_EXTS_LABEL = "DOC, DOCX, ODT, PNG, JPEG, GIF, PDF"
 
 
 def _chave_anexo(tipo: str, id_tramite: str) -> str:
@@ -425,10 +455,14 @@ def adicionar_anexos(slug: str, paj_norm: str, tipo: str, id_tramite: str,
     # maiúsculas). Duplicados são ignorados e devolvidos em `duplicados`.
     existentes = {(a.get("nome") or "").strip().lower() for a in anexos}
     duplicados: list[str] = []
+    rejeitados: list[str] = []  # formato não aceito pelo Aplicativo SISDPU
     for nome, dados in arquivos:
         if not dados:
             continue
         nome_base = Path(nome or "arquivo").name
+        if Path(nome_base).suffix.lstrip(".").lower() not in _ANEXO_EXTS:
+            rejeitados.append(nome_base)
+            continue
         if nome_base.strip().lower() in existentes:
             duplicados.append(nome_base)
             continue
@@ -446,7 +480,7 @@ def adicionar_anexos(slug: str, paj_norm: str, tipo: str, id_tramite: str,
             "incluido_em": _dt.datetime.now().isoformat(timespec="seconds"),
         })
     _gravar_box(slug, box)
-    return {"ok": True, "anexos": anexos, "duplicados": duplicados}
+    return {"ok": True, "anexos": anexos, "duplicados": duplicados, "rejeitados": rejeitados}
 
 
 def remover_anexo(slug: str, paj_norm: str, tipo: str, id_tramite: str, anexo_id: str) -> dict:
@@ -1460,7 +1494,9 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
                   for a in anexos_meta]
     ctx = {
         "paj": t["paj"], "paj_norm": paj_norm, "tramite_ids": ids,
+        "id_processo": t.get("id", ""),          # id interno do PAJ (p/ o Playwright abrir a tela)
         "assistido": t.get("assistido", ""),
+        "app_aderidos": _aderidos_app(cont),     # nomes que aderiram ao App (multi-assistido)
         "mensagem": mensagem, "telefones": cont.get("telefones", []),
         "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
         "somente_leitura": bool(t.get("envio_somente_leitura")),

@@ -458,10 +458,13 @@
             Documentos que serão enviados junto com a mensagem ao assistido.</p>
         <div id="anx-lista" style="margin-top:6px;"></div>
         <div id="anx-add-box" style="margin-top:12px;">
-            <input type="file" id="anx-input" multiple style="display:none;" onchange="anxUpload(this)">
+            <input type="file" id="anx-input" multiple style="display:none;"
+                   accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxUpload(this)">
             <button class="btn-accent" style="padding:6px 14px;font-size:12px;"
                     onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
             <span id="anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
+            <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">
+                Formatos aceitos pelo Aplicativo SISDPU: <strong>DOC, DOCX, ODT, PNG, JPEG, GIF, PDF</strong>. Outros são recusados.</p>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:14px;">
             <button class="btn-accent" style="padding:6px 14px;" onclick="anxFechar()">Salvar</button>
@@ -525,9 +528,19 @@
     }
     async function anxUpload(input) {
         if (!input.files || !input.files.length) return;
-        const fd = new FormData();
-        for (const f of input.files) fd.append('arquivos', f);
+        const EXTS = ['doc','docx','odt','png','jpg','jpeg','gif','pdf'];  // aceitos pelo App SISDPU
         const msg = document.getElementById('anx-msg');
+        const fd = new FormData();
+        const rejLocal = []; let n = 0;
+        for (const f of input.files) {
+            const ext = (f.name.split('.').pop() || '').toLowerCase();
+            if (EXTS.includes(ext)) { fd.append('arquivos', f); n++; }
+            else rejLocal.push(f.name);
+        }
+        if (!n) {  // nada válido para enviar
+            msg.textContent = 'Formato não permitido: ' + rejLocal.join(', ') + '. Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.';
+            input.value = ''; return;
+        }
         msg.textContent = 'Enviando…';
         try {
             const r = await fetch(anxRaiz() + '/anexos', { method: 'POST', body: fd });
@@ -535,8 +548,11 @@
             if (d.ok) {
                 anxMudou = true;
                 anxRender(d.anexos || []);
-                const dup = d.duplicados || [];
-                msg.textContent = dup.length ? ('Já constava(m), não adicionado(s): ' + dup.join(', ')) : '';
+                const avisos = [];
+                const rej = (d.rejeitados || []).concat(rejLocal);
+                if (rej.length) avisos.push('Formato não permitido (recusado): ' + rej.join(', '));
+                if ((d.duplicados || []).length) avisos.push('Já constava(m): ' + d.duplicados.join(', '));
+                msg.textContent = avisos.join(' · ');
             }
             else { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
         } catch (e) { msg.textContent = 'Erro: ' + e; }

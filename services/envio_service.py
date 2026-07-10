@@ -40,9 +40,31 @@ def label_meio(meio: str) -> str:
     return MEIOS.get(meio, meio)
 
 
-# ----------------- handlers por meio (a implementar) -----------------
+# ----------------- handlers por meio -----------------
 async def _enviar_app_sisdpu(ctx: dict) -> dict:
-    raise NotImplementedError("Envio pelo Aplicativo SISDPU ainda não configurado.")
+    """Envia a notificação pelo Aplicativo SISDPU (tela 'Notificar Assistido').
+
+    Delega a `sisdpu_client.notificar_assistido`, que abre o PAJ, marca o assistido
+    (o que aderiu ao App, em PAJ multi-assistido), preenche prazo/somente-leitura e
+    o texto, e clica em Enviar. Devolve {ok, status, detalhe}."""
+    from ingestao import sisdpu_client
+
+    id_proc = str(ctx.get("id_processo") or "").strip()
+    if not id_proc:
+        return {"ok": False, "status": "falha",
+                "detalhe": "PAJ sem id de processo — sincronize a caixa antes de enviar."}
+    mensagem = ctx.get("mensagem") or ""
+    if not mensagem.strip():
+        return {"ok": False, "status": "falha", "detalhe": "Mensagem vazia."}
+
+    return await sisdpu_client.notificar_assistido(
+        id_processo=id_proc,
+        mensagem=mensagem,
+        prazo_dias=ctx.get("prazo_app", 5),
+        somente_leitura=bool(ctx.get("somente_leitura")),
+        aderidos=ctx.get("app_aderidos") or [],
+        anexos=ctx.get("anexos") or [],
+    )
 
 
 async def _enviar_whatsapp(ctx: dict) -> dict:
