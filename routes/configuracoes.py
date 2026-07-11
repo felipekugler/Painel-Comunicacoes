@@ -46,6 +46,7 @@ async def configuracoes(request: Request):
         analise_concorrencia_max=config_service.ANALISE_CONCORRENCIA_MAX,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modos=config_service.get_envio_modos(),
+        whatsapp_intervalo=config_service.get_whatsapp_intervalo_seg(),
         comunicados=config_service.listar_comunicados(),  # gerais
         paragrafos=config_service.listar_paragrafos(),    # gerais
         caixas_disponiveis=caixas_disp,
@@ -78,6 +79,16 @@ async def set_envio_modo(payload: dict = Body(...)):
     meio = (payload or {}).get("meio", "")
     modo = (payload or {}).get("modo", "simulado")
     return {"ok": True, "modos": config_service.set_envio_modo_meio(meio, modo)}
+
+
+@router.post("/api/config/whatsapp-intervalo", response_class=JSONResponse)
+async def set_whatsapp_intervalo(payload: dict = Body(...)):
+    """Intervalo MÍNIMO (segundos) entre mensagens no envio em lote por WhatsApp."""
+    try:
+        n = int((payload or {}).get("seg", 25))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
+    return {"ok": True, "seg": config_service.set_whatsapp_intervalo_seg(n)}
 
 
 @router.post("/api/config/prazos-predefinidos", response_class=JSONResponse)

@@ -170,6 +170,20 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">WhatsApp — intervalo entre mensagens</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Intervalo <strong>mínimo</strong> (em segundos) entre mensagens no envio <strong>em lote</strong> pelo WhatsApp —
+            imita o ritmo humano e <strong>reduz o risco de banimento</strong> da conta. Mínimo 5s (recomendado ≥ 20s).
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="number" id="wa-intervalo" class="wa-input" style="width:90px;" min="5" max="600" value="{{ whatsapp_intervalo }}">
+            <span class="text-secondary" style="font-size:13px;">segundos</span>
+            <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
+            <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Prazos de resposta pré-definidos</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             Botões de atalho oferecidos ao gravar o envio (ao lado do campo <strong>Prazo (dias)</strong>), para cada meio.
@@ -512,6 +526,14 @@ async function salvarConcorrencia(){
     const r=await fetch('/api/config/analise-concorrencia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({n})});
     const d=await r.json();
     if(d.ok){ document.getElementById('n-conc').value=d.n; document.getElementById('conc-status').textContent='salvo ✓'; toast('Configuração salva'); }
+    else alert('Erro: '+(d.erro||'falha'));
+}
+async function salvarWaIntervalo(){
+    const el=document.getElementById('wa-intervalo');
+    let n=parseInt(el.value,10); if(isNaN(n)||n<5)n=5; el.value=n;
+    const r=await fetch('/api/config/whatsapp-intervalo',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({seg:n})});
+    const d=await r.json();
+    if(d.ok){ el.value=d.seg; document.getElementById('wa-intervalo-msg').textContent='salvo ✓'; toast('Intervalo salvo'); }
     else alert('Erro: '+(d.erro||'falha'));
 }
 async function definirModo(meio, modo, btn){
