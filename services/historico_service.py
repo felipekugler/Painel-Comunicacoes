@@ -166,6 +166,44 @@ def contar_por_paj() -> dict:
     return {k: len(v) for k, v in vistos.items()}
 
 
+_STATUS_ENVIADO = {"enviado", "simulado", "dry_run"}
+
+
+def remover_falhas() -> int:
+    """Remove do histórico os registros que NÃO representam envio efetivo — mantém só
+    'enviado'/'simulado'/'dry_run'. Falhas ('falha'/'nao_configurado'/etc.) não têm
+    utilidade no histórico (a falha fica visível/acionável em Prontos). Faz snapshot
+    datado + .bak antes de reescrever. Retorna quantos foram removidos."""
+    itens = listar()
+    if not itens:
+        return 0
+
+    def _mantem(r: dict) -> bool:
+        st = (r.get("status") or "").strip().lower()
+        if st in _STATUS_ENVIADO:
+            return True
+        # registros antigos agregados: mantém se ALGUM meio foi efetivamente enviado
+        res = r.get("resultado") or {}
+        return any((str(v) or "").strip().lower() in _STATUS_ENVIADO for v in res.values())
+
+    manter = [r for r in itens if _mantem(r)]
+    removidos = len(itens) - len(manter)
+    if not removidos:
+        return 0
+    _snapshot_datado()
+    _backup()
+    HIST_DIR.mkdir(parents=True, exist_ok=True)
+    if manter:
+        manter.sort(key=lambda r: r.get("ts", ""))  # ordem cronológica
+        with HIST_FILE.open("w", encoding="utf-8") as fh:
+            for r in manter:
+                fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+    else:
+        with contextlib.suppress(Exception):
+            HIST_FILE.unlink()
+    return removidos
+
+
 def limpar(modo: str = "tudo", data: str = "") -> int:
     """Apaga registros do histórico. Retorna quantos foram removidos.
 

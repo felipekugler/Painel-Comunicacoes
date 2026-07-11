@@ -63,7 +63,13 @@
             <tr class="hist-row">
                 <td class="text-secondary" style="white-space:nowrap;" data-sort="{{ r.ts }}">{{ r.ts | data_hora_br }}</td>
                 <td data-sort="{{ r.paj }}">
+                    {% if r.url_detalhe %}
+                    <a href="{{ r.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+                       title="Abrir o PAJ no SISDPU"
+                       style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ r.paj }}</a>
+                    {% else %}
                     <span style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ r.paj }}</span>
+                    {% endif %}
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ (r.oficio or '~')|lower }}">{{ r.oficio or "—" }}</td>
                 <td data-sort="{{ (r.assistido or '~')|lower }}">{{ r.assistido or "—" }}</td>

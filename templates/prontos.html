@@ -132,7 +132,11 @@
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
                     {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
                     {% if paj.envio_urgente %}<div class="mt-1"><span class="pill-urgente" title="Urgente — prioridade na fila de envio">⚡ Urgente</span></div>{% endif %}
-                    {% if paj.envio_falhas %}<div class="mt-1"><span title="Falhou no último envio ({{ paj.envio_falhas.keys()|join(', ') }}) — reenviar" style="display:inline-flex;font-size:10.5px;font-weight:700;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:1px 6px;">⚠ falha no envio</span></div>{% endif %}
+                    {% if paj.envio_falhas %}<div class="mt-1" style="display:flex;flex-direction:column;gap:3px;">
+                        {% for meio, det in paj.envio_falhas.items() %}
+                        <span title="{{ det }}" style="display:block;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;">⚠ {{ meio_labels.get(meio, meio) }}: {{ det }}</span>
+                        {% endfor %}
+                    </div>{% endif %}
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
                 <td>{{ paj.assistido or "—" }}</td>

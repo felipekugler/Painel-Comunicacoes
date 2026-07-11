@@ -62,7 +62,6 @@ async def _enviar_app_sisdpu(ctx: dict) -> dict:
         mensagem=mensagem,
         prazo_dias=ctx.get("prazo_app", 5),
         somente_leitura=bool(ctx.get("somente_leitura")),
-        aderidos=ctx.get("app_aderidos") or [],
         anexos=ctx.get("anexos") or [],
     )
 

@@ -783,6 +783,12 @@ _JS_ESTADO_NOTIFICACAO = r"""
                   || dialogVis('possuem notifica[çc][ãa]o'),
         takeover: dialogVis('outra esta[çc][ãa]o') || dialogVis('efetuado em outra'),
         semApp: dialogVis('n[ãa]o possui assistido sendo acompanhado'),
+        // Conflito de sessão (1 sessão por usuário): diálogo 'confirmDialogLogin'
+        // ('Atenção' com 'Desbloquear'/'Sair'). Só bloqueia quando VISÍVEL — a máscara
+        // '..._modal' só existe no DOM quando o diálogo está aberto.
+        conflitoLogin: !!document.querySelector('[id$="confirmDialogLogin_modal"]')
+                       || [...document.querySelectorAll('[id$="confirmDialogLogin"]')]
+                              .some(d => d.offsetParent !== null),
     };
 }
 """
@@ -809,6 +815,30 @@ async def _eval_seguro(page: Page, js: str, tentativas: int = 5) -> dict:
     if ultimo:
         raise ultimo
     return await page.evaluate(js)
+
+
+# Mensagem exibida no log/selo quando o conflito de sessão persiste mesmo após tentar
+# assumir a sessão ("Desbloquear").
+_MSG_CONFLITO_SESSAO = ("Conflito de sessão do SISDPU — feche a outra sessão e tente de novo.")
+
+
+async def _resolver_conflito_login(page: Page) -> bool:
+    """Se o diálogo de conflito de sessão (confirmDialogLogin) estiver VISÍVEL, clica
+    'Desbloquear' (o painel ASSUME a sessão, derrubando a outra) e aguarda o diálogo
+    sumir. Retorna True se não há conflito (ou foi resolvido); False se persiste."""
+    est = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+    if not est.get("conflitoLogin"):
+        return True
+    _log.info("notificar_assistido: conflito de sessão detectado — clicando 'Desbloquear'.")
+    btn = page.locator('[id$="confirmTramitacao"]').first  # botão "Desbloquear"
+    with contextlib.suppress(Exception):
+        if await btn.count():
+            await btn.click(timeout=5000)  # clique REAL (não JS)
+    with contextlib.suppress(Exception):  # espera a máscara do diálogo sumir
+        await page.wait_for_selector('[id$="confirmDialogLogin_modal"]', state="hidden", timeout=8000)
+    await page.wait_for_timeout(300)
+    est2 = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+    return not est2.get("conflitoLogin")
 
 
 async def _anexar_documentos(page: Page, anexos: list[dict]) -> list[str]:
@@ -875,19 +905,17 @@ async def notificar_assistido(
     mensagem: str,
     prazo_dias: int = 5,
     somente_leitura: bool = False,
-    aderidos: list[str] | None = None,
     anexos: list[dict] | None = None,
     dry_run: bool = False,
     screenshot_path: str | None = None,
 ) -> dict:
     """Envia uma notificacao ao assistido pelo Aplicativo SISDPU.
 
-    Retorna {ok, status, detalhe}. status: 'enviado' | 'dry_run' | 'falha'.
-    Qualquer condicao que impeca o envio (sessao assumida em outra estacao,
-    assistido nao identificado, notificacao anterior pendente) devolve
-    ok=False/status='falha' — assim o trâmite PERMANECE na fila para reenvio.
+    Seleciona TODOS os assistidos disponíveis na tela (a tela não distingue quem
+    aderiu ao App; quem aderiu recebe, os demais ficam pendentes). Retorna
+    {ok, status, detalhe}. status: 'enviado' | 'dry_run' | 'falha'. Qualquer condicao
+    que impeca o envio devolve ok=False — assim o item PERMANECE na fila.
     """
-    aderidos = aderidos or []
     # prazo 0 no painel = "urgente" (prioridade na fila), NAO um prazo real de 0
     # dias — para a notificacao do App usamos o default 5 nesse caso.
     try:
@@ -900,8 +928,8 @@ async def notificar_assistido(
     await _ensure_logged_in()
     page = await _get_page()
     url = f"{SISDPU_URL}/pages/movimentacao/notificarAssistido.xhtml?id={id_processo}"
-    _log.info("notificar_assistido(id=%s prazo=%s SL=%s dry=%s aderidos=%s)",
-              id_processo, prazo, somente_leitura, dry_run, aderidos)
+    _log.info("notificar_assistido(id=%s prazo=%s SL=%s dry=%s)",
+              id_processo, prazo, somente_leitura, dry_run)
     await page.goto(url, wait_until="domcontentloaded", timeout=30000)
     # A tela pode re-navegar (postback JSF) logo apos o load — deixa assentar.
     with contextlib.suppress(Exception):
@@ -915,6 +943,17 @@ async def notificar_assistido(
     if est.get("semApp"):
         return {"ok": False, "status": "falha",
                 "detalhe": "PAJ sem assistido acompanhado pelo App — envio não realizado."}
+    # Aviso que aparece ao abrir a tela quando TODOS os assistidos acompanhados já têm
+    # notificação nova não respondida ("...é necessário encerrar a Notificação para
+    # prosseguir"): captura de imediato, sem tentar clicar atrás do modal.
+    if est.get("pendente"):
+        return {"ok": False, "status": "falha",
+                "detalhe": ("Impossível enviar nova mensagem pelo aplicativo neste momento, "
+                            "pois há mensagem anterior pendente de visualização pelo assistido.")}
+    # Conflito de sessão (confirmDialogLogin): tenta ASSUMIR a sessão ('Desbloquear');
+    # se persistir, falha com aviso claro.
+    if not await _resolver_conflito_login(page):
+        return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
 
     try:
         await page.wait_for_selector(f'[id="{_NOTIF_FORM}:rteTextoNotificacao"]', timeout=15000)
@@ -934,32 +973,36 @@ async def notificar_assistido(
     linhas = page.locator(f'{tbl_sel} tbody > tr[data-rk]')
     n = await linhas.count()
     if n == 0:
-        # A tela SO lista assistidos aptos (aderiram ao App E sem notificacao
-        # pendente nao respondida). Zero = ninguem apto agora -> mantem na fila.
+        # A tela lista os assistidos do PAJ, MENOS os que já têm uma notificação
+        # anterior pendente de visualização/resposta. Zero = todos estão nesse estado
+        # -> não dá para enviar agora; mantém na fila (permanece em Prontos).
         return {"ok": False, "status": "falha",
-                "detalhe": ("Nenhum assistido disponível para notificar (todos com notificação "
-                            "pendente não respondida, ou sem adesão ao App) — mantido na fila.")}
-    alvos: list[int] = []
-    if n == 1:
-        alvos = [0]  # assistido unico: seleciona o unico
-    else:
-        adr = [_norm_nome(a) for a in aderidos if a]
-        for i in range(n):
-            nome = await linhas.nth(i).locator("td").nth(1).inner_text()
-            nn = _norm_nome(nome)
-            if any(a and (a in nn or nn in a) for a in adr):
-                alvos.append(i)
-        if not alvos:
-            return {"ok": False, "status": "falha",
-                    "detalhe": ("PAJ multi-assistido: não identifiquei quem aderiu ao App "
-                                f"(aderidos={aderidos or '—'}) — envio não realizado.")}
+                "detalhe": ("Impossível enviar nova mensagem pelo aplicativo neste momento, "
+                            "pois há mensagem anterior pendente de visualização pelo assistido.")}
+    # Nomes dos assistidos disponíveis na tela (sem notificação pendente).
+    nomes_tela: list[str] = []
+    for i in range(n):
+        nomes_tela.append((await linhas.nth(i).locator("td").nth(1).inner_text()).strip())
+
+    # Um único assistido: seleciona o único. Mais de um: SELECIONA TODOS — a tela não
+    # distingue quem aderiu ao App; quem aderiu recebe, e para quem não aderiu a
+    # notificação fica pendente (some das opções futuras até ser lida/encerrada).
+    alvos = list(range(n))
     nomes_sel: list[str] = []
     for i in alvos:
-        nomes_sel.append((await linhas.nth(i).locator("td").nth(1).inner_text()).strip())
+        nomes_sel.append(nomes_tela[i])
         box = linhas.nth(i).locator(".ui-chkbox-box").first
         cls = await box.get_attribute("class") or ""
         if "ui-state-active" not in cls:
-            await box.click()
+            # O diálogo de conflito de sessão pode surgir num postback e sua máscara
+            # intercepta o clique. Clique com timeout curto; se falhar, tenta assumir
+            # a sessão e repete — se ainda bloquear, falha com aviso claro.
+            try:
+                await box.click(timeout=8000)
+            except Exception:  # noqa: BLE001
+                if not await _resolver_conflito_login(page):
+                    return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
+                await box.click(timeout=8000)
             await page.wait_for_timeout(150)
 
     # ---------- 2) prazo da notificacao ----------
@@ -1031,18 +1074,27 @@ async def notificar_assistido(
         return {"ok": True, "status": "dry_run", "detalhe": f"[dry_run] pronto p/ enviar → {resumo}"}
 
     # ---------- 5) Enviar ----------
-    await page.locator(f'[id="{_NOTIF_FORM}"] button', has_text="Enviar").first.click()
+    enviar_btn = page.locator(f'[id="{_NOTIF_FORM}"] button', has_text="Enviar").first
+    try:
+        await enviar_btn.click(timeout=8000)
+    except Exception:  # noqa: BLE001 — conflito de sessão pode interceptar o clique
+        if not await _resolver_conflito_login(page):
+            return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
+        await enviar_btn.click(timeout=8000)
 
     for _ in range(40):  # aguarda ate ~20s pelo desfecho
         await page.wait_for_timeout(500)
         est = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+        if est.get("conflitoLogin"):
+            if not await _resolver_conflito_login(page):
+                return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
         if est.get("takeover"):
             return {"ok": False, "status": "falha",
                     "detalhe": "Sessão assumida em outra estação durante o envio — não confirmado."}
         if est.get("pendente"):
             return {"ok": False, "status": "falha",
-                    "detalhe": ("Assistido com notificação anterior não respondida — "
-                                "envio não realizado (tratar manualmente).")}
+                    "detalhe": ("Impossível enviar nova mensagem pelo aplicativo neste momento, "
+                                "pois há mensagem anterior pendente de visualização pelo assistido.")}
         if est.get("sucesso") or "detalhamentoProcesso.xhtml" in est.get("url", ""):
             return {"ok": True, "status": "enviado",
                     "detalhe": f"Notificação enviada com sucesso → {resumo}"}

@@ -4,7 +4,7 @@ de qualquer caixa. Tabela pesquisável e classificável (client-side)."""
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from services import envio_service, historico_service
+from services import divcom_service, envio_service, historico_service
 
 router = APIRouter()
 
@@ -13,8 +13,14 @@ router = APIRouter()
 async def historico(request: Request):
     registros = historico_service.listar_por_meio()  # uma linha por meio
     labels = {m["key"]: m["label"] for m in envio_service.meios_disponiveis()}
+    _url_cache: dict[tuple, str] = {}  # backfill da URL de detalhamento (registros antigos)
     for r in registros:
         r["meios_labels"] = [labels.get(m, m) for m in (r.get("meios") or [])]
+        if not r.get("url_detalhe"):
+            chave = (r.get("caixa_slug"), r.get("paj_norm"))
+            if chave not in _url_cache and chave[0] and chave[1]:
+                _url_cache[chave] = divcom_service.url_detalhe_do_paj(chave[0], chave[1])
+            r["url_detalhe"] = _url_cache.get(chave, "")
     template = request.app.state.jinja.get_template("historico.html")
     return HTMLResponse(template.render(request=request, registros=registros))
 

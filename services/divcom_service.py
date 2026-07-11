@@ -293,6 +293,16 @@ def _achar_solic(box: dict, id_tramite: str) -> dict | None:
     return None
 
 
+def url_detalhe_do_paj(slug: str, paj_norm: str) -> str:
+    """URL de detalhamento do PAJ no SISDPU (de qualquer tramitação do box). Usado
+    para o Histórico linkar o número do PAJ mesmo em registros antigos sem a URL."""
+    box = _ler_box(slug, paj_norm)
+    for s in (box.get("solicitacoes", []) if box else []):
+        if s.get("url_detalhe"):
+            return s["url_detalhe"]
+    return ""
+
+
 def definir_sugestao(slug: str, paj_norm: str, id_tramite: str, texto: str,
                      tipo: str | None = None) -> dict:
     """Edição MANUAL da sugestão de UMA tramitação: o texto e, opcionalmente, a
@@ -331,32 +341,6 @@ def _prazos_envio(prazos: dict | None) -> dict:
         "prazo_whatsapp": _prazo_ok(prazos.get("whatsapp", 5)),
         "prazo_email": _prazo_ok(prazos.get("email", 5)),
     }
-
-
-# Regex das movimentações de ADESÃO ao App (fase "Gerado pelo aplicativo sisdpu";
-# descrição "Adesão ao Termo... Assistido: NOME CPF Acompanhante: ..."). Usado para
-# saber QUEM aderiu e marcar o assistido certo na tela Notificar Assistido (App)
-# quando o PAJ tem mais de um assistido/representante.
-_RE_ADESAO_APP = re.compile(
-    r"Ades[ãa]o ao Termo de Responsabilidade do Aplicativo do SISDPU", re.I)
-# O texto extraído do SISDPU vem SEM espaços nas junções (ex.: "...SISDPUAssistido:
-# MARIA AMELIA C DCPF Acompanhante:..."), então NÃO exigir espaço nem \b antes de CPF.
-_RE_ADESAO_ASSISTIDO = re.compile(r"Assistido:\s*(.+?)\s*CPF", re.I)
-
-
-def _aderidos_app(cont: dict) -> list[str]:
-    """Nomes dos assistidos que aderiram ao App SISDPU (das movimentações de adesão)."""
-    nomes: list[str] = []
-    for m in (cont.get("movimentacoes") or []):
-        desc = str(m.get("descricao") or "")
-        if not _RE_ADESAO_APP.search(desc):
-            continue
-        mo = _RE_ADESAO_ASSISTIDO.search(desc)
-        if mo:
-            nome = mo.group(1).strip()
-            if nome and nome not in nomes:
-                nomes.append(nome)
-    return nomes
 
 
 def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
@@ -1755,7 +1739,6 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         "paj": t["paj"], "paj_norm": paj_norm, "tramite_ids": ids,
         "id_processo": t.get("id", ""),          # id interno do PAJ (p/ o Playwright abrir a tela)
         "assistido": t.get("assistido", ""),
-        "app_aderidos": _aderidos_app(cont),     # nomes que aderiram ao App (multi-assistido)
         "mensagem": mensagem, "telefones": cont.get("telefones", []),
         "emails": cont.get("emails", []), "whatsapp_numeros": cont.get("whatsapp_numeros", []),
         "somente_leitura": bool(t.get("envio_somente_leitura")),
@@ -1781,6 +1764,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
         "mensagem": mensagem, "anexos": anexos_meta,
         "anexo_tipo": tipo_alvo, "anexo_ref": ("" if conjunto else ids[0]),
+        "url_detalhe": t.get("url_detalhe", ""),  # p/ o PAJ virar link no Histórico
     }
 
     # UMA linha de histórico POR MEIO (status/prazo próprios + campos de baixa reservados).
@@ -1791,19 +1775,21 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
         r = await envio_service.enviar(meio, ctx)
         st = r.get("status", "falha")
         detalhe = r.get("detalhe", st)
-        reg = historico_service.registrar({
-            **base_reg,
-            "meio": meio, "meios": [meio],
-            "prazo": prazo_por_meio.get(meio, 5),
-            "somente_leitura": bool(t.get("envio_somente_leitura")) if meio == "app_sisdpu" else False,
-            "status": st, "detalhe": detalhe,
-            # reservados p/ controle futuro de resposta/baixa (por meio):
-            "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
-        })
-        ultimo_ts = reg["ts"]
         yield {"level": ("ok" if r.get("ok") else "erro"),
                "msg": f"     {envio_service.label_meio(meio)}: {detalhe}"}
         if r.get("ok"):
+            # Registra no Histórico SÓ o que foi efetivamente enviado (ou simulado).
+            # Falhas NÃO são registradas — a falha já fica visível/acionável em Prontos.
+            reg = historico_service.registrar({
+                **base_reg,
+                "meio": meio, "meios": [meio],
+                "prazo": prazo_por_meio.get(meio, 5),
+                "somente_leitura": bool(t.get("envio_somente_leitura")) if meio == "app_sisdpu" else False,
+                "status": st, "detalhe": detalhe,
+                # reservados p/ controle futuro de resposta/baixa (por meio):
+                "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+            })
+            ultimo_ts = reg["ts"]
             ok_meios.append(meio)
             ok_ids.append(reg["id"])
             if st == "enviado":
