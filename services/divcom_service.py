@@ -391,6 +391,8 @@ def remover_da_fila(slug: str, paj_norm: str, id_tramite: str) -> dict:
 # dados/_anexos/<PAJ>/<id_tramite|conjunto>/ (fora do Projeto).
 ANEXOS_DIR = DADOS_DIR / "_anexos"
 _ANEXO_MAX = 25 * 1024 * 1024  # 25 MB por arquivo
+# Comprovantes de envio por WhatsApp (PDF de 2 páginas gerado no envio).
+COMPROVANTES_WA_DIR = DADOS_DIR / "_comprovantes_whatsapp"
 # Formatos aceitos pelo Aplicativo SISDPU (envio de anexos). Outros são rejeitados
 # aqui para não quebrar o envio pelo app. DOC/DOCX/ODT/PNG/JPEG/GIF/PDF.
 _ANEXO_EXTS = {"doc", "docx", "odt", "png", "jpg", "jpeg", "gif", "pdf"}
@@ -645,6 +647,29 @@ def contar_prontos_envio() -> int:
     """Total de itens gravados para envio somando todas as caixas (badge do menu)."""
     return sum(len(montar_dashboard(c["slug"])["fila"])
                for c in config_service.listar_caixas_habilitadas())
+
+
+# Submenus de "Prontos para Envio" (1 por MEIO): (slug_url, chave_do_meio, rótulo).
+# App/E-mail = envio em lote; WhatsApp = assistido por linha; Telefone/Carta = a definir.
+PRONTOS_MEIOS = [
+    ("app", "app_sisdpu", "Aplicativo SISDPU"),
+    ("whatsapp", "whatsapp", "WhatsApp"),
+    ("email", "email", "E-mail"),
+    ("telefone", "telefone", "Telefone"),
+    ("carta", "carta", "Carta"),
+]
+_PRONTOS_KEY = {slug: key for slug, key, _l in PRONTOS_MEIOS}
+_PRONTOS_LABEL = {slug: lab for slug, _k, lab in PRONTOS_MEIOS}
+
+
+def prontos_por_meio() -> dict:
+    """Contagens para os submenus de Prontos: {slug_meio: n, 'total': n_distinto}.
+    UMA passada em listar_prontos_envio (item com 2 meios conta nos 2 submenus)."""
+    prontos = listar_prontos_envio()
+    d = {slug: sum(1 for p in prontos if key in (p.get("envio_meios") or []))
+         for slug, key, _l in PRONTOS_MEIOS}
+    d["total"] = len(prontos)
+    return d
 
 
 # ==================== enriquecimento (merge caixa + contato) ====================
@@ -1712,15 +1737,23 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
     paj_norm = t["paj_norm"]
     conjunto = t.get("tipo") == "conjunto"
     ids = t.get("tramite_ids", []) if conjunto else [t.get("id_tramite", "")]
-    meios = t.get("envio_meios", []) or []
+    # WhatsApp é ASSISTIDO (enviado 1-a-1 na aba WhatsApp), NÃO entra no lote autônomo.
+    meios_todos = t.get("envio_meios", []) or []
+    wa_presente = "whatsapp" in meios_todos
+    meios = [m for m in meios_todos if m != "whatsapp"]
     mensagem = t.get("envio_mensagem", "")
     nome = t.get("assistido") or "s/ nome"
     etiqueta = (f"conjunto de {len(ids)} tramitações" if conjunto
                 else f"tramitação {t.get('data_envio', '')}")
     if not meios:
-        yield {"level": "erro",
-               "msg": f"{rotulo}PAJ {t['paj']} ({nome}): sem meio selecionado — mantido na fila."}
-        yield {"_status": "falha"}
+        if wa_presente:
+            yield {"level": "muted",
+                   "msg": f"{rotulo}PAJ {t['paj']} ({nome}): só WhatsApp — enviar na aba WhatsApp. Pulado no lote."}
+            yield {"_status": "pulado"}
+        else:
+            yield {"level": "erro",
+                   "msg": f"{rotulo}PAJ {t['paj']} ({nome}): sem meio selecionado — mantido na fila."}
+            yield {"_status": "falha"}
         return
 
     n_anx = len(t.get("anexos", []) or [])
@@ -1820,16 +1853,161 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
                 if conjunto:
                     entry["tramite_ids"] = ids
                 alvo.setdefault("enviados", []).append(entry)
-            if fail_meios:
+            if fail_meios or wa_presente:
+                # WhatsApp permanece na fila (é enviado na aba WhatsApp); falhas idem.
                 envio = alvo.get("envio") or {}
-                envio["meios"] = fail_meios       # só os que faltam reenviar
-                envio["falhas"] = falhas          # {meio: detalhe} — marcação da falha
-                envio["falha_em"] = ultimo_ts
+                envio["meios"] = fail_meios + (["whatsapp"] if wa_presente else [])
+                if fail_meios:
+                    envio["falhas"] = falhas      # {meio: detalhe} — marcação da falha
+                    envio["falha_em"] = ultimo_ts
                 alvo["envio"] = envio
             else:
                 alvo["envio"] = {}                # tudo OK → sai da fila
         _gravar_box(slug, box)
     yield {"_status": status}
+
+
+async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
+                                  headless: bool | None = None) -> dict:
+    """Envio ASSISTIDO por WhatsApp de UMA tramitação (fora do lote autônomo).
+
+    Modelo: 1 clique no painel → o Playwright abre a conversa (Chrome dedicado, na
+    máquina do servidor), envia TEXTO e depois os ANEXOS, gera o comprovante PDF
+    (2 páginas: dados do contato + conversa) e registra no histórico + em `enviados`
+    do trâmite, limpando a fila. Respeita o modo do meio (simulado × real).
+    Retorna {ok, status, detalhe, comprovante, comprovante_nome}."""
+    from ingestao import whatsapp_client
+    from services import historico_service
+
+    caixa = config_service.get_caixa(slug)
+    if not caixa:
+        return {"ok": False, "status": "falha", "detalhe": "Caixa desconhecida."}
+    box = _ler_box(slug, paj_norm)
+    sol = _achar_solic(box, id_tramite) if box else None
+    if not sol:
+        return {"ok": False, "status": "falha", "detalhe": "Tramitação não encontrada."}
+
+    envio = sol.get("envio") or {}
+    mensagem = (envio.get("mensagem") or sol.get("sugestao_editada")
+                or sol.get("sugestao_ia") or "").strip()
+    cont = ler_contato(paj_norm)
+    numeros = cont.get("whatsapp_numeros") or []
+    if not numeros:
+        return {"ok": False, "status": "falha",
+                "detalhe": "PAJ sem número de WhatsApp cadastrado."}
+    numero = numeros[0]
+    assistido = cont.get("assistido") or sol.get("assistido") or ""
+    paj = box.get("paj", "")
+
+    anexos_meta = sol.get("anexos", []) or []
+    anexos_ctx = [{**a, "caminho": str(caminho_anexo(paj_norm, "tramite", id_tramite,
+                   a.get("arquivo", "")))} for a in anexos_meta]
+
+    modo = config_service.get_envio_modo_meio("whatsapp")
+
+    if not _pode_exclusivo():
+        return {"ok": False, "status": "falha",
+                "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
+
+    async with _sync_lock:
+        if modo == "simulado":
+            await asyncio.sleep(0.4)
+            res = {"ok": True, "status": "simulado", "comprovante": None,
+                   "detalhe": f"[simulado] WhatsApp para {assistido or numero}"}
+        else:
+            if headless is None:
+                headless = config_service.get_whatsapp_headless()
+            res = await whatsapp_client.enviar_mensagem(
+                numero=numero, mensagem=mensagem, anexos=anexos_ctx,
+                headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm)
+
+        if not res.get("ok"):
+            box2 = _ler_box(slug, paj_norm)
+            s2 = _achar_solic(box2, id_tramite) if box2 else None
+            if s2:
+                e = s2.get("envio") or {}
+                e["falhas"] = {"whatsapp": res.get("detalhe", "falha")}
+                e["falha_em"] = _dt.datetime.now().isoformat(timespec="seconds")
+                s2["envio"] = e
+                _gravar_box(slug, box2)
+            return res
+
+        comprovante = res.get("comprovante")
+        comp_nome = Path(comprovante).name if comprovante else ""
+        envio_id = uuid.uuid4().hex[:12]
+        reg = historico_service.registrar({
+            "envio_id": envio_id,
+            "paj_norm": paj_norm, "paj": paj, "assistido": assistido,
+            "oficio": sol.get("oficio_origem", ""),
+            "id_tramite": id_tramite, "tramite_ids": [id_tramite],
+            "conjunto": False, "tramite_data": sol.get("data_envio", ""),
+            "tipo": sol.get("sugestao_tipo", ""),
+            "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
+            "meio": "whatsapp", "meios": ["whatsapp"],
+            "prazo": _prazo_ok(envio.get("prazo_whatsapp", 5)),
+            "mensagem": mensagem, "anexos": anexos_meta,
+            "anexo_tipo": "tramite", "anexo_ref": id_tramite,
+            "url_detalhe": sol.get("url_detalhe", ""),
+            "status": res.get("status", "enviado"), "detalhe": res.get("detalhe", ""),
+            "comprovante": comp_nome,  # nome do PDF em dados/_comprovantes_whatsapp/
+            "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+        })
+        box2 = _ler_box(slug, paj_norm)
+        s2 = _achar_solic(box2, id_tramite) if box2 else None
+        if s2:
+            entry = {"em": reg["ts"], "meios": ["whatsapp"], "mensagem": mensagem,
+                     "status": res.get("status", "enviado"), "envio_id": envio_id,
+                     "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome}
+            s2.setdefault("enviados", []).append(entry)
+            # remove SÓ o WhatsApp da fila; preserva outros meios (app/email) pendentes.
+            e2 = s2.get("envio") or {}
+            restantes = [m for m in (e2.get("meios") or []) if m != "whatsapp"]
+            if restantes:
+                e2["meios"] = restantes
+                s2["envio"] = e2
+            else:
+                s2["envio"] = {}
+            _gravar_box(slug, box2)
+        return {**res, "comprovante_nome": comp_nome, "historico_id": reg["id"]}
+
+
+async def enviar_whatsapp_lote_stream(selecao: list[dict]):
+    """Envio em LOTE por WhatsApp (assistido, 1 clique → dispara vários), com
+    INTERVALO entre mensagens (ritmo humano, reduz risco de ban). `selecao`: lista
+    de {slug, paj_norm, id_tramite, paj?}. Emite eventos SSE; reaproveita
+    `enviar_whatsapp_tramite` (que trava/valida/gera comprovante+histórico por item).
+    Erros não param o lote (o item fica na fila com a falha)."""
+    itens = [s for s in (selecao or []) if s.get("slug") and s.get("paj_norm") and s.get("id_tramite")]
+    if not itens:
+        yield {"level": "info", "msg": "Nada a enviar (seleção vazia)."}
+        yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0}}
+        return
+    intervalo = config_service.get_whatsapp_intervalo_seg()
+    t0 = time.monotonic()
+    yield {"level": "info",
+           "msg": f"Enviando {len(itens)} WhatsApp — intervalo de {intervalo}s entre mensagens."}
+    enviados = falhas = 0
+    for i, it in enumerate(itens, 1):
+        if i > 1:
+            yield {"level": "muted", "msg": f"     aguardando {intervalo}s antes da próxima…"}
+            await asyncio.sleep(intervalo)
+        paj_lbl = it.get("paj") or it.get("paj_norm")
+        yield {"level": "novo", "msg": f"[{i}/{len(itens)}] {paj_lbl} — abrindo conversa…"}
+        try:
+            res = await enviar_whatsapp_tramite(it["slug"], it["paj_norm"], it["id_tramite"])
+        except Exception as e:  # noqa: BLE001
+            res = {"ok": False, "detalhe": str(e)}
+        if res.get("ok"):
+            enviados += 1
+            yield {"level": "ok", "msg": f"     ✓ {res.get('detalhe', 'enviado')}"}
+        else:
+            falhas += 1
+            yield {"level": "erro", "msg": f"     ✗ {res.get('detalhe') or res.get('erro') or 'falha'}"}
+    dur = time.monotonic() - t0
+    yield {"level": "ok",
+           "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
+    yield {"done": True, "resumo": {"ok": True, "enviados": enviados, "falhas": falhas,
+                                    "duracao": round(dur, 1)}}
 
 
 async def enviar_fila_stream(slug: str):
@@ -1867,6 +2045,8 @@ async def enviar_fila_stream(slug: str):
                 if "_status" in ev:
                     if ev["_status"] == "falha":
                         falhas += 1
+                    elif ev["_status"] == "pulado":
+                        pass  # WhatsApp fora do lote — não conta como enviado nem falha
                     else:
                         enviados += 1
                 else:
@@ -1946,6 +2126,8 @@ async def enviar_selecao_stream(selecao: list[dict]):
                 if "_status" in ev:
                     if ev["_status"] == "falha":
                         falhas += 1
+                    elif ev["_status"] == "pulado":
+                        pass  # WhatsApp fora do lote — não conta como enviado nem falha
                     else:
                         enviados += 1
                 else:

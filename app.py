@@ -68,6 +68,8 @@ from services import divcom_service as _ds  # noqa: E402
 
 app.state.jinja.globals["menu_caixas"] = _ds.menu_caixas
 app.state.jinja.globals["total_prontos"] = _ds.contar_prontos_envio
+app.state.jinja.globals["prontos_por_meio"] = _ds.prontos_por_meio
+app.state.jinja.globals["prontos_meios"] = _ds.PRONTOS_MEIOS
 app.state.jinja.globals["cor_caixa"] = _ds.cor_caixa
 
 

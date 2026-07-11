@@ -26,6 +26,17 @@ async def home():
     return RedirectResponse("/configuracoes")
 
 
+@router.get("/caixas", response_class=HTMLResponse)
+async def caixas_home(request: Request):
+    """Página de RESUMO das caixas sincronizadas (habilitadas), com nº de PAJs a
+    tratar e link para abrir cada uma. Espelha a lógica do resumo de Prontos."""
+    caixas = divcom_service.menu_caixas()  # habilitadas + qtd
+    template = request.app.state.jinja.get_template("caixas_resumo.html")
+    return HTMLResponse(template.render(
+        request=request, caixas=caixas,
+        total=sum(c.get("qtd", 0) for c in caixas)))
+
+
 @router.get("/caixa/{slug}", response_class=HTMLResponse)
 async def dashboard(request: Request, slug: str):
     caixa = config_service.get_caixa(slug)
@@ -63,27 +74,98 @@ async def sincronizar_stream(slug: str):
 
 
 @router.get("/prontos", response_class=HTMLResponse)
-async def prontos_envio(request: Request):
-    """Página GLOBAL "Prontos para Envio": fila de envio de todas as caixas."""
+async def prontos_home(request: Request):
+    """Página de RESUMO: quantas mensagens gravadas há em cada meio (com link para
+    abrir), ou aviso de que não há mensagens gravadas em nenhum meio."""
+    counts = divcom_service.prontos_por_meio()
+    linhas = [{"slug": slug, "key": key, "label": lab, "qtd": counts.get(slug, 0)}
+              for slug, key, lab in divcom_service.PRONTOS_MEIOS if counts.get(slug, 0)]
+    template = request.app.state.jinja.get_template("prontos_resumo.html")
+    return HTMLResponse(template.render(
+        request=request, linhas=linhas,
+        total=counts.get("total", 0),
+        total_meios=sum(l["qtd"] for l in linhas)))
+
+
+@router.get("/prontos/{meio}", response_class=HTMLResponse)
+async def prontos_envio(request: Request, meio: str):
+    """Página "Prontos para Envio" de UM meio (submenu). App/E-mail = lote;
+    WhatsApp = assistido por linha; Telefone/Carta = a definir."""
+    key_por_slug = {slug: k for slug, k, _l in divcom_service.PRONTOS_MEIOS}
+    label_por_slug = {slug: lab for slug, _k, lab in divcom_service.PRONTOS_MEIOS}
+    if meio not in key_por_slug:
+        return RedirectResponse("/prontos/app")
+    key = key_por_slug[meio]
     meios = envio_service.meios_disponiveis()
-    prontos = divcom_service.listar_prontos_envio()
-    # Opções de filtro: caixas e tipos (texto padrão) presentes na fila.
+    todos = divcom_service.listar_prontos_envio()
+    itens = [p for p in todos if key in (p.get("envio_meios") or [])]
+    prontos_app = itens if meio in ("app", "email") else []
+    prontos_wa = itens if meio == "whatsapp" else []
+    # Opções de filtro (caixas/tipos presentes NESTE meio).
     caixas_filtro, _vistos = [], set()
-    for p in prontos:
+    for p in itens:
         if p["caixa_slug"] not in _vistos:
             _vistos.add(p["caixa_slug"])
             caixas_filtro.append({"slug": p["caixa_slug"], "nome": p["caixa_nome"]})
-    tipos_filtro = sorted({p.get("sugestao_tipo", "") for p in prontos if p.get("sugestao_tipo")})
+    tipos_filtro = sorted({p.get("sugestao_tipo", "") for p in itens if p.get("sugestao_tipo")})
     template = request.app.state.jinja.get_template("prontos.html")
     return HTMLResponse(template.render(
         request=request,
-        prontos=prontos,
+        prontos=itens,
+        prontos_app=prontos_app,
+        prontos_wa=prontos_wa,
+        meio_ativo=meio,
+        meio_label=label_por_slug[meio],
         meios_envio=meios,
         meio_labels={m["key"]: m["label"] for m in meios},
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modos_resumo=config_service.resumo_modos()))
+
+
+@router.post("/api/prontos/whatsapp/enviar", response_class=JSONResponse)
+async def prontos_whatsapp_enviar(payload: dict = Body(...)):
+    """Envio ASSISTIDO por WhatsApp de UMA tramitação (fora do lote). 1 clique →
+    Playwright envia texto→anexos, gera o comprovante e registra. Bloqueia até
+    concluir (~30s em modo real). Retorna {ok, status, detalhe, comprovante_nome}."""
+    slug = (payload or {}).get("slug", "")
+    paj = (payload or {}).get("paj_norm", "")
+    tr = (payload or {}).get("id_tramite", "")
+    if not (slug and paj and tr):
+        return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
+    return await divcom_service.enviar_whatsapp_tramite(slug, paj, tr)
+
+
+@router.post("/api/prontos/whatsapp/enviar-lote")
+async def prontos_whatsapp_lote(payload: dict = Body(default={})):
+    """Envio em LOTE por WhatsApp (com intervalo entre mensagens). Corpo:
+    {selecao: [{slug, paj_norm, id_tramite, paj}]}. Resposta SSE (via POST)."""
+    selecao = payload.get("selecao") or [] if isinstance(payload, dict) else []
+
+    async def gen():
+        try:
+            async for ev in divcom_service.enviar_whatsapp_lote_stream(selecao):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@router.get("/comprovante/whatsapp/{nome}")
+async def comprovante_whatsapp(nome: str):
+    """Serve o PDF do comprovante de envio por WhatsApp (abre inline no navegador).
+    Só o nome-base, dentro de COMPROVANTES_WA_DIR (bloqueia path traversal)."""
+    from pathlib import Path
+    base = Path(nome).name
+    caminho = divcom_service.COMPROVANTES_WA_DIR / base
+    if base != nome or caminho.suffix.lower() != ".pdf" or not caminho.is_file():
+        return JSONResponse({"erro": "comprovante não encontrado"}, status_code=404)
+    return FileResponse(str(caminho), media_type="application/pdf",
+                        headers={"Content-Disposition": f'inline; filename="{base}"'})
 
 
 @router.get("/api/prontos/enviar/stream")

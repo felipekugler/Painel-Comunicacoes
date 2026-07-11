@@ -26,9 +26,12 @@
 </div>
 <div class="flex items-end justify-between gap-4 flex-wrap mb-6">
     <div>
-        <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos para Envio</h1>
+        <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos — {{ meio_label }}</h1>
         <p class="text-secondary mt-1" style="font-size: 13px;">
-            PAJs gravados para envio de <strong>todas as caixas</strong>. Filtre e marque o que enviar; "Enviar Agora" dispara os <strong>marcados</strong>.
+            PAJs gravados de <strong>todas as caixas</strong> para envio por <strong>{{ meio_label }}</strong>.
+            {% if meio_ativo in ('app','email') %}Marque e use <strong>"Enviar Agora"</strong> (lote).
+            {% elif meio_ativo == 'whatsapp' %}Envio <strong>assistido</strong>: 1 clique por linha — o painel envia texto e anexos e gera o <strong>comprovante (PDF)</strong>.
+            {% endif %}
         </p>
     </div>
 </div>
@@ -39,7 +42,7 @@
         Envio: {{ envio_modos_resumo }}</span>
     {% if prontos %}
     <div style="margin-left:auto;">
-        <button class="btn-accent" id="btn-enviar" onclick="enviarSelecionados()" disabled>
+        <button class="btn-accent" id="btn-enviar" onclick="{% if meio_ativo == 'whatsapp' %}enviarLoteWhatsapp(){% else %}enviarSelecionados(){% endif %}" disabled>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
             </svg>
@@ -49,60 +52,26 @@
     {% endif %}
 </div>
 
-{% if prontos %}
-<div class="pr-filtros">
-    <span class="text-tertiary" style="font-size:12px;">Filtrar:</span>
-    <label>Caixa
-        <select id="f-caixa" onchange="aplicarFiltros()">
-            <option value="">Todas</option>
-            {% for c in caixas_filtro %}<option value="{{ c.slug }}">{{ c.nome }}</option>{% endfor %}
-        </select>
-    </label>
-    <label>Texto padrão
-        <select id="f-tipo" onchange="aplicarFiltros()">
-            <option value="">Todos</option>
-            {% for t in tipos_filtro %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
-            <option value="__none__">(texto específico / sem classificação)</option>
-        </select>
-    </label>
-    <label>Meio
-        <select id="f-meio" onchange="aplicarFiltros()">
-            <option value="">Todos</option>
-            {% for m in meios_envio %}<option value="{{ m.key }}">{{ m.label }}</option>{% endfor %}
-        </select>
-    </label>
-    <label>Anexos
-        <select id="f-anexo" onchange="aplicarFiltros()">
-            <option value="">Todos</option>
-            <option value="com">Com anexo</option>
-            <option value="sem">Sem anexo</option>
-        </select>
-    </label>
-    <span style="margin-left:auto;font-size:12px;">
-        <a href="#" onclick="marcarVisiveis(true);return false;">marcar visíveis</a> ·
-        <a href="#" onclick="marcarVisiveis(false);return false;">limpar</a>
-    </span>
-</div>
-
+{% if prontos_app %}
+<p class="text-tertiary" style="font-size:12px;margin:0 0 8px;">Clique nos cabeçalhos para ordenar. Marque os PAJs e use "Enviar Agora".</p>
 <div class="fluent-card" style="overflow-x:auto;">
     <table class="fluent-table">
         <thead>
             <tr>
-                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar visíveis"></th>
-                <th style="width: 7rem;">PAJ</th>
-                <th style="width: 8rem;">Ofício</th>
-                <th style="width: 9rem;">Assistido</th>
-                <th style="width: 10rem;">Caixa de origem</th>
-                <th style="width: 10rem;">Tipo</th>
+                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar todos"></th>
+                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Caixa de origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Tipo<span class="sort-arrow"></span></th>
                 <th style="min-width: 16rem;">Mensagem</th>
-                <th class="text-center" style="width: 3rem;">Anexos</th>
-                <th class="text-center" style="width: 6rem;">Prazo</th>
-                <th class="text-center" style="width: 7rem;">Meios</th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width: 3rem;">Anexos<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width: 6rem;">Prazo<span class="sort-arrow"></span></th>
                 <th style="width: 8rem;">Ações</th>
             </tr>
         </thead>
         <tbody>
-            {% for paj in prontos %}
+            {% for paj in prontos_app %}
             {% set c = paj.contatos or {} %}
             <tr class="pr-row" data-caixa="{{ paj.caixa_slug }}"
                 data-tipoclass="{{ paj.sugestao_tipo or '' }}"
@@ -127,7 +96,7 @@
                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
                            data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
                 </td>
-                <td>
+                <td data-sort="{{ paj.paj }}">
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
                     {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
@@ -155,7 +124,7 @@
                             data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
                             title="Ver a mensagem completa">Ver mensagem</button>
                 </td>
-                <td class="text-center">
+                <td class="text-center" data-sort="{{ paj.n_anexos }}">
                     <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
                             data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
                             data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
@@ -168,21 +137,10 @@
                         {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
                     </button>
                 </td>
-                <td class="text-center">
-                    {% set _plab = {'app_sisdpu':'App','whatsapp':'WhatsApp','email':'E-mail'} %}
-                    {% set _prz = {'app_sisdpu': paj.envio_prazo_app, 'whatsapp': paj.envio_prazo_whatsapp, 'email': paj.envio_prazo_email} %}
-                    {% for m in paj.envio_meios %}{% set _p = _prz.get(m, 5) %}<div style="font-size:12px;white-space:nowrap;"><span class="text-tertiary">{{ _plab.get(m, m) }}:</span> {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}</div>{% endfor %}
-                    {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                <td class="text-center">
-                    <div style="display:inline-flex;flex-wrap:wrap;gap:6px;justify-content:center;align-items:flex-start;">
-                        {% for m in paj.envio_meios %}
-                            {% if m == 'app_sisdpu' and paj.envio_somente_leitura %}
-                            <span class="meio-sl">{{ meio_icon(m, meio_labels.get(m, m)) }}<span class="sl-badge" title="Será enviado em modo Somente Leitura">SL</span></span>
-                            {% else %}{{ meio_icon(m, meio_labels.get(m, m)) }}{% endif %}
-                        {% endfor %}
-                        {% if not paj.envio_meios %}<span class="text-tertiary">—</span>{% endif %}
-                    </div>
+                {% set _p = paj.envio_prazo_app if meio_ativo == 'app' else paj.envio_prazo_email %}
+                <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ _p }}">
+                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}
+                    {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<div class="mt-1"><span class="sl-badge" title="Somente Leitura">SL</span></div>{% endif %}
                 </td>
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
@@ -213,10 +171,119 @@
         </tbody>
     </table>
 </div>
-<p class="text-tertiary" style="font-size:11.5px;margin-top:8px;" id="pr-vazio-filtro" hidden>Nenhum item corresponde ao filtro.</p>
-{% else %}
+{% endif %}{# fim tabela App/E-mail #}
+
+{% if prontos_wa %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar todos"></th>
+                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Caixa de origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Tipo<span class="sort-arrow"></span></th>
+                <th style="min-width:15rem;">Mensagem</th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:3rem;">Anexos<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Prazo<span class="sort-arrow"></span></th>
+                <th style="min-width:14rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for paj in prontos_wa %}
+            {% set c = paj.contatos or {} %}
+            <tr class="wa-row pr-row"
+                data-item='{{ {"slug": paj.caixa_slug, "paj_norm": paj.paj_norm, "paj": paj.paj,
+                               "tipo": paj.tipo, "id_tramite": paj.id_tramite|default("")} | tojson }}'>
+                <td style="text-align:center;">
+                    <input type="checkbox" class="pr-cb" onchange="atualizarContador()"
+                           data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
+                           data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
+                </td>
+                <td data-sort="{{ paj.paj }}">
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+                       style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.envio_urgente %}<div class="mt-1"><span class="pill-urgente" title="Urgente">⚡ Urgente</span></div>{% endif %}
+                    {% if paj.envio_falhas and paj.envio_falhas.get('whatsapp') %}
+                    <div class="mt-1"><span title="{{ paj.envio_falhas['whatsapp'] }}" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ {{ paj.envio_falhas['whatsapp'] }}</span></div>
+                    {% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
+                <td>{{ paj.assistido or "—" }}</td>
+                <td>
+                    {%- set _cor = cor_caixa(paj.caixa_slug) -%}
+                    <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
+                          style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
+                </td>
+                <td>
+                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;">
+                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
+                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
+                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}">Ver mensagem</button>
+                </td>
+                <td class="text-center" data-sort="{{ paj.n_anexos }}">
+                    <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                            data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+                            onclick="anxAbrir(this)"
+                            title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                        </svg>
+                        {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+                    </button>
+                </td>
+                <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ paj.envio_prazo_whatsapp }}">
+                    {% set _p = paj.envio_prazo_whatsapp %}
+                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}
+                </td>
+                <td>
+                    <div class="wa-acao" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                        {% if paj.whatsapp_estado == 'ativo' %}
+                        <button class="btn-wa-enviar"
+                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
+                                data-tramite="{{ paj.id_tramite }}" onclick="enviarWhatsapp(this)">
+                            {{ meio_icon('whatsapp', 'WhatsApp') }} Enviar no WhatsApp
+                        </button>
+                        {% else %}
+                        <span class="text-tertiary" style="font-size:12px;">Cadastre o nº de WhatsApp na caixa de origem</span>
+                        {% endif %}
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                data-mensagem="{{ paj.envio_mensagem }}" data-meios='{{ paj.envio_meios|tojson }}'
+                                data-anexos='{{ paj.anexos|tojson }}' data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                data-prazo-app="{{ paj.envio_prazo_app }}" data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
+                                data-prazo-email="{{ paj.envio_prazo_email }}"
+                                data-app="{{ 1 if c.app_sisdpu else 0 }}" data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                data-email="{{ 1 if c.email else 0 }}" onclick="gravarAbrir(this)">Editar</button>
+                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
+                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                onclick="removerDaFila(this)" title="Tirar da fila">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{% if meio_ativo in ('telefone','carta') %}
+<div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;line-height:1.6;">
+    O meio <strong>{{ meio_label }}</strong> ainda será configurado — a função de
+    {% if meio_ativo == 'telefone' %}<strong>registro de contato por telefone</strong>{% else %}<strong>geração/expedição de carta</strong>{% endif %}
+    está no roadmap. Por enquanto não há itens gravados para este meio.
+</div>
+{% elif not prontos %}
 <div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">
-    Nenhum PAJ gravado para envio.
+    Nenhum PAJ gravado para envio por <strong>{{ meio_label }}</strong>.
 </div>
 {% endif %}
 {% endblock %}
@@ -244,6 +311,18 @@
              cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
 .btn-grava:hover { filter:brightness(1.07); }
 .btn-grava svg { width:14px; height:14px; }
+.btn-wa-enviar { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid transparent;
+                 border-radius:6px; background:var(--c-zap,#16a34a); color:#fff; font-weight:600; font-size:12.5px;
+                 cursor:pointer; transition:filter .12s ease; }
+.btn-wa-enviar:hover { filter:brightness(1.07); }
+.btn-wa-enviar:disabled { opacity:.65; cursor:default; }
+.btn-wa-enviar .meio-ic { color:#fff !important; }
+.btn-wa-enviar .meio-ic svg { width:16px; height:16px; }
+.wa-enviado-ok { color:var(--c-zap,#16a34a); font-weight:700; font-size:12.5px; }
+.wa-pdf-link { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600;
+               color:var(--c-mail,#2563eb); text-decoration:none; margin-left:6px;
+               border:1px solid color-mix(in srgb, var(--c-mail,#2563eb) 40%, transparent); border-radius:6px; padding:4px 9px; }
+.wa-pdf-link:hover { background:color-mix(in srgb, var(--c-mail,#2563eb) 10%, transparent); }
 .wa-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
               justify-content:center; z-index:1000; padding:16px; }
 .wa-opt { display:flex; align-items:center; gap:10px; cursor:pointer; padding:8px 10px; border-radius:8px; }
@@ -384,31 +463,34 @@ function mostrarToast(msg) {
     setTimeout(() => { t.remove(); }, 2000);
 }
 
-// ---------- Filtros + seleção ----------
-function aplicarFiltros() {
-    const fc = document.getElementById('f-caixa').value;
-    const ft = document.getElementById('f-tipo').value;
-    const fm = document.getElementById('f-meio').value;
-    const fa = document.getElementById('f-anexo').value;
-    let visiveis = 0;
-    document.querySelectorAll('tr.pr-row').forEach(row => {
-        const okC = !fc || row.dataset.caixa === fc;
-        const tc = row.dataset.tipoclass || '';
-        const okT = !ft || (ft === '__none__' ? tc === '' : tc === ft);
-        const meios = (row.dataset.meios || '').split(',').filter(Boolean);
-        const okM = !fm || meios.includes(fm);
-        const temAnexo = row.dataset.anexo === '1';
-        const okA = !fa || (fa === 'com' ? temAnexo : !temAnexo);
-        const mostra = okC && okT && okM && okA;
-        row.style.display = mostra ? '' : 'none';
-        const cb = row.querySelector('.pr-cb');
-        if (!mostra && cb) cb.checked = false;   // oculto sai da seleção
-        if (mostra) visiveis++;
+// ---------- Ordenação por clique no cabeçalho ----------
+function ordenarTabela(th) {
+    const table = th.closest('table');
+    const tbody = table.tBodies[0];
+    const col = parseInt(th.dataset.col, 10);
+    const tipo = th.dataset.type || 'text';
+    const dir = th.dataset.dir === 'asc' ? 'desc' : 'asc';
+    table.querySelectorAll('th.sortable').forEach(h => {
+        h.removeAttribute('data-dir');
+        const a = h.querySelector('.sort-arrow'); if (a) a.textContent = '';
     });
-    const aviso = document.getElementById('pr-vazio-filtro');
-    if (aviso) aviso.hidden = visiveis > 0;
-    atualizarContador();
+    th.dataset.dir = dir;
+    th.querySelector('.sort-arrow').textContent = dir === 'asc' ? '▲' : '▼';
+    const val = (tr) => {
+        const cell = tr.cells[col];
+        return (cell.getAttribute('data-sort') ?? cell.textContent).trim();
+    };
+    const rows = Array.from(tbody.rows);
+    rows.sort((a, b) => {
+        let av = val(a), bv = val(b), cmp;
+        if (tipo === 'num') { cmp = (parseFloat(av) || 0) - (parseFloat(bv) || 0); }
+        else { cmp = av.localeCompare(bv, 'pt-BR', { numeric: true, sensitivity: 'base' }); }
+        return dir === 'asc' ? cmp : -cmp;
+    });
+    rows.forEach(r => tbody.appendChild(r));
 }
+
+// ---------- Seleção (lote App/E-mail) ----------
 function marcarVisiveis(v) {
     document.querySelectorAll('tr.pr-row').forEach(row => {
         if (row.style.display === 'none') return;
@@ -838,6 +920,79 @@ function confAdiar(g) {
     const idsConf = new Set(conflitos.flat().map(chaveItem));
     const semConflito = itens.filter(i => !idsConf.has(chaveItem(i)));
     abrirConflitoModal(conflitos, semConflito);
+}
+
+// ---------- WhatsApp: envio assistido por linha (1 clique → sequência) ----------
+async function enviarWhatsapp(btn) {
+    const cell = btn.closest('.wa-acao');
+    const slug = btn.dataset.slug, paj = btn.dataset.paj, tramite = btn.dataset.tramite || '';
+    if (!confirm('Enviar esta mensagem pelo WhatsApp agora?\n\nO painel vai abrir a conversa, enviar o TEXTO e depois os ANEXOS, e gerar o comprovante (PDF).')) return;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = 'Enviando… (~30s)';
+    try {
+        const r = await fetch('/api/prontos/whatsapp/enviar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: slug, paj_norm: paj, id_tramite: tramite })
+        });
+        const d = await r.json();
+        if (d.ok) {
+            let html = '<span class="wa-enviado-ok">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
+            if (d.comprovante_nome) {
+                html += '<a class="wa-pdf-link" target="_blank" title="Abrir comprovante (PDF)" href="/comprovante/whatsapp/'
+                    + encodeURIComponent(d.comprovante_nome) + '">'
+                    + '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>'
+                    + 'Comprovante PDF</a>';
+            }
+            if (cell) cell.innerHTML = html;
+            mostrarToast('WhatsApp ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
+        } else {
+            btn.disabled = false; btn.innerHTML = orig;
+            alert('Falha no envio pelo WhatsApp:\n' + (d.detalhe || d.erro || 'erro'));
+        }
+    } catch (e) {
+        btn.disabled = false; btn.innerHTML = orig;
+        alert('Erro: ' + e);
+    }
+}
+
+// ---------- WhatsApp: envio EM LOTE (marcados) com intervalo entre mensagens ----------
+async function enviarLoteWhatsapp() {
+    const itens = itensSelecionados();
+    if (!itens.length) { mostrarToast('Marque ao menos um PAJ'); return; }
+    if (!confirm('Enviar ' + itens.length + ' mensagem(ns) pelo WhatsApp EM LOTE?\n\n'
+        + 'O painel abre cada conversa e envia automaticamente, com um intervalo entre as mensagens (configurável em Configurações). Pode levar alguns minutos.')) return;
+    const selecao = itens.map(i => ({ slug: i.slug, paj_norm: i.paj_norm, id_tramite: i.id_tramite || '', paj: i.paj }));
+    const modal = document.getElementById('sse-modal');
+    const log = document.getElementById('sse-log');
+    const st = document.getElementById('sse-status');
+    const fechar = document.getElementById('sse-fechar');
+    log.innerHTML = ''; st.textContent = '— em andamento…'; fechar.style.display = 'none';
+    modal.style.display = 'flex';
+    try {
+        const resp = await fetch('/api/prontos/whatsapp/enviar-lote', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ selecao })
+        });
+        const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+        while (true) {
+            const { done, value } = await reader.read(); if (done) break;
+            buf += dec.decode(value, { stream: true }); let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+                const linha = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                if (!linha.startsWith('data: ')) continue;
+                let d; try { d = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+                if (d.done) { st.textContent = '— concluído'; continue; }
+                const div = document.createElement('div');
+                div.className = 'sync-line sync-' + (d.level || 'info');
+                div.textContent = d.msg || ''; log.appendChild(div); log.scrollTop = log.scrollHeight;
+            }
+        }
+    } catch (e) {
+        const div = document.createElement('div'); div.className = 'sync-line sync-erro';
+        div.textContent = 'Erro: ' + e; log.appendChild(div); st.textContent = '— erro';
+    }
+    fechar.style.display = '';
 }
 
 async function devolverPendentes(g) {

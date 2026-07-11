@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Caixas Sincronizadas{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="font-display" style="font-size: 28px; margin: 0;">Caixas Sincronizadas</h1>
+    <p class="text-secondary mt-1" style="font-size: 13px;">
+        Resumo das caixas de grupo habilitadas para sincronização. Clique numa caixa para abri-la.
+    </p>
+</div>
+
+{% if not caixas %}
+<div class="fluent-card text-tertiary" style="padding:40px 24px;text-align:center;font-size:14px;line-height:1.6;">
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.4" stroke="currentColor"
+         style="width:40px;height:40px;margin:0 auto 12px;opacity:.5;">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+    Nenhuma caixa habilitada para sincronização.
+    <div class="mt-2" style="font-size:12.5px;">Habilite caixas em <strong>Configurações → Caixas para Sincronização</strong>.</div>
+</div>
+{% else %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th>Caixa de grupo</th>
+                <th class="text-center" style="width:10rem;">PAJs a tratar</th>
+                <th style="width:9rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for cx in caixas %}
+            {%- set _cor = cor_caixa(cx.slug) -%}
+            <tr>
+                <td>
+                    <a href="/caixa/{{ cx.slug }}" class="resumo-caixa">
+                        <span class="caixa-chip" title="Grupo: {{ cx.grupo }}"
+                              style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ cx.nome }}</span>
+                        <span class="text-tertiary" style="font-size:12px;">{{ cx.grupo }}</span>
+                    </a>
+                </td>
+                <td class="text-center"><span class="pill">{{ cx.qtd|default(0) }}</span></td>
+                <td>
+                    <a class="btn-subtle" style="padding:4px 12px;font-size:12.5px;text-decoration:none;" href="/caixa/{{ cx.slug }}">Abrir →</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<p class="text-tertiary" style="font-size:12px;margin-top:10px;">
+    {{ caixas|length }} caixa(s) sincronizada(s) · <strong>{{ total }}</strong> PAJ(s) a tratar no total.
+</p>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<style>
+.caixa-chip { display:inline-flex; align-items:center; font-size:12px; font-weight:600; padding:3px 10px;
+              border-radius:999px; white-space:nowrap; }
+.resumo-caixa { display:inline-flex; align-items:center; gap:10px; text-decoration:none; }
+.resumo-caixa:hover .caixa-chip { filter:brightness(1.05); }
+</style>
+{% endblock %}

@@ -260,6 +260,33 @@ def get_envio_modo() -> str:
     return "simulado" if all(v == "simulado" for v in get_envio_modos().values()) else "real"
 
 
+def get_whatsapp_headless() -> bool:
+    """Se True, o Chrome do WhatsApp roda OCULTO. Padrão False (headed — o servidor
+    vê a janela do envio acontecer na máquina dele)."""
+    return bool(ler_config().get("whatsapp_headless", False))
+
+
+def get_whatsapp_intervalo_seg() -> int:
+    """Intervalo (segundos) entre mensagens no ENVIO EM LOTE por WhatsApp — para
+    imitar ritmo humano e reduzir risco de banimento. Padrão 25s (mín. 5)."""
+    try:
+        n = int(ler_config().get("whatsapp_intervalo_seg", 25))
+    except (TypeError, ValueError):
+        n = 25
+    return max(5, n)
+
+
+def set_whatsapp_intervalo_seg(seg: int) -> int:
+    d = ler_config()
+    try:
+        n = max(5, int(seg))
+    except (TypeError, ValueError):
+        n = 25
+    d["whatsapp_intervalo_seg"] = n
+    _gravar(d)
+    return n
+
+
 def resumo_modos() -> str:
     """Texto curto do modo de cada meio, p/ logs/avisos. Ex.: 'App=REAL · WhatsApp=simulado'."""
     modos = get_envio_modos()
