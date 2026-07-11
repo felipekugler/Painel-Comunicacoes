@@ -78,7 +78,7 @@
     </div>
 </div>
 
-{% if not pendentes and not fila and not enviados and not triagem %}
+{% if not pendentes and not fila and not triagem %}
 <div class="fluent-card flex flex-col items-center justify-center text-center" style="padding: 64px 24px;">
     <span class="inline-flex items-center justify-center rounded-2xl mb-4"
           style="width:56px;height:56px;background:var(--accent-soft);color:var(--accent);">
@@ -345,87 +345,8 @@
 {#- (A seção "Gravados para envio" foi movida para a página GLOBAL "Prontos para
     Envio" no menu — os gravados de todas as caixas ficam agrupados lá.) -#}
 
-{#- ===================== TABELA 3: já enviados nesta caixa ===================== -#}
-{% if enviados %}
-<div class="section-head" style="margin-top:28px;">
-    <h2 class="font-display" style="font-size:18px;margin:0;">Enviados</h2>
-    <span class="pill">{{ enviados|length }}</span>
-    <span class="text-tertiary" style="font-size:12px;">— mensagem já disparada; aguardam a conclusão da tramitação no SISDPU</span>
-</div>
-<div class="fluent-card" style="overflow-x:auto;">
-    <table class="fluent-table">
-        <thead>
-            <tr>
-                <th class="sortable" data-col="0" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">PAJ<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width: 20rem;">Mensagem enviada</th>
-                <th class="text-center" style="width: 8rem;">Meios usados</th>
-                <th class="sortable" data-col="6" data-type="num" onclick="ordenarTabela(this)" style="width: 9rem;">Enviado em<span class="sort-arrow"></span></th>
-                <th style="width: 8rem;">Ações</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for paj in enviados %}
-            {% set c = paj.contatos or {} %}
-            <tr>
-                <td data-sort="{{ paj.paj }}">
-                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
-                       class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
-                    {% if paj.remetente %}<div class="text-tertiary" style="font-size:11px;margin-top:2px;" title="Remetente da tramitação">{{ paj.remetente }}</div>{% endif %}
-                    {% if paj.n_contatos %}
-                    <div class="mt-1"><a class="pill-ok" href="/historico?q={{ paj.paj|urlencode }}"
-                        title="Ver as mensagens deste PAJ no histórico">
-                        Histórico de {{ paj.n_contatos }} mensage{{ 'm' if paj.n_contatos == 1 else 'ns' }}</a></div>
-                    {% endif %}
-                </td>
-                <td class="text-secondary" style="font-size:12.5px;" data-sort="{{ paj.oficio|lower }}">{{ paj.oficio or "—" }}</td>
-                <td data-sort="{{ (paj.assistido or '~')|lower }}">{{ paj.assistido or "—" }}</td>
-                <td data-sort="{{ (paj.sugestao_tipo or '~')|lower }}">
-                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
-                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
-                </td>
-                <td class="text-secondary" style="font-size:12.5px;">
-                    <div class="clamp3">{{ paj.contato_mensagem or "—" }}</div>
-                    {% if paj.contato_mensagem %}
-                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
-                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.contato_mensagem }}"
-                            title="Ver a mensagem completa">Ver mensagem</button>
-                    {% endif %}
-                </td>
-                <td class="text-center">
-                    <div style="display:inline-flex;gap:4px;align-items:flex-start;">
-                        {% for m in paj.contato_meios %}
-                            {% if m == 'app_sisdpu' and paj.contato_somente_leitura %}
-                            <span class="meio-sl">{{ contato_icon(m, true) }}<span class="sl-badge" title="Enviado em modo Somente Leitura">SL</span></span>
-                            {% else %}{{ contato_icon(m, true) }}{% endif %}
-                        {% endfor %}
-                        {% if not paj.contato_meios %}<span class="text-tertiary" style="font-size:12px;">—</span>{% endif %}
-                    </div>
-                </td>
-                <td class="text-secondary" style="white-space:nowrap;font-size:12.5px;" data-sort="{{ paj.contato_em }}">{{ paj.contato_em | data_hora_br }}</td>
-                <td>
-                    <button class="btn-grava" style="padding:3px 9px;font-size:12px;box-shadow:none;"
-                            data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                            data-mensagem="{{ paj.contato_mensagem }}"
-                            data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                            data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                            data-email="{{ 1 if c.email else 0 }}"
-                            onclick="gravarAbrir(this)" title="Gravar novamente para envio">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-                        </svg>
-                        Enviar de novo
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-{% endif %}
+{#- A tabela "Enviados" foi REMOVIDA das caixas. Os itens já enviados são
+    consultados apenas na página "Histórico de mensagens". -#}
 {% endif %}
 {% endblock %}
 
@@ -892,14 +813,89 @@ function btnRestore(btn) {
     btn.disabled = false;
     if (btn.dataset._orig != null) { btn.innerHTML = btn.dataset._orig; delete btn.dataset._orig; }
 }
+// Indicação PROEMINENTE de "IA em andamento" na triagem: spinner no botão clicado +
+// desabilita os dois botões do grupo + linha de status visível abaixo.
+function triagemAnalisando(btn) {
+    const acoes = btn.closest('.tri-actions');
+    if (acoes) {
+        acoes.querySelectorAll('button').forEach(b => { if (b !== btn) b.disabled = true; });
+        if (!acoes.querySelector('.tri-status')) {
+            const s = document.createElement('span');
+            s.className = 'tri-status';
+            s.style.cssText = 'display:inline-flex;align-items:center;gap:6px;font-size:12px;'
+                + 'color:var(--accent);font-weight:600;margin-left:4px;';
+            s.innerHTML = '<span style="display:inline-block;width:12px;height:12px;border:2px solid currentColor;'
+                + 'border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>'
+                + 'Analisando com a IA… pode levar alguns segundos';
+            acoes.appendChild(s);
+        }
+    }
+    btnSpinner(btn, 'Analisando com IA…');
+}
+function triagemRestore(btn) {
+    const acoes = btn.closest('.tri-actions');
+    if (acoes) {
+        acoes.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        const s = acoes.querySelector('.tri-status');
+        if (s) s.remove();
+    }
+    btnRestore(btn);
+}
+// A triagem roda em SEGUNDO PLANO no servidor (sobrevive a sair da página). O front
+// vigia o status: mantém o spinner enquanto "running" e recarrega quando concluir.
+let triagemWatch = new Set();
+let triagemPolling = false;
+function triagemAplicarSpinnerPaj(paj) {
+    // acha um botão de triagem daquele PAJ e coloca o grupo em estado "Analisando…"
+    const btn = Array.from(document.querySelectorAll('.tri-actions button'))
+        .find(b => b.dataset && b.dataset.paj === paj);
+    if (btn && !btn.closest('.tri-actions').querySelector('.tri-status')) triagemAnalisando(btn);
+}
+async function triagemLoop(slug) {
+    triagemPolling = true;
+    while (triagemWatch.size) {
+        await new Promise(r => setTimeout(r, 2500));
+        let jobs = null;
+        try {
+            const r = await fetch('/api/caixa/' + slug + '/triagem-status');
+            jobs = (await r.json()).jobs || {};
+        } catch (e) { continue; }  // erro de rede transitório → tenta de novo
+        for (const paj of Array.from(triagemWatch)) {
+            const j = jobs[paj];
+            if (!j) { location.reload(); return; }               // concluído → mostra o resultado
+            if (j.status === 'erro') {
+                alert('Falha na análise do PAJ ' + paj + ': ' + (j.erro || 'erro'));
+                location.reload(); return;
+            }
+        }
+    }
+    triagemPolling = false;
+}
+function triagemWatchPaj(slug, paj) {
+    triagemWatch.add(paj);
+    if (!triagemPolling) triagemLoop(slug);
+}
+// Ao (re)carregar a caixa: se houver triagens em andamento, reexibe o spinner e retoma
+// a vigília — assim, voltar de outra página não "perde" o trabalho em curso.
+async function triagemRetomar() {
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/triagem-status');
+        const jobs = (await r.json()).jobs || {};
+        Object.keys(jobs).forEach(paj => {
+            if (jobs[paj].status === 'running') { triagemAplicarSpinnerPaj(paj); triagemWatchPaj(CAIXA_SLUG, paj); }
+        });
+    } catch (e) { /* silencioso */ }
+}
+triagemRetomar();
 async function tratarConjunto(btn) {
     if (!confirm('Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?')) return;
-    btnSpinner(btn, 'Analisando…');
+    triagemAnalisando(btn);
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/conjunto', { method: 'POST' });
         const d = await r.json();
-        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btnRestore(btn); }
-    } catch (e) { alert('Erro: ' + e); btnRestore(btn); }
+        if (d.ok) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
+        else { alert('Erro: ' + (d.erro || 'falha')); triagemRestore(btn); }
+    } catch (e) { alert('Erro: ' + e); triagemRestore(btn); }
 }
 async function desfazerConjunto(btn) {
     if (!confirm('Desfazer o tratamento em conjunto e voltar este PAJ à triagem?')) return;
@@ -922,13 +918,14 @@ async function tratarSeparado(btn) {
     const tr = btn.closest('tr');
     const mapeamento = {};
     tr.querySelectorAll('.tri-sel').forEach(s => { mapeamento[s.dataset.tramite] = s.value; });
-    btnSpinner(btn, 'Analisando…');
+    triagemAnalisando(btn);
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/separado',
             { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mapeamento}) });
         const d = await r.json();
-        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); btnRestore(btn); }
-    } catch (e) { alert('Erro: ' + e); btnRestore(btn); }
+        if (d.ok) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
+        else { alert('Erro: ' + (d.erro || 'falha')); triagemRestore(btn); }
+    } catch (e) { alert('Erro: ' + e); triagemRestore(btn); }
 }
 
 // ---------- Ver mensagem (íntegra) ----------
@@ -946,7 +943,8 @@ function sugAbrir(btn) {
     sugPajAtual = btn.dataset.paj;
     sugMeta = { paj: btn.dataset.paj, pajnum: btn.dataset.pajnum || '', tramite: btn.dataset.tramite || '',
                 tipo: btn.dataset.tipo || 'tramite', anexos: btn.dataset.anexos || '[]',
-                app: btn.dataset.app || '0', whats: btn.dataset.whats || '0', email: btn.dataset.email || '0' };
+                app: btn.dataset.app || '0', whats: btn.dataset.whats || '0', email: btn.dataset.email || '0',
+                padraoIncluidos: {}, modeloAtual: '' };  // controle dos anexos padrão aplicados
     document.getElementById('sug-paj').textContent = btn.dataset.pajnum || '';
     document.getElementById('sug-texto').value = btn.dataset.sugestao || '';
     const tr = btn.closest('tr');
@@ -974,7 +972,7 @@ function sugMontarModelos() {
     box.style.display = 'flex';
 }
 // Aplica o texto de um modelo escolhido, SUBSTITUINDO o texto atual (com confirmação).
-function sugAplicarModelo(sel) {
+async function sugAplicarModelo(sel) {
     const i = parseInt(sel.value, 10);
     if (isNaN(i) || !COMUNICADOS[i]) return;
     const c = COMUNICADOS[i];
@@ -983,15 +981,52 @@ function sugAplicarModelo(sel) {
         sel.value = '';
         return;
     }
+    // Se um modelo anterior (com anexo padrão) foi aplicado, pergunta se remove os anexos dele.
+    if (sugMeta.modeloAtual && sugMeta.modeloAtual !== c.id && sugMeta.padraoIncluidos[sugMeta.modeloAtual]) {
+        if (confirm('O texto padrão anterior incluiu anexo(s) padrão. Remover esse(s) anexo(s) dos anexos deste PAJ?')) {
+            await removerPadrao(sugMeta.modeloAtual);
+        }
+    }
     ta.value = c.texto || '';
     // Registra a classificação MANUAL escolhida — será persistida ao Salvar
     // (prevalece sobre a da IA) e atualiza o selo de tipo na hora.
     sugMeta.tipoManual = c.tipo || '';
+    sugMeta.modeloAtual = c.id || '';
     const tipoEl = document.getElementById('sug-tipo');
     if (c.tipo) { tipoEl.textContent = c.tipo; tipoEl.style.display = 'inline-flex'; }
     else { tipoEl.style.display = 'none'; }
     sel.value = '';
     sugMontarParagrafos();  // recomputa os checkboxes de parágrafos sobre o novo texto
+    // Anexa automaticamente os anexos padrão do modelo (aditivo, dedupe no servidor).
+    if (c.anexos && c.anexos.length) await anexarPadrao('comunicado', c.id);
+}
+// Copia os anexos padrão de um comunicado/parágrafo para os anexos da tramitação.
+async function anexarPadrao(kind, ownerId) {
+    if (!ownerId) return;
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(sugMeta.paj) + '/anexar-padrao',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tipo: sugMeta.tipo, id_tramite: sugMeta.tramite || '', kind, owner_id: ownerId, owner_slug: CAIXA_SLUG }) });
+        const d = await r.json();
+        if (d.ok) {
+            sugMeta.anexos = JSON.stringify(d.anexos || []);
+            sugMeta.padraoIncluidos[ownerId] = true;
+            if (d.incluidos && d.incluidos.length) mostrarToast(d.incluidos.length + ' anexo(s) padrão incluído(s)');
+        }
+    } catch (e) { /* silencioso */ }
+}
+async function removerPadrao(ownerId) {
+    try {
+        const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(sugMeta.paj) + '/remover-anexo-padrao',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ tipo: sugMeta.tipo, id_tramite: sugMeta.tramite || '', owner_id: ownerId }) });
+        const d = await r.json();
+        if (d.ok) {
+            sugMeta.anexos = JSON.stringify(d.anexos || []);
+            delete sugMeta.padraoIncluidos[ownerId];
+            if (d.removidos && d.removidos.length) mostrarToast(d.removidos.length + ' anexo(s) padrão removido(s)');
+        }
+    } catch (e) { /* silencioso */ }
 }
 function sugMontarParagrafos() {
     const box = document.getElementById('sug-par-box');
@@ -1015,6 +1050,8 @@ function sugMontarParagrafos() {
         const cb = lab.querySelector('input');
         cb.checked = jaTem;
         cb.dataset.texto = p.texto;
+        cb.dataset.pid = p.id || '';
+        cb.dataset.temAnexo = (p.anexos && p.anexos.length) ? '1' : '0';
         cb.onchange = () => sugParagrafoToggle(cb);
         lab.querySelectorAll('span span')[0].textContent = p.titulo;
         lab.querySelectorAll('span span')[1].textContent = p.texto;
@@ -1028,15 +1065,23 @@ function sugTogglePar() {
     lista.style.display = abrir ? 'flex' : 'none';
     if (chev) chev.style.transform = abrir ? 'rotate(90deg)' : 'rotate(0deg)';
 }
-function sugParagrafoToggle(cb) {
+async function sugParagrafoToggle(cb) {
     const ta = document.getElementById('sug-texto');
     const txt = cb.dataset.texto;
     if (cb.checked) {
         if (!ta.value.includes(txt)) {
             ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, '') + '\n\n' : '') + txt;
         }
+        // Anexa automaticamente os anexos padrão do parágrafo (aditivo).
+        if (cb.dataset.temAnexo === '1') await anexarPadrao('paragrafo', cb.dataset.pid);
     } else {
         ta.value = ta.value.replace('\n\n' + txt, '').split(txt).join('').replace(/\n{3,}/g, '\n\n').trim();
+        // Se este parágrafo havia incluído anexo padrão, pergunta se remove também.
+        if (cb.dataset.temAnexo === '1' && sugMeta.padraoIncluidos[cb.dataset.pid]) {
+            if (confirm('Este parágrafo incluiu anexo(s) padrão. Remover esse(s) anexo(s) dos anexos deste PAJ?')) {
+                await removerPadrao(cb.dataset.pid);
+            }
+        }
     }
 }
 function sugFechar() { document.getElementById('sug-modal').style.display = 'none'; }

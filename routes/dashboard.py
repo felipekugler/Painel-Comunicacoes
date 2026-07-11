@@ -38,7 +38,7 @@ async def dashboard(request: Request, slug: str):
     template = request.app.state.jinja.get_template("dashboard.html")
     return HTMLResponse(template.render(
         request=request, caixa=caixa,
-        triagem=db["triagem"], pendentes=db["pendentes"], fila=db["fila"], enviados=db["enviados"],
+        triagem=db["triagem"], pendentes=db["pendentes"], fila=db["fila"],
         paragrafos=paragrafos, comunicados=comunicados,
         meios_envio=envio_service.meios_disponiveis(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
@@ -122,6 +122,23 @@ async def prontos_enviar_selecao(payload: dict = Body(default={})):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/api/prontos/devolver-pendentes", response_class=JSONResponse)
+async def prontos_devolver_pendentes(payload: dict = Body(...)):
+    """Devolve tramitações GRAVADAS de um mesmo PAJ (mesma caixa) para 'pendentes'
+    (ficam na triagem da caixa; SEM rodar a IA). Corpo: {slug, paj_norm,
+    id_tramites: [...]}. Remediação do conflito de App SISDPU."""
+    slug = payload.get("slug") if isinstance(payload, dict) else None
+    paj_norm = payload.get("paj_norm") if isinstance(payload, dict) else None
+    ids = (payload.get("id_tramites") or []) if isinstance(payload, dict) else []
+    if not slug or not paj_norm:
+        return JSONResponse({"ok": False, "erro": "slug/paj_norm ausentes"}, status_code=400)
+    try:
+        res = divcom_service.devolver_para_pendentes(slug, paj_norm, ids)
+        return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
 
 @router.get("/api/sincronizar-todas/stream")
@@ -218,22 +235,24 @@ async def remover_da_fila(slug: str, paj_norm: str, id_tramite: str):
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/triar/conjunto", response_class=JSONResponse)
 async def triar_conjunto(slug: str, paj_norm: str):
-    """Trata em conjunto as tramitações pendentes do PAJ (síntese única pela IA)."""
-    try:
-        res = await divcom_service.tratar_conjunto(slug, paj_norm)
-        return JSONResponse(res, status_code=200 if res.get("ok") else 502)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+    """Dispara (em segundo plano) o tratamento em conjunto do PAJ. Retorna na hora;
+    o progresso é consultado em /triagem-status."""
+    res = divcom_service.iniciar_triagem(slug, paj_norm, "conjunto")
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/triar/separado", response_class=JSONResponse)
 async def triar_separado(slug: str, paj_norm: str, payload: dict = Body(default={})):
     mapeamento = (payload or {}).get("mapeamento") or {}
-    try:
-        res = await divcom_service.tratar_separado(slug, paj_norm, mapeamento)
-        return JSONResponse(res, status_code=200 if res.get("ok") else 502)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+    res = divcom_service.iniciar_triagem(slug, paj_norm, "separado", mapeamento)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/api/caixa/{slug}/triagem-status", response_class=JSONResponse)
+async def triagem_status(slug: str):
+    """Triagens em andamento (ou com erro) da caixa — para o front manter o spinner e
+    recarregar quando concluir."""
+    return {"ok": True, "jobs": divcom_service.status_triagem(slug)}
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/triar/desfazer", response_class=JSONResponse)
@@ -318,6 +337,27 @@ async def anexos_conjunto_del(slug: str, paj_norm: str, anexo_id: str):
 @router.get("/api/caixa/{slug}/paj/{paj_norm}/conjunto/anexo/{arquivo}")
 async def anexo_conjunto_baixar(slug: str, paj_norm: str, arquivo: str):
     return _servir_anexo(paj_norm, "conjunto", "", arquivo)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/anexar-padrao", response_class=JSONResponse)
+async def anexar_padrao(slug: str, paj_norm: str, payload: dict = Body(...)):
+    """Copia os anexos PADRÃO de um comunicado/parágrafo para a tramitação/conjunto
+    (ao aplicar o texto/parágrafo no dashboard). Corpo: {tipo, id_tramite, kind,
+    owner_id, owner_slug}."""
+    res = divcom_service.anexar_padrao_em_tramite(
+        slug, paj_norm, payload.get("tipo", "tramite"), payload.get("id_tramite", ""),
+        payload.get("kind", ""), payload.get("owner_id", ""), payload.get("owner_slug") or None)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/caixa/{slug}/paj/{paj_norm}/remover-anexo-padrao", response_class=JSONResponse)
+async def remover_anexo_padrao_tramite(slug: str, paj_norm: str, payload: dict = Body(...)):
+    """Remove da tramitação os anexos incluídos por um dado texto/parágrafo padrão
+    (quando o usuário desfaz a aplicação). Corpo: {tipo, id_tramite, owner_id}."""
+    res = divcom_service.remover_anexos_padrao_do_alvo(
+        slug, paj_norm, payload.get("tipo", "tramite"), payload.get("id_tramite", ""),
+        payload.get("owner_id", ""))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/sugestao", response_class=JSONResponse)

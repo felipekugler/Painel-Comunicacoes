@@ -18,6 +18,12 @@
 {% endmacro %}
 
 {% block content %}
+{#- Ícones de meio ocultos, clonados pelo JS no modal de conflito (mesma arte das tabelas). -#}
+<div id="meio-icon-templates" style="display:none;">
+    <span data-meio="app_sisdpu">{{ meio_icon('app_sisdpu', meio_labels.get('app_sisdpu','Aplicativo SISDPU')) }}</span>
+    <span data-meio="whatsapp">{{ meio_icon('whatsapp', meio_labels.get('whatsapp','WhatsApp')) }}</span>
+    <span data-meio="email">{{ meio_icon('email', meio_labels.get('email','E-mail')) }}</span>
+</div>
 <div class="flex items-end justify-between gap-4 flex-wrap mb-6">
     <div>
         <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos para Envio</h1>
@@ -33,11 +39,11 @@
         Envio: {{ envio_modos_resumo }}</span>
     {% if prontos %}
     <div style="margin-left:auto;">
-        <button class="btn-accent" id="btn-enviar" onclick="enviarSelecionados()">
+        <button class="btn-accent" id="btn-enviar" onclick="enviarSelecionados()" disabled>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
             </svg>
-            Enviar Agora (<span id="btn-enviar-n">{{ prontos|length }}</span>)
+            Enviar Agora (<span id="btn-enviar-n">0</span>)
         </button>
     </div>
     {% endif %}
@@ -82,7 +88,7 @@
     <table class="fluent-table">
         <thead>
             <tr>
-                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" checked onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar visíveis"></th>
+                <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar visíveis"></th>
                 <th style="width: 7rem;">PAJ</th>
                 <th style="width: 8rem;">Ofício</th>
                 <th style="width: 9rem;">Assistido</th>
@@ -101,9 +107,23 @@
             <tr class="pr-row" data-caixa="{{ paj.caixa_slug }}"
                 data-tipoclass="{{ paj.sugestao_tipo or '' }}"
                 data-meios="{{ paj.envio_meios|join(',') }}"
-                data-anexo="{{ 1 if paj.tem_anexo else 0 }}">
+                data-anexo="{{ 1 if paj.tem_anexo else 0 }}"
+                data-item='{{ {
+                    "slug": paj.caixa_slug, "paj_norm": paj.paj_norm, "paj": paj.paj,
+                    "tipo": paj.tipo, "id_tramite": paj.id_tramite|default(''),
+                    "assistido": paj.assistido or "", "caixa_nome": paj.caixa_nome,
+                    "data_envio": paj.data_envio or "", "oficio": paj.oficio or "",
+                    "mensagem": paj.envio_mensagem or "", "meios": paj.envio_meios or [],
+                    "sl": paj.envio_somente_leitura|default(false),
+                    "prazo_app": paj.envio_prazo_app, "prazo_whatsapp": paj.envio_prazo_whatsapp,
+                    "prazo_email": paj.envio_prazo_email,
+                    "app": c.app_sisdpu|default(false), "whats": paj.whatsapp_estado == "ativo",
+                    "email": c.email|default(false),
+                    "cor": cor_caixa(paj.caixa_slug), "grupo": paj.grupo or "",
+                    "sugestao_tipo": paj.sugestao_tipo or ""
+                } | tojson }}'>
                 <td style="text-align:center;">
-                    <input type="checkbox" class="pr-cb" checked onchange="atualizarContador()"
+                    <input type="checkbox" class="pr-cb" onchange="atualizarContador()"
                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
                            data-tramite="{{ paj.id_tramite }}" data-tipo="{{ paj.tipo }}">
                 </td>
@@ -230,6 +250,21 @@
 .sug-textarea { width:100%; min-height:170px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
                 background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
 .grava-dialog { width:50vw; max-width:50vw; padding:24px; max-height:88vh; overflow:auto; }
+.conf-dialog { width:56vw; max-width:56vw; padding:24px; max-height:88vh; overflow:auto; }
+.conf-grupo { border:1px solid var(--stroke-strong); border-radius:10px; padding:14px 16px; background:var(--layer-alt); }
+.conf-grupo h4 { margin:0 0 6px; font-size:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.conf-msg { padding:10px 0; border-top:1px dashed var(--stroke); }
+.conf-msg-top { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+.conf-msg-corpo { font-size:12.5px; line-height:1.5; color:var(--text-secondary); white-space:pre-wrap;
+                  background:var(--card); border:1px solid var(--stroke); border-radius:8px;
+                  padding:8px 11px; max-height:150px; overflow:auto; }
+.conf-meio-atual { display:inline-flex; align-items:center; gap:4px; }
+.conf-meio-sel { padding:4px 8px; border-radius:6px; border:1px solid var(--stroke-strong);
+                 background:var(--card); color:var(--text); font-size:12.5px; }
+.conf-acoes { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; align-items:center; }
+.conf-acoes button { padding:6px 12px; font-size:12.5px; }
+.conf-acoes button:disabled { opacity:.45; cursor:not-allowed; }
+.conf-meio-aviso { font-size:12px; color:var(--c-red); margin-top:8px; min-height:16px; }
 .mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
 .msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
 .sync-dialog { width:100%; max-width:660px; padding:22px; }
@@ -302,6 +337,29 @@
     <div id="sse-log" class="sync-log"></div>
     <div style="text-align:right;margin-top:12px;">
         <button class="btn-subtle" id="sse-fechar" onclick="sseFechar()" style="display:none;">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal "Conflito de envio pelo App SISDPU" -->
+<div id="conf-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)confFechar()">
+  <div class="fluent-card conf-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;display:flex;align-items:center;gap:8px;">
+        <span style="color:var(--c-red);">⚠</span> Conflito de envio pelo Aplicativo SISDPU
+    </h3>
+    <p class="text-secondary" style="font-size:13px;margin:8px 0 4px;line-height:1.5;">
+        O Aplicativo SISDPU não aceita uma 2ª notificação ao mesmo assistido enquanto a
+        primeira não for lida. Há <strong id="conf-n">0</strong> PAJ(s) com mais de uma mensagem
+        pelo App marcada para envio — a 2ª (e seguintes) voltariam com <strong>falha</strong>.
+        Resolva antes de prosseguir:
+    </p>
+    <div id="conf-grupos" style="margin-top:12px;display:flex;flex-direction:column;gap:12px;"></div>
+    <div id="conf-rodape" style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:18px;flex-wrap:wrap;">
+        <div id="conf-semconflito" class="text-tertiary" style="font-size:12.5px;"></div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn-subtle" onclick="confFechar()">Cancelar</button>
+            <button class="btn-accent" id="conf-enviar-sc" style="display:none;" onclick="confEnviarSemConflito()"></button>
+        </div>
     </div>
   </div>
 </div>
@@ -498,15 +556,42 @@ function msgAbrir(btn) {
 }
 function msgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
 
-// ---------- Enviar Agora (só os MARCADOS) — SSE via POST ----------
+// ---------- Enviar Agora (só os MARCADOS) — com checagem de conflito de App ----------
+function chaveItem(it) { return [it.slug, it.paj_norm, it.tipo, it.id_tramite].join('::'); }
+function toSelecao(it) { return { slug: it.slug, paj_norm: it.paj_norm, id_tramite: it.id_tramite || '', tipo: it.tipo || 'tramite' }; }
+function itensSelecionados() {
+    return Array.from(document.querySelectorAll('tr.pr-row .pr-cb:checked')).map(cb => {
+        try { return JSON.parse(cb.closest('tr').dataset.item); } catch (e) { return null; }
+    }).filter(Boolean);
+}
+// Grupos de conflito = PAJs com 2+ mensagens marcadas que incluem o App SISDPU.
+// (O assistido e os "aderidos ao App" são do PAJ → mesmo PAJ = mesmo destinatário.)
+function detectarConflitos(itens) {
+    const porPaj = {};
+    itens.filter(i => (i.meios || []).includes('app_sisdpu'))
+         .forEach(i => { (porPaj[i.paj_norm] = porPaj[i.paj_norm] || []).push(i); });
+    return Object.values(porPaj).filter(g => g.length >= 2);
+}
+// Unificável só se todas forem tramitações individuais (não conjunto) e da MESMA caixa.
+function grupoUnificavel(g) {
+    return g.every(i => i.tipo !== 'conjunto') && new Set(g.map(i => i.slug)).size === 1;
+}
+
 async function enviarSelecionados() {
-    const marcados = Array.from(document.querySelectorAll('tr.pr-row .pr-cb:checked'));
-    if (!marcados.length) { mostrarToast('Marque ao menos um PAJ'); return; }
-    const selecao = marcados.map(cb => ({
-        slug: cb.dataset.slug, paj_norm: cb.dataset.paj,
-        id_tramite: cb.dataset.tramite || '', tipo: cb.dataset.tipo || 'tramite'
-    }));
-    if (!confirm('Disparar o envio dos ' + selecao.length + ' PAJ(s) marcado(s)?')) return;
+    const itens = itensSelecionados();
+    if (!itens.length) { mostrarToast('Marque ao menos um PAJ'); return; }
+    const conflitos = detectarConflitos(itens);
+    if (!conflitos.length) { dispararEnvio(itens.map(toSelecao), true); return; }
+    const idsConf = new Set(conflitos.flat().map(chaveItem));
+    const semConflito = itens.filter(i => !idsConf.has(chaveItem(i)));
+    abrirConflitoModal(conflitos, semConflito);
+}
+
+// Dispara o envio (SSE via POST) de uma seleção já resolvida.
+async function dispararEnvio(selecao, comConfirm) {
+    if (!selecao.length) { mostrarToast('Nada a enviar'); return; }
+    if (comConfirm && !confirm('Disparar o envio dos ' + selecao.length + ' PAJ(s) marcado(s)?')) return;
+    confFechar();
     const modal = document.getElementById('sse-modal');
     const log = document.getElementById('sse-log');
     const st = document.getElementById('sse-status');
@@ -545,5 +630,231 @@ async function enviarSelecionados() {
     fechar.style.display = '';
 }
 function sseFechar() { document.getElementById('sse-modal').style.display = 'none'; location.reload(); }
+
+// ---------- Modal de conflito ----------
+let CONF_SC = [];        // itens sem conflito (para "Enviar só os sem conflito")
+let CONF_GRUPOS = [];    // grupos de conflito exibidos (índice = gi)
+const MEIO_LABEL = k => (MEIOS_ENVIO.find(x => x.key === k) || {}).label || k;
+// clona o ícone do meio (mesma arte das tabelas) do bloco oculto
+function iconeMeio(k) {
+    const el = document.querySelector('#meio-icon-templates [data-meio="' + k + '"]');
+    return el ? el.innerHTML : MEIO_LABEL(k);
+}
+function chipCaixa(it) {
+    const chip = document.createElement('span');
+    chip.className = 'caixa-chip';
+    chip.title = 'Grupo: ' + (it.grupo || '');
+    const cor = it.cor || 'var(--accent)';
+    chip.style.background = 'color-mix(in srgb, ' + cor + ' 16%, transparent)';
+    chip.style.color = cor;
+    chip.textContent = it.caixa_nome || '';
+    return chip;
+}
+function pillTipo(it) {
+    const sp = document.createElement('span');
+    if (it.sugestao_tipo) { sp.className = 'pill'; sp.title = 'Texto padrão / classificação'; sp.textContent = it.sugestao_tipo; }
+    else { sp.className = 'text-tertiary'; sp.style.fontSize = '12px'; sp.textContent = 'texto específico'; }
+    return sp;
+}
+function abrirConflitoModal(conflitos, semConflito) {
+    CONF_SC = semConflito || [];
+    CONF_GRUPOS = conflitos;
+    document.getElementById('conf-n').textContent = conflitos.length;
+    const box = document.getElementById('conf-grupos');
+    box.innerHTML = '';
+    conflitos.forEach((g, gi) => {
+        const unif = grupoUnificavel(g);
+        const div = document.createElement('div');
+        div.className = 'conf-grupo';
+        div.id = 'conf-grupo-' + gi;
+        const h = document.createElement('h4');
+        h.innerHTML = '<span style="font-family:\'Cascadia Code\',\'Consolas\',monospace;">' + g[0].paj + '</span>'
+            + '<span class="text-tertiary" style="font-weight:400;font-size:12px;">' + (g[0].assistido || 's/ nome') + '</span>'
+            + '<span class="text-tertiary" style="font-weight:400;font-size:12px;">· ' + g.length + ' mensagens pelo App</span>';
+        div.appendChild(h);
+        g.forEach((it, mi) => {
+            const row = document.createElement('div');
+            row.className = 'conf-msg';
+            const top = document.createElement('div');
+            top.className = 'conf-msg-top';
+            top.appendChild(chipCaixa(it));
+            top.appendChild(pillTipo(it));
+            // meio de envio ATUAL (ícone)
+            const atual = document.createElement('span');
+            atual.className = 'conf-meio-atual';
+            atual.innerHTML = (it.meios || []).map(iconeMeio).join('');
+            top.appendChild(atual);
+            // dropdown para trocar a forma de envio (oculto até "Alterar forma de envio")
+            const sel = document.createElement('select');
+            sel.className = 'conf-meio-sel';
+            sel.style.display = 'none';
+            sel.dataset.gi = gi; sel.dataset.mi = mi;
+            MEIOS_ENVIO.forEach(m => {
+                const avail = (m.key === 'app_sisdpu' && it.app) || (m.key === 'whatsapp' && it.whats) || (m.key === 'email' && it.email);
+                if (!avail) return;
+                const o = document.createElement('option');
+                o.value = m.key; o.textContent = m.label; sel.appendChild(o);
+            });
+            sel.value = (it.meios || []).includes('app_sisdpu') ? 'app_sisdpu' : ((it.meios || [])[0] || '');
+            sel.onchange = () => confValidarMeios(gi);
+            top.appendChild(sel);
+            row.appendChild(top);
+            // mensagem integral (500 caracteres)
+            const corpo = document.createElement('div');
+            corpo.className = 'conf-msg-corpo';
+            const txt = (it.mensagem || '').trim();
+            corpo.textContent = (txt.slice(0, 500) + (txt.length > 500 ? '…' : '')) || '(sem mensagem gravada)';
+            row.appendChild(corpo);
+            div.appendChild(row);
+        });
+        const acoes = document.createElement('div');
+        acoes.className = 'conf-acoes';
+        const bUnif = document.createElement('button');
+        bUnif.className = 'btn-accent';
+        bUnif.textContent = 'Devolver para Pendentes';
+        bUnif.disabled = !unif;
+        bUnif.title = unif
+            ? 'Tira estas tramitações da fila e as devolve para Pendentes (ficam na triagem da caixa).'
+            : 'Só é possível para tramitações individuais da mesma caixa. Use "Alterar forma de envio".';
+        bUnif.onclick = () => devolverPendentes(g);
+        const bMeio = document.createElement('button');
+        bMeio.className = 'btn-subtle';
+        bMeio.textContent = 'Alterar forma de envio';
+        bMeio.id = 'conf-alterar-' + gi;
+        bMeio.onclick = () => confAlterarMeios(gi);
+        const bAdiar = document.createElement('button');
+        bAdiar.className = 'btn-subtle';
+        bAdiar.textContent = 'Deixar para enviar mais tarde';
+        bAdiar.title = 'Não envia agora; desmarca estas mensagens (continuam gravadas em Prontos).';
+        bAdiar.onclick = () => confAdiar(g);
+        const bSave = document.createElement('button');
+        bSave.className = 'btn-grava';
+        bSave.textContent = 'Salvar formas de envio';
+        bSave.id = 'conf-save-' + gi;
+        bSave.style.display = 'none';
+        bSave.onclick = () => confSalvarMeios(gi);
+        acoes.appendChild(bUnif); acoes.appendChild(bMeio); acoes.appendChild(bAdiar); acoes.appendChild(bSave);
+        div.appendChild(acoes);
+        const aviso = document.createElement('div');
+        aviso.className = 'conf-meio-aviso';
+        aviso.id = 'conf-aviso-' + gi;
+        div.appendChild(aviso);
+        box.appendChild(div);
+    });
+    const sc = document.getElementById('conf-semconflito');
+    const btnSc = document.getElementById('conf-enviar-sc');
+    if (CONF_SC.length) {
+        sc.textContent = CONF_SC.length + ' item(ns) sem conflito também estão marcados.';
+        btnSc.style.display = ''; btnSc.textContent = 'Enviar agora só os ' + CONF_SC.length + ' sem conflito';
+    } else {
+        sc.textContent = ''; btnSc.style.display = 'none';
+    }
+    document.getElementById('conf-modal').style.display = 'flex';
+}
+function confFechar() { document.getElementById('conf-modal').style.display = 'none'; }
+function confEnviarSemConflito() { dispararEnvio(CONF_SC.map(toSelecao), true); }
+
+// ---------- Alterar forma de envio INLINE (dropdown por mensagem) ----------
+function confAlterarMeios(gi) {
+    const grupo = document.getElementById('conf-grupo-' + gi);
+    if (!grupo) return;
+    grupo.querySelectorAll('.conf-meio-atual').forEach(el => el.style.display = 'none');
+    grupo.querySelectorAll('.conf-meio-sel').forEach(el => el.style.display = '');
+    const btnAlterar = document.getElementById('conf-alterar-' + gi);
+    if (btnAlterar) btnAlterar.style.display = 'none';
+    const btnSave = document.getElementById('conf-save-' + gi);
+    if (btnSave) btnSave.style.display = '';
+    confValidarMeios(gi);
+}
+function confValidarMeios(gi) {
+    const grupo = document.getElementById('conf-grupo-' + gi);
+    const sels = Array.from(grupo.querySelectorAll('.conf-meio-sel'));
+    const comApp = sels.filter(s => s.value === 'app_sisdpu').length;
+    const semMeio = sels.filter(s => !s.value).length;
+    let msg = '';
+    if (comApp > 1) msg = 'Deixe no máximo uma mensagem pelo Aplicativo SISDPU (' + comApp + ' selecionadas).';
+    else if (semMeio) msg = semMeio + ' mensagem(ns) sem forma de envio.';
+    document.getElementById('conf-aviso-' + gi).textContent = msg;
+    const btnSave = document.getElementById('conf-save-' + gi);
+    if (btnSave) btnSave.disabled = !!msg;
+    return !msg;
+}
+async function confSalvarMeios(gi) {
+    if (!confValidarMeios(gi)) return;
+    const g = CONF_GRUPOS[gi] || [];
+    const grupo = document.getElementById('conf-grupo-' + gi);
+    const sels = Array.from(grupo.querySelectorAll('.conf-meio-sel'));
+    const btnSave = document.getElementById('conf-save-' + gi);
+    btnSave.disabled = true; btnSave.textContent = 'Salvando…';
+    try {
+        for (const sel of sels) {
+            const it = g[parseInt(sel.dataset.mi, 10)];
+            const novo = [sel.value];
+            const antes = (it.meios || []).slice().sort().join(',');
+            if (antes === novo.slice().sort().join(',')) continue;  // sem mudança
+            const url = it.tipo === 'conjunto'
+                ? '/api/caixa/' + it.slug + '/paj/' + it.paj_norm + '/conjunto/gravar'
+                : '/api/caixa/' + it.slug + '/paj/' + it.paj_norm + '/tramite/' + it.id_tramite + '/gravar';
+            const resp = await fetch(url, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mensagem: it.mensagem || '', meios: novo,
+                    somente_leitura: !!it.sl && novo.includes('app_sisdpu'),
+                    prazos: { app_sisdpu: it.prazo_app, whatsapp: it.prazo_whatsapp, email: it.prazo_email }
+                })
+            });
+            const d = await resp.json();
+            if (!d.ok) { alert('Falha ao gravar PAJ ' + it.paj + ': ' + (d.erro || 'erro')); btnSave.disabled = false; btnSave.textContent = 'Salvar formas de envio'; return; }
+        }
+        mostrarToast('Formas de envio atualizadas');
+        location.reload();
+    } catch (e) {
+        alert('Erro: ' + e); btnSave.disabled = false; btnSave.textContent = 'Salvar formas de envio';
+    }
+}
+
+// "Deixar para enviar mais tarde": desmarca as mensagens conflitantes do grupo
+// (continuam gravadas em Prontos, só não entram neste disparo) e reavalia.
+function confAdiar(g) {
+    const chaves = new Set(g.map(chaveItem));
+    document.querySelectorAll('tr.pr-row .pr-cb:checked').forEach(cb => {
+        try {
+            const it = JSON.parse(cb.closest('tr').dataset.item);
+            if (chaves.has(chaveItem(it))) cb.checked = false;
+        } catch (e) {}
+    });
+    atualizarContador();
+    const itens = itensSelecionados();
+    const conflitos = detectarConflitos(itens);
+    if (!conflitos.length) {
+        confFechar();
+        mostrarToast('Mensagens adiadas — clique em Enviar Agora para disparar os selecionados');
+        return;
+    }
+    const idsConf = new Set(conflitos.flat().map(chaveItem));
+    const semConflito = itens.filter(i => !idsConf.has(chaveItem(i)));
+    abrirConflitoModal(conflitos, semConflito);
+}
+
+async function devolverPendentes(g) {
+    const slug = g[0].slug, paj_norm = g[0].paj_norm;
+    const ids = g.map(i => i.id_tramite).filter(Boolean);
+    if (!confirm('Devolver as ' + g.length + ' mensagens do PAJ ' + g[0].paj + ' para Pendentes?\n\n'
+        + 'Elas saem da fila de envio e voltam para a caixa "' + g[0].caixa_nome + '", onde ficarão na '
+        + 'triagem para você decidir como tratá-las.')) return;
+    try {
+        const resp = await fetch('/api/prontos/devolver-pendentes', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug, paj_norm, id_tramites: ids })
+        });
+        const d = await resp.json();
+        if (d.ok) {
+            window.location.href = '/caixa/' + slug;
+        } else {
+            alert('Não foi possível devolver para pendentes: ' + (d.erro || 'falha'));
+        }
+    } catch (e) { alert('Erro: ' + e); }
+}
+
 </script>
 {% endblock %}

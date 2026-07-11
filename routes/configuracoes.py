@@ -10,8 +10,8 @@
   (todos os de comunicado aceitam "slug" no corpo: vazio/omisso = geral)
 """
 
-from fastapi import APIRouter, Body, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import APIRouter, Body, File, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ingestao import sisdpu_client
 from services import config_service, divcom_service, historico_service
@@ -185,3 +185,35 @@ async def update_paragrafo(pid: str, payload: dict = Body(...)):
 async def delete_paragrafo(pid: str, payload: dict = Body(default={})):
     slug = (payload or {}).get("slug") or None
     return {"ok": config_service.delete_paragrafo(pid, slug)}
+
+
+# ---------------- anexos PADRÃO (por comunicado/parágrafo) ----------------
+async def _ler_uploads(arquivos: list[UploadFile]) -> list[tuple[str, bytes]]:
+    return [(f.filename or "arquivo", await f.read()) for f in (arquivos or [])]
+
+
+@router.post("/api/config/anexos-padrao/{kind}/{oid}", response_class=JSONResponse)
+async def add_anexos_padrao(kind: str, oid: str, slug: str = "",
+                            arquivos: list[UploadFile] = File(default=[])):
+    if kind not in ("comunicado", "paragrafo"):
+        return JSONResponse({"ok": False, "erro": "tipo inválido"}, status_code=400)
+    res = divcom_service.adicionar_anexos_padrao(kind, oid, slug or None,
+                                                 await _ler_uploads(arquivos))
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/config/anexos-padrao/{kind}/{oid}/remover/{anexo_id}", response_class=JSONResponse)
+async def del_anexo_padrao(kind: str, oid: str, anexo_id: str, payload: dict = Body(default={})):
+    slug = (payload or {}).get("slug") or None
+    res = divcom_service.remover_anexo_padrao(kind, oid, slug, anexo_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/api/config/anexos-padrao/{oid}/arquivo/{arquivo}")
+async def baixar_anexo_padrao(oid: str, arquivo: str):
+    p = divcom_service.caminho_anexo_padrao(oid, arquivo).resolve()
+    base = divcom_service.ANEXOS_PADRAO_DIR.resolve()
+    if base not in p.parents or not p.is_file():
+        return JSONResponse({"ok": False, "erro": "arquivo não encontrado"}, status_code=404)
+    nome = arquivo.split("__", 1)[1] if "__" in arquivo else arquivo
+    return FileResponse(str(p), filename=nome)

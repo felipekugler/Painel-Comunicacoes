@@ -500,3 +500,37 @@ def delete_paragrafo(pid: str, slug: str | None = None) -> bool:
         _gravar(d)
         return True
     return False
+
+
+# ---------------- anexos PADRÃO (por comunicado ou parágrafo) ----------------
+# Documentos pré-configurados que são anexados automaticamente à tramitação quando
+# o texto/parágrafo padrão é APLICADO no dashboard. Os arquivos ficam no disco (fora
+# do config); aqui guardamos só os metadados na lista `anexos` do dono. NÃO alteram
+# comunicados_rev (não fazem parte do prompt da IA).
+def _owner_padrao(d: dict, kind: str, oid: str, slug: str | None):
+    lista = _lista_comunicados(d, slug) if kind == "comunicado" else _lista_paragrafos(d, slug)
+    for o in lista:
+        if o.get("id") == oid:
+            return o
+    return None
+
+
+def owner_padrao(kind: str, oid: str, slug: str | None = None) -> dict | None:
+    """Retorna o comunicado/parágrafo (dict) por id, ou None."""
+    return _owner_padrao(ler_config(), kind, oid, slug)
+
+
+def anexos_padrao(kind: str, oid: str, slug: str | None = None) -> list[dict]:
+    o = owner_padrao(kind, oid, slug)
+    return list(o.get("anexos", [])) if o else []
+
+
+def set_anexos_padrao(kind: str, oid: str, slug: str | None, anexos: list[dict]) -> bool:
+    """Grava a lista de anexos padrão do dono (comunicado/parágrafo). Não bump rev."""
+    d = ler_config()
+    o = _owner_padrao(d, kind, oid, slug)
+    if o is None:
+        return False
+    o["anexos"] = anexos
+    _gravar(d)
+    return True

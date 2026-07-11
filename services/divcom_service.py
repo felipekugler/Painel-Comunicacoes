@@ -504,6 +504,142 @@ def remover_anexo(slug: str, paj_norm: str, tipo: str, id_tramite: str, anexo_id
     return {"ok": True, "anexos": restantes}
 
 
+# ==================== anexos PADRÃO (por comunicado / parágrafo) ====================
+# Documentos pré-configurados em Configurações que, ao APLICAR o texto/parágrafo
+# padrão no dashboard, são copiados automaticamente para os anexos da tramitação.
+# Arquivos ficam em dados/_anexos_padrao/<owner_id>/; metadados no config (via
+# config_service). Ao copiar para a tramitação, marcamos padrao_owner/padrao_kind
+# para permitir remoção seletiva depois (quando o usuário desfaz a aplicação).
+ANEXOS_PADRAO_DIR = DADOS_DIR / "_anexos_padrao"
+
+
+def _anexos_padrao_dir(owner_id: str) -> Path:
+    return ANEXOS_PADRAO_DIR / owner_id
+
+
+def caminho_anexo_padrao(owner_id: str, arquivo: str) -> Path:
+    return _anexos_padrao_dir(owner_id) / arquivo
+
+
+def adicionar_anexos_padrao(kind: str, owner_id: str, slug: str | None,
+                            arquivos: list[tuple[str, bytes]]) -> dict:
+    """Salva documentos padrão de um comunicado/parágrafo e registra os metadados
+    no config. Mesmas regras de formato/tamanho/dedupe dos anexos de tramitação."""
+    if config_service.owner_padrao(kind, owner_id, slug) is None:
+        return {"ok": False, "erro": "texto/parágrafo não encontrado"}
+    anexos = config_service.anexos_padrao(kind, owner_id, slug)
+    dest = _anexos_padrao_dir(owner_id)
+    dest.mkdir(parents=True, exist_ok=True)
+    existentes = {(a.get("nome") or "").strip().lower() for a in anexos}
+    duplicados, rejeitados = [], []
+    for nome, dados in arquivos:
+        if not dados:
+            continue
+        nome_base = Path(nome or "arquivo").name
+        if Path(nome_base).suffix.lstrip(".").lower() not in _ANEXO_EXTS:
+            rejeitados.append(nome_base)
+            continue
+        if nome_base.strip().lower() in existentes:
+            duplicados.append(nome_base)
+            continue
+        if len(dados) > _ANEXO_MAX:
+            return {"ok": False, "erro": f"'{nome}' excede o limite de 25 MB."}
+        existentes.add(nome_base.strip().lower())
+        aid = uuid.uuid4().hex[:12]
+        arquivo_salvo = f"{aid}__{_nome_seguro(nome)}"
+        with contextlib.suppress(Exception):
+            (dest / arquivo_salvo).write_bytes(dados)
+        anexos.append({
+            "id": aid, "nome": nome_base, "arquivo": arquivo_salvo,
+            "tamanho": len(dados), "tipo": Path(arquivo_salvo).suffix.lstrip(".").lower(),
+            "incluido_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        })
+    config_service.set_anexos_padrao(kind, owner_id, slug, anexos)
+    return {"ok": True, "anexos": anexos, "duplicados": duplicados, "rejeitados": rejeitados}
+
+
+def remover_anexo_padrao(kind: str, owner_id: str, slug: str | None, anexo_id: str) -> dict:
+    """Remove um anexo padrão (arquivo + metadado) do comunicado/parágrafo."""
+    anexos = config_service.anexos_padrao(kind, owner_id, slug)
+    restantes = []
+    for a in anexos:
+        if a.get("id") == anexo_id:
+            with contextlib.suppress(Exception):
+                (_anexos_padrao_dir(owner_id) / a.get("arquivo", "")).unlink()
+        else:
+            restantes.append(a)
+    if not config_service.set_anexos_padrao(kind, owner_id, slug, restantes):
+        return {"ok": False, "erro": "texto/parágrafo não encontrado"}
+    return {"ok": True, "anexos": restantes}
+
+
+def anexar_padrao_em_tramite(slug: str, paj_norm: str, tipo: str, id_tramite: str,
+                             kind: str, owner_id: str, owner_slug: str | None) -> dict:
+    """Copia os anexos PADRÃO de um comunicado/parágrafo para os anexos da tramitação
+    (ou conjunto). Aditivo, dedupe por nome; marca padrao_owner p/ remoção seletiva."""
+    padrao = config_service.anexos_padrao(kind, owner_id, owner_slug)
+    # O comunicado/parágrafo pode ser GERAL (slug=None) mesmo aplicado numa caixa:
+    # se não achou no slug informado, tenta os gerais.
+    if not padrao and config_service.owner_padrao(kind, owner_id, owner_slug) is None:
+        padrao = config_service.anexos_padrao(kind, owner_id, None)
+    if not padrao:
+        return {"ok": True, "incluidos": [], "anexos": []}
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
+    if alvo is None:
+        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+    dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
+    dest.mkdir(parents=True, exist_ok=True)
+    existentes = {(a.get("nome") or "").strip().lower() for a in anexos}
+    incluidos = []
+    for pa in padrao:
+        nome = (pa.get("nome") or "").strip()
+        if not nome or nome.lower() in existentes:
+            continue
+        aid = uuid.uuid4().hex[:12]
+        arquivo_salvo = f"{aid}__{_nome_seguro(nome)}"
+        with contextlib.suppress(Exception):
+            src = caminho_anexo_padrao(owner_id, pa.get("arquivo", ""))
+            if src.exists():
+                shutil.copy2(src, dest / arquivo_salvo)
+        anexos.append({
+            "id": aid, "nome": pa.get("nome"), "arquivo": arquivo_salvo,
+            "tamanho": pa.get("tamanho", 0), "tipo": pa.get("tipo", ""),
+            "incluido_em": _dt.datetime.now().isoformat(timespec="seconds"),
+            "padrao_owner": owner_id, "padrao_kind": kind,
+        })
+        existentes.add(nome.lower())
+        incluidos.append(pa.get("nome"))
+    _gravar_box(slug, box)
+    return {"ok": True, "incluidos": incluidos, "anexos": anexos}
+
+
+def remover_anexos_padrao_do_alvo(slug: str, paj_norm: str, tipo: str,
+                                  id_tramite: str, owner_id: str) -> dict:
+    """Remove da tramitação os anexos que foram incluídos por um dado texto/parágrafo
+    padrão (marcados com padrao_owner). Usado quando o usuário desfaz a aplicação."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
+    if alvo is None:
+        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+    dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
+    restantes, removidos = [], []
+    for a in anexos:
+        if a.get("padrao_owner") == owner_id:
+            with contextlib.suppress(Exception):
+                (dest / a.get("arquivo", "")).unlink()
+            removidos.append(a.get("nome"))
+        else:
+            restantes.append(a)
+    alvo["anexos"] = restantes
+    _gravar_box(slug, box)
+    return {"ok": True, "removidos": removidos, "anexos": restantes}
+
+
 def listar_fila(slug: str) -> list[dict]:
     """Itens gravados para envio (tramitações individuais + conjuntos)."""
     return montar_dashboard(slug)["fila"]
@@ -752,6 +888,7 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["em_caixa"] = box.get("em_caixa", True)
     d["tramite_ids"] = ids
     d["n_tramites"] = len(ids)
+    d["id"] = prim.get("id", "")          # id interno do processo (p/ o Playwright abrir a tela)
     d["oficio"] = prim.get("oficio_origem", "")
     d["url_detalhe"] = prim.get("url_detalhe", "")
     d["remetente"] = prim.get("remetente", "")
@@ -793,9 +930,10 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
 
 
 def montar_dashboard(slug: str) -> dict:
-    """Classifica os itens da caixa em 4 grupos: triagem, pendentes, fila (gravados)
-    e enviados. Itens têm `tipo` = 'tramite' | 'conjunto' | 'triagem'."""
-    triagem, pendentes, fila, enviados = [], [], [], []
+    """Classifica os itens da caixa em 3 grupos: triagem, pendentes e fila (gravados).
+    Itens têm `tipo` = 'tramite' | 'conjunto' | 'triagem'. Itens JÁ ENVIADOS (e que
+    ainda não saíram da caixa) não são exibidos — ficam só no Histórico de mensagens."""
+    triagem, pendentes, fila = [], [], []
     bdir = _box_dir(slug)
     if bdir.is_dir():
         for f in bdir.glob("PAJ-*.json"):
@@ -805,12 +943,11 @@ def montar_dashboard(slug: str) -> dict:
                     continue
                 cont = ler_contato(box.get("paj_norm", ""))
                 sols = box.get("solicitacoes", [])
-                # tramitações já resolvidas individualmente entram sempre.
+                # tramitações gravadas para envio entram sempre na fila (as já enviadas
+                # não pendentes ficam de fora — só no Histórico).
                 for s in sols:
                     if (s.get("envio") or {}).get("status") == "gravado":
                         fila.append({**_enriquecer_tramite(box, s, cont), "tipo": "tramite"})
-                    elif s.get("enviados"):
-                        enviados.append({**_enriquecer_tramite(box, s, cont), "tipo": "tramite"})
                 pend = _sols_pendentes(box)
                 if not pend:
                     continue
@@ -824,10 +961,9 @@ def montar_dashboard(slug: str) -> dict:
                     item = _enriquecer_conjunto(box, cont)
                     if item["envio_status"] == "gravado":
                         fila.append(item)
-                    elif item["contato_enviado"]:
-                        enviados.append(item)
-                    else:
+                    elif not item["contato_enviado"]:
                         pendentes.append(item)
+                    # else: conjunto já enviado → não exibe (fica só no Histórico)
                 elif decisao == "separado":
                     for s in pend:
                         pendentes.append({**_enriquecer_tramite(box, s, cont),
@@ -838,8 +974,7 @@ def montar_dashboard(slug: str) -> dict:
     pendentes.sort(key=lambda d: d.get("data_envio_key") or "99999999")
     # Urgentes (prazo 0) primeiro na fila; depois por ordem de gravação.
     fila.sort(key=lambda d: (0 if d.get("envio_urgente") else 1, d.get("envio_gravado_em", "")))
-    enviados.sort(key=lambda d: d.get("contato_em", ""), reverse=True)
-    return {"triagem": triagem, "pendentes": pendentes, "fila": fila, "enviados": enviados}
+    return {"triagem": triagem, "pendentes": pendentes, "fila": fila}
 
 
 def _achar_conjunto(box: dict):
@@ -982,6 +1117,29 @@ def remover_conjunto_da_fila(slug: str, paj_norm: str) -> dict:
     return box
 
 
+def devolver_para_pendentes(slug: str, paj_norm: str,
+                            id_tramites: list[str]) -> dict:
+    """Devolve as tramitações GRAVADAS indicadas para 'pendentes' (limpa o envio).
+    Como o PAJ passa a ter 2+ pendentes, elas caem naturalmente na TRIAGEM da
+    caixa, onde o usuário decide tratar em conjunto ou separado. NÃO roda a IA
+    agora (para não atrasar o trabalho). Usada pela remediação do conflito de
+    App SISDPU (>=2 mensagens ao mesmo PAJ)."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    ids = [i for i in (id_tramites or []) if i]
+    n = 0
+    for s in box.get("solicitacoes", []):
+        if s.get("id_tramite") in ids:
+            s["envio"] = {}
+            n += 1
+    # zera a decisão de triagem anterior → o PAJ volta à triagem (sem IA).
+    box.pop("triagem", None)
+    box.pop("conjunto", None)
+    _gravar_box(slug, box)
+    return {"ok": True, "slug": slug, "paj_norm": paj_norm, "devolvidas": n}
+
+
 def definir_sugestao_conjunto(slug: str, paj_norm: str, texto: str,
                               tipo: str | None = None) -> dict:
     box = _ler_box(slug, paj_norm)
@@ -1031,6 +1189,70 @@ async def _triagem_ctx():
             yield
     finally:
         _triagem_ativas -= 1
+
+
+# ---------- triagem como TAREFA DE FUNDO (sobrevive à navegação do usuário) ----------
+# A análise da IA leva dezenas de segundos. Se rodasse dentro da requisição, sair da
+# página abortaria a resposta e a tela não saberia do resultado. Por isso a triagem é
+# disparada como task e o progresso fica num REGISTRO consultável (por caixa). O front
+# mostra o spinner enquanto o job está "running" e recarrega quando ele some (concluído).
+# Chave = "slug::paj_norm". Estado em memória (some no restart — mas o resultado já fica
+# gravado no box; um job "running" órfão não sobrevive ao restart).
+_triagem_jobs: dict[str, dict] = {}
+
+
+def _job_key(slug: str, paj_norm: str) -> str:
+    return f"{slug}::{paj_norm}"
+
+
+async def _rodar_triagem_job(key: str, coro):
+    """Executa a coroutine de triagem e atualiza o registro: remove ao concluir com
+    sucesso (a tela recarrega e lê o box já atualizado) ou marca 'erro'."""
+    try:
+        res = await coro
+        if res.get("ok"):
+            _triagem_jobs.pop(key, None)
+        else:
+            j = _triagem_jobs.get(key, {})
+            j.update({"status": "erro", "erro": res.get("erro", "falha")})
+            _triagem_jobs[key] = j
+    except Exception as e:  # noqa: BLE001
+        j = _triagem_jobs.get(key, {})
+        j.update({"status": "erro", "erro": str(e)})
+        _triagem_jobs[key] = j
+
+
+def iniciar_triagem(slug: str, paj_norm: str, kind: str,
+                    mapeamento: dict | None = None) -> dict:
+    """Dispara a triagem (conjunto/separado) em segundo plano e registra o job.
+    Retorna imediatamente {ok, status}. Se já houver um job em andamento para o PAJ,
+    não inicia outro."""
+    key = _job_key(slug, paj_norm)
+    atual = _triagem_jobs.get(key)
+    if atual and atual.get("status") == "running":
+        return {"ok": True, "status": "running"}
+    if kind == "conjunto":
+        coro = tratar_conjunto(slug, paj_norm)
+    elif kind == "separado":
+        coro = tratar_separado(slug, paj_norm, mapeamento or {})
+    else:
+        return {"ok": False, "erro": "tipo de triagem inválido"}
+    _triagem_jobs[key] = {"status": "running", "kind": kind}
+    # guarda a referência da task para não ser coletada pelo GC
+    _triagem_jobs[key]["task"] = asyncio.create_task(_rodar_triagem_job(key, coro))
+    return {"ok": True, "status": "running"}
+
+
+def status_triagem(slug: str) -> dict:
+    """Jobs de triagem de uma caixa: {paj_norm: {status, kind, erro}}. Jobs concluídos
+    já não aparecem (foram removidos); o cliente interpreta a ausência como concluído."""
+    prefixo = f"{slug}::"
+    out: dict = {}
+    for k, v in list(_triagem_jobs.items()):
+        if k.startswith(prefixo):
+            out[k[len(prefixo):]] = {"status": v.get("status", "running"),
+                                     "kind": v.get("kind", ""), "erro": v.get("erro", "")}
+    return out
 
 
 def _ids_em_caixa(slug: str) -> set[str]:
