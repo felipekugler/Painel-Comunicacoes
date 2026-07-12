@@ -110,24 +110,34 @@
                 Escuro
             </button>
         </div>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-bottom:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Layout das tramitações pendentes</h2>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            Como as tramitações <strong>pendentes</strong> aparecem no painel de cada caixa.
-            <strong>Simples</strong>: uma linha por PAJ (ofício, assistido, contatos e dados da
-            tramitação); clique na linha para abrir a análise da IA, anexos e ações — visual mais
-            enxuto. <strong>Completo</strong>: um PAJ por vez, ocupando toda a tela, com navegação
-            por setas — todas as informações completas e sem cortes.
-        </p>
-        <div id="layout-seg" class="modo-seg">
-            <button type="button" class="{{ 'ativo' if layout_pendentes=='simples' else '' }}"
-                    onclick="definirLayout('simples',this)">Simples (retrátil)</button>
-            <button type="button" class="{{ 'ativo' if layout_pendentes=='completo' else '' }}"
-                    onclick="definirLayout('completo',this)">Completo (um por vez)</button>
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;">
+                <input type="checkbox" id="abrir-tela-cheia" onchange="salvarTelaCheia()" {{ 'checked' if abrir_tela_cheia else '' }}>
+                <span>Iniciar em tela cheia</span>
+                <span id="tela-cheia-msg" class="text-tertiary" style="font-size:12px;"></span>
+            </label>
+            <p class="text-secondary" style="font-size:12.5px;margin:8px 0 0;">
+                Iniciar em <strong>tela cheia</strong> (equivalente ao F11, via Chrome/Edge) em vez de
+                abrir como aba comum do navegador. Vale a partir da <strong>próxima abertura</strong>.
+            </p>
         </div>
-        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Vale ao (re)abrir a caixa.</p>
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid color-mix(in srgb, currentColor 12%, transparent);">
+            <div style="font-size:14px;font-weight:600;margin-bottom:4px;">Layout das tramitações pendentes</div>
+            <p class="text-secondary" style="font-size:12.5px;margin:0 0 12px;">
+                Como as tramitações <strong>pendentes</strong> aparecem no painel de cada caixa.
+                <strong>Simples</strong>: uma linha por PAJ (ofício, assistido, contatos e dados da
+                tramitação); clique na linha para abrir a análise da IA, anexos e ações — visual mais
+                enxuto. <strong>Completo</strong>: um PAJ por vez, ocupando toda a tela, com navegação
+                por setas — todas as informações completas e sem cortes.
+            </p>
+            <div id="layout-seg" class="modo-seg">
+                <button type="button" class="{{ 'ativo' if layout_pendentes=='simples' else '' }}"
+                        onclick="definirLayout('simples',this)">Simples (retrátil)</button>
+                <button type="button" class="{{ 'ativo' if layout_pendentes=='completo' else '' }}"
+                        onclick="definirLayout('completo',this)">Completo (um por vez)</button>
+            </div>
+            <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Vale ao (re)abrir a caixa.</p>
+        </div>
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;">
@@ -199,20 +209,6 @@
             <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
             <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
         </div>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Abertura do painel</h2>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
-            Ao abrir pelo atalho <strong>Painel-DIVCOM</strong>, iniciar em <strong>tela cheia</strong>
-            (equivalente ao F11, via Chrome/Edge) em vez de abrir como aba comum do navegador.
-            Vale a partir da <strong>próxima abertura</strong> pelo atalho.
-        </p>
-        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;">
-            <input type="checkbox" id="abrir-tela-cheia" onchange="salvarTelaCheia()" {{ 'checked' if abrir_tela_cheia else '' }}>
-            <span>Abrir em tela cheia</span>
-            <span id="tela-cheia-msg" class="text-tertiary" style="font-size:12px;"></span>
-        </label>
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
