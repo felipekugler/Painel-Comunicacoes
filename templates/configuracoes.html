@@ -112,6 +112,24 @@
         </div>
     </div>
 
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-bottom:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Layout das tramitações pendentes</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Como as tramitações <strong>pendentes</strong> aparecem no painel de cada caixa.
+            <strong>Simples</strong>: uma linha por PAJ (ofício, assistido, contatos e dados da
+            tramitação); clique na linha para abrir a análise da IA, anexos e ações — visual mais
+            enxuto. <strong>Completo</strong>: um PAJ por vez, ocupando toda a tela, com navegação
+            por setas — todas as informações completas e sem cortes.
+        </p>
+        <div id="layout-seg" class="modo-seg">
+            <button type="button" class="{{ 'ativo' if layout_pendentes=='simples' else '' }}"
+                    onclick="definirLayout('simples',this)">Simples (retrátil)</button>
+            <button type="button" class="{{ 'ativo' if layout_pendentes=='completo' else '' }}"
+                    onclick="definirLayout('completo',this)">Completo (um por vez)</button>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Vale ao (re)abrir a caixa.</p>
+    </div>
+
     <div class="fluent-card" style="padding:22px;max-width:720px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Quantidade de movimentações a analisar</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
@@ -527,6 +545,17 @@ async function salvarConcorrencia(){
     const d=await r.json();
     if(d.ok){ document.getElementById('n-conc').value=d.n; document.getElementById('conc-status').textContent='salvo ✓'; toast('Configuração salva'); }
     else alert('Erro: '+(d.erro||'falha'));
+}
+async function definirLayout(v, btn){
+    try {
+        const r = await fetch('/api/config/layout-pendentes', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({layout:v})});
+        const d = await r.json();
+        if (d.ok) {
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('ativo'));
+            btn.classList.add('ativo');
+            toast('Layout salvo: ' + (d.layout === 'completo' ? 'Completo' : 'Simples'));
+        } else alert('Falha ao salvar o layout.');
+    } catch(e){ alert('Erro: ' + e); }
 }
 async function salvarWaIntervalo(){
     const el=document.getElementById('wa-intervalo');

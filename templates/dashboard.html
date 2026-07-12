@@ -59,10 +59,140 @@
     {% endif %}
 {% endmacro %}
 
+{#- ===== Macros de conteúdo do PAJ (reusados pelos layouts Simples e Completo) =====
+    `full=true` remove o clamp (mostra o texto inteiro, usado no layout Completo);
+    `listar=true` (anexos) lista os NOMES dos arquivos abaixo do clipe. -#}
+{% macro card_resumo(paj, full=false) %}
+<div class="ia-card">
+    <div class="card-label">Resumo IA</div>
+    <div class="ia-corpo">
+        {% if paj.resumo_ia %}
+        <div class="text-secondary {{ '' if full else 'clamp6' }}"{% if not full %} title="{{ paj.resumo_ia }}"{% endif %}>{{ paj.resumo_ia }}</div>
+        {% else %}
+        <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
+        {% endif %}
+    </div>
+    {% if paj.movimentacoes %}
+    <button class="mov-badge" onclick="movAbrir(this)"
+            data-paj="{{ paj.paj_norm }}"
+            data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
+            data-texto='{{ paj.movs_texto_ia|tojson }}'
+            title="Ver a íntegra das últimas movimentações">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+        </svg>
+        {{ paj.movimentacoes|length }} últimas movimentações
+    </button>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro card_sugestao(paj, c, full=false) %}
+<div class="ia-card">
+    <div class="card-label">Sugestão IA</div>
+    <div class="ia-corpo">
+        {% if paj.sugestao_atual %}
+        {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill-tipo" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
+        {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
+        <div class="text-secondary {{ '' if full else 'clamp6' }}" style="font-size:12.5px;"{% if not full %} title="{{ paj.sugestao_atual }}"{% endif %}>{{ paj.sugestao_atual }}</div>
+        {% else %}
+        <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
+        {% endif %}
+    </div>
+    {% if paj.sugestao_atual %}
+    <div class="ia-acao-baixo" style="padding-top:8px;">
+        <button class="btn-subtle" style="padding:4px 10px;font-size:12px;"
+                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                data-sugestao="{{ paj.sugestao_atual }}"
+                data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
+                data-anexos='{{ paj.anexos|tojson }}'
+                data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                data-email="{{ 1 if c.email else 0 }}"
+                onclick="sugAbrir(this)">Ver / editar</button>
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro card_anexos(paj, slug, listar=false) %}
+<div class="ia-anexos{{ ' ia-anexos-full' if listar else '' }}">
+    <div class="card-label">Anexos</div>
+    <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+            data-slug="{{ slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+            data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+            onclick="anxAbrir(this)"
+            title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+        </svg>
+        {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+    </button>
+    {% if listar and paj.anexos %}
+    <ul class="anx-nomes">
+        {% for a in paj.anexos %}<li title="{{ a.nome }}">{{ a.nome }}</li>{% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% macro acoes_paj(paj, c) %}
+    {% if paj.tipo == 'conjunto' %}
+    <div style="text-align:center;margin-bottom:2px;"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
+    <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+            data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
+            title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
+    {% else %}
+    <button class="btn-subtle sync-paj-btn" style="padding:5px 9px;font-size:12px;"
+            data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+            onclick="sincronizarPaj(this)" title="Sincronizar apenas este PAJ">
+        <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+        <svg class="ic-sync" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+        </svg>
+        Sincronizar
+    </button>
+    {% if paj.de_triagem_separado %}
+    <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+            data-paj="{{ paj.paj_norm }}" onclick="voltarTriagem(this)"
+            title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
+    {% endif %}
+    {% endif %}
+    <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
+            data-paj="{{ paj.paj_norm }}" onclick="reanalisarIA(this)"
+            title="Descartar a análise atual e gerar uma nova pela IA (usa as movimentações selecionadas no popup)">
+        <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
+        <svg class="ic-ia" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:13px;height:13px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
+        </svg>
+        Reanálise pela IA
+    </button>
+    <button class="btn-grava grava-btn" style="padding:5px 9px;font-size:12px;box-shadow:none;"
+            data-tipo="{{ paj.tipo }}"
+            data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+            data-tramite="{{ paj.id_tramite }}"
+            data-mensagem="{{ paj.sugestao_atual }}"
+            data-anexos='{{ paj.anexos|tojson }}'
+            data-app="{{ 1 if c.app_sisdpu else 0 }}"
+            data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+            data-email="{{ 1 if c.email else 0 }}"
+            onclick="gravarAbrir(this)" title="Gravar para envio em lote">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
+        </svg>
+        Gravar para envio
+    </button>
+{% endmacro %}
+
 {% block content %}
 <div class="flex items-end justify-between gap-4 flex-wrap mb-6">
     <div>
-        <h1 class="font-display" style="font-size: 28px; margin: 0;">{{ caixa.nome }}</h1>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+            <h1 class="font-display" style="font-size: 28px; margin: 0; text-transform:uppercase;">{{ caixa.nome }}</h1>
+            <span class="pill-quad" title="Tramitações pendentes de tratamento (triagem + pendentes)">{{ (triagem|length) + (pendentes|length) }}</span>
+        </div>
         <p class="text-secondary mt-1" style="font-size: 13px;">
             Tramitações da Caixa de Grupo: <span style="font-family: 'Cascadia Code','Consolas',monospace;">{{ caixa.grupo }}</span>
         </p>
@@ -159,47 +289,150 @@
 
 {#- ===================== TABELA 1: pendentes de contato ===================== -#}
 <div class="section-head">
-    <h2 class="font-display" style="font-size:18px;margin:0;">Pendentes</h2>
-    <span class="pill">{{ pendentes|length }}</span>
+    <h2 class="font-display" style="font-size:18px;margin:0;text-transform:uppercase;">Tramitações pendentes de tratamento</h2>
+    <span class="pill-quad">{{ pendentes|length }}</span>
     <span class="text-tertiary" style="font-size:12px;">— sincronizados, aguardando tratamento</span>
 </div>
 {% if pendentes %}
+{% if layout_pendentes == 'completo' %}
+{#- ===================== LAYOUT COMPLETO: um PAJ por vez (carrossel) ===================== -#}
+<div class="pj-carousel" id="pj-carousel">
+    <button type="button" class="pj-nav pj-prev" onclick="pjNav(-1)" title="PAJ anterior (seta ←)" aria-label="Anterior">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" /></svg>
+    </button>
+    <div class="pj-track">
+        {% for paj in pendentes %}
+        {% set c = paj.contatos or {} %}
+        <section class="pj-panel fluent-card {{ 'pj-even' if loop.index is divisibleby 2 else 'pj-odd' }}{{ ' ativo' if loop.first else '' }}" data-idx="{{ loop.index0 }}">
+            {#-- Linha 1: mini-tabela IDÊNTICA à 1ª linha do simples (mesmas células de Contatos:
+                 5 colunas de 2.6rem centralizadas). Só variam as colunas que cada layout tem. --#}
+            <div class="pjp-sec pjp-id">
+                <table class="fluent-table pjp-id-table">
+                    <thead>
+                        <tr>
+                            <th>PAJ</th>
+                            <th>Ofício</th>
+                            <th style="width:100%;">Assistido</th>
+                            <th>Envio</th>
+                            <th>Remetente</th>
+                            <th>Prazo</th>
+                            <th class="text-center" colspan="5">Contatos</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                                   class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a></td>
+                            <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ paj.oficio or "—" }}</td>
+                            <td style="white-space:nowrap;" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</td>
+                            <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
+                                {% if paj.tipo == 'conjunto' %}
+                                {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
+                                {% else %}
+                                <div>{{ paj.envio_data | data_br }}</div>
+                                {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
+                                {% endif %}
+                            </td>
+                            <td class="text-secondary" style="font-size:12px;white-space:nowrap;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
+                            <td>
+                                {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
+                            </td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            {#-- Linha 2: card vermelho só com a Descrição do trâmite (rótulo + conteúdo) --#}
+            <div class="pjp-sec pjp-tram">
+                <div class="pjp-tram-card">
+                    <div class="card-label">Descrição do trâmite</div>
+                    {% if paj.tipo == 'conjunto' %}
+                        {% set _descs = paj.descricoes_tramites | select | list %}
+                        <div class="pjp-desc-3 clamp3" title="{{ _descs | join(' · ') }}">{% for dt in _descs %}{{ dt }}{% if not loop.last %} · {% endif %}{% endfor %}{% if not _descs %}Sem descrição de trâmite.{% endif %}</div>
+                    {% elif paj.descricao_tramite %}
+                        <div class="pjp-desc-3 clamp3" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>
+                    {% else %}
+                        <div class="pjp-desc-3 text-tertiary">Sem descrição de trâmite.</div>
+                    {% endif %}
+                </div>
+            </div>
+            {#-- Linha 3: Resumo IA (33%) + Sugestão IA (67%) --#}
+            <div class="pjp-sec pjp-ia">
+                <div class="cards-row cards-full cards-ia2">
+                    {{ card_resumo(paj, full=true) }}
+                    {{ card_sugestao(paj, c, full=true) }}
+                </div>
+            </div>
+            {#-- Linha 4: Anexos (esquerda) + Ações (direita, largura = coluna Contatos) --#}
+            <div class="pjp-sec pjp-l4">
+                <div class="ia-card pjp-anx {{ 'tem-anexo' if paj.tem_anexo else '' }}"
+                     data-slug="{{ caixa.slug }}" data-paj="{{ paj.paj_norm }}"
+                     data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                     data-anexos='{{ paj.anexos|tojson }}'>
+                    <div class="pjp-anx-head">
+                        <div class="card-label" style="display:flex;align-items:center;gap:5px;margin:0;">
+                            <svg class="pjp-anx-clip" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                            </svg>
+                            Anexos
+                        </div>
+                        <input type="file" class="pjp-anx-input" multiple style="display:none;"
+                               accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxCardUpload(this)">
+                        <button type="button" class="btn-accent" style="padding:3px 9px;font-size:12px;white-space:nowrap;"
+                                onclick="this.previousElementSibling.click()">+ Adicionar arquivo(s)</button>
+                    </div>
+                    <div class="pjp-anx-lista"></div>
+                    <span class="pjp-anx-msg text-tertiary" style="font-size:11px;display:block;margin-top:4px;"></span>
+                </div>
+                <div class="pjp-acoes">
+                    {{ acoes_paj(paj, c) }}
+                </div>
+            </div>
+        </section>
+        {% endfor %}
+    </div>
+    <button type="button" class="pj-nav pj-next" onclick="pjNav(1)" title="Próximo PAJ (seta →)" aria-label="Próximo">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+    </button>
+    <div class="pj-counter"><span id="pj-pos">1</span> / {{ pendentes|length }} PAJs</div>
+</div>
+{% else %}
+{#- ===================== LAYOUT SIMPLES: linha por PAJ, cards retráteis ===================== -#}
 <div class="fluent-card" style="overflow-x:auto;">
-    <table class="fluent-table pj-table">
+    <table class="fluent-table pj-table pj-simples">
         <thead>
             <tr>
+                <th style="width: 1.4rem;"></th>
                 <th style="width: 7.5rem;">PAJ</th>
-                <th style="width: 8rem;">Ofício</th>
-                <th style="width: 9rem;">Assistido</th>
+                <th>Ofício</th>
+                <th>Assistido</th>
+                <th style="width: 100%; min-width: 12rem;">Descrição do trâmite</th>
                 <th style="width: 5rem;">Envio</th>
+                <th>Remetente</th>
                 <th style="width: 5rem;">Prazo</th>
-                <th style="width: 8rem;">Remetente</th>
-                <th style="min-width: 12rem;">Descrição do trâmite</th>
                 <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
             </tr>
         </thead>
         <tbody>
             {% for paj in pendentes %}
             {% set c = paj.contatos or {} %}
-            <tr class="pj-head">
+            {% set _par = 'pj-even' if loop.index is divisibleby 2 else 'pj-odd' %}
+            <tr class="pj-head pj-toggle {{ _par }}" onclick="togglePaj(this, event)" title="Clique para abrir/fechar a análise, anexos e ações">
+                <td class="pj-caret-cell">
+                    <span class="pj-caret" aria-hidden="true">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
+                    </span>
+                </td>
                 <td>
-                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
+                    <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
-                <td>{{ paj.assistido or "—" }}</td>
-                <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
-                    {% if paj.tipo == 'conjunto' %}
-                    {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
-                    {% else %}
-                    <div>{{ paj.envio_data | data_br }}</div>
-                    {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
-                    {% endif %}
-                </td>
-                <td>
-                    {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                <td class="text-secondary" style="font-size:12px;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ paj.oficio or "—" }}</td>
+                <td style="white-space:nowrap;">{{ paj.assistido or "—" }}</td>
                 <td class="text-secondary" style="font-size:12.5px;">
                     {# Descrição do trâmite: texto que o ofício de origem escreveu ao encaminhar —
                        muitas vezes é a fonte mais direta do motivo do contato. #}
@@ -213,124 +446,31 @@
                         <span class="text-tertiary">—</span>
                     {% endif %}
                 </td>
+                <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
+                    {% if paj.tipo == 'conjunto' %}
+                    {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
+                    {% else %}
+                    <div>{{ paj.envio_data | data_br }}</div>
+                    {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
+                    {% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12px;white-space:nowrap;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
+                <td>
+                    {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
             </tr>
-            <tr class="pj-cards">
-                <td colspan="12">
+            <tr class="pj-cards pj-collapse {{ _par }}">
+                <td colspan="13">
                     <div class="cards-row">
-                        {#-- Card Resumo IA (40%) --#}
-                        <div class="ia-card">
-                            <div class="card-label">Resumo IA</div>
-                            {% if paj.resumo_ia %}
-                            <div class="clamp6 text-secondary" title="{{ paj.resumo_ia }}">{{ paj.resumo_ia }}</div>
-                            {% else %}
-                            <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
-                            {% endif %}
-                            {% if paj.movimentacoes %}
-                            <button class="mov-badge" onclick="movAbrir(this)"
-                                    data-paj="{{ paj.paj_norm }}"
-                                    data-pajnum="{{ paj.paj }}" data-movs='{{ paj.movimentacoes|tojson }}'
-                                    data-texto='{{ paj.movs_texto_ia|tojson }}'
-                                    title="Ver a íntegra das últimas movimentações">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-                                </svg>
-                                {{ paj.movimentacoes|length }} últimas movimentações
-                            </button>
-                            {% endif %}
-                        </div>
-                        {#-- Card Sugestão IA (40%) + Ver/editar --#}
-                        <div class="ia-card">
-                            <div class="card-label">Sugestão IA</div>
-                            {% if paj.sugestao_atual %}
-                            {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
-                            {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
-                            <div class="clamp6 text-secondary" style="font-size:12.5px;" title="{{ paj.sugestao_atual }}">{{ paj.sugestao_atual }}</div>
-                            {% else %}
-                            <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
-                            {% endif %}
-                            {% if paj.sugestao_atual %}
-                            <div style="margin-top:8px;">
-                                <button class="btn-subtle" style="padding:4px 10px;font-size:12px;"
-                                        data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                        data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                        data-sugestao="{{ paj.sugestao_atual }}"
-                                        data-editada="{{ 1 if paj.sugestao_editada else 0 }}"
-                                        data-anexos='{{ paj.anexos|tojson }}'
-                                        data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                                        data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                        data-email="{{ 1 if c.email else 0 }}"
-                                        onclick="sugAbrir(this)">Ver / editar</button>
-                            </div>
-                            {% endif %}
-                        </div>
-                        {#-- Card Anexos (10%) --#}
-                        <div class="ia-anexos">
-                            <div class="card-label">Anexos</div>
-                            <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
-                                    data-slug="{{ caixa.slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                    data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                    data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
-                                    onclick="anxAbrir(this)"
-                                    title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-                                </svg>
-                                {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
-                            </button>
-                        </div>
-                        {#-- Ações (13%): sincronizar + gravar --#}
-                        <div class="ia-actions">
-                            {% if paj.tipo == 'conjunto' %}
-                            <div style="text-align:center;margin-bottom:2px;"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
-                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
-                                    data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
-                                    title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
-                            {% else %}
-                            <button class="btn-subtle sync-paj-btn" style="padding:5px 9px;font-size:12px;"
-                                    data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                    onclick="sincronizarPaj(this)" title="Sincronizar apenas este PAJ">
-                                <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
-                                <svg class="ic-sync" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                                </svg>
-                                Sincronizar
-                            </button>
-                            {% if paj.de_triagem_separado %}
-                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
-                                    data-paj="{{ paj.paj_norm }}" onclick="voltarTriagem(this)"
-                                    title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
-                            {% endif %}
-                            {% endif %}
-                            <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
-                                    data-paj="{{ paj.paj_norm }}" onclick="reanalisarIA(this)"
-                                    title="Descartar a análise atual e gerar uma nova pela IA (usa as movimentações selecionadas no popup)">
-                                <span class="spin-mini" style="display:none;width:11px;height:11px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite;"></span>
-                                <svg class="ic-ia" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" style="width:13px;height:13px;">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09ZM18.259 8.715 18 9.75l-.259-1.035a3.375 3.375 0 0 0-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 0 0 2.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 0 0 2.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 0 0-2.456 2.456Z" />
-                                </svg>
-                                Reanálise pela IA
-                            </button>
-                            <button class="btn-grava grava-btn" style="padding:5px 9px;font-size:12px;box-shadow:none;"
-                                    data-tipo="{{ paj.tipo }}"
-                                    data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                    data-tramite="{{ paj.id_tramite }}"
-                                    data-mensagem="{{ paj.sugestao_atual }}"
-                                    data-anexos='{{ paj.anexos|tojson }}'
-                                    data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                                    data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                    data-email="{{ 1 if c.email else 0 }}"
-                                    onclick="gravarAbrir(this)" title="Gravar para envio em lote">
-                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
-                                </svg>
-                                Gravar para envio
-                            </button>
-                        </div>
+                        {{ card_resumo(paj) }}
+                        {{ card_sugestao(paj, c) }}
+                        {{ card_anexos(paj, caixa.slug) }}
+                        <div class="ia-actions">{{ acoes_paj(paj, c) }}</div>
                     </div>
                 </td>
             </tr>
@@ -338,6 +478,7 @@
         </tbody>
     </table>
 </div>
+{% endif %}{# fim do layout simples #}
 {% else %}
 <div class="fluent-card text-tertiary" style="padding:20px 24px;font-size:13px;">Nenhuma tramitação nesta seção.</div>
 {% endif %}
@@ -415,19 +556,104 @@
    Cada PAJ ocupa 2 linhas: (1) dados extraídos do PAJ, (2) cards da IA. */
 .pj-table th { white-space:nowrap; }
 .pj-head > td { border-bottom:none !important; vertical-align:top; padding-top:14px; padding-bottom:4px; }
+/* A primeira linha do completo (.pjp-id-table) usa os MESMOS padrões de .fluent-table
+   que o simples efetivamente usa (12px 16px, valign top) — nenhuma sobrescrita própria,
+   para que o espaçamento/altura das células seja idêntico nos dois layouts. */
 .pj-cards > td { border-bottom:1px solid var(--stroke); padding-top:2px; padding-bottom:16px; }
 .desc-tram { line-height:1.35; }
 .cards-row { display:flex; gap:12px; align-items:stretch; }
 /* Proporção: Resumo 38,5% · Sugestão 38,5% · Anexos 10% · Ações 13% (basis 0). */
 .cards-row .ia-card { flex:38.5 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
-    padding:10px 12px; background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+    padding:10px 12px; background:color-mix(in srgb, var(--accent) 4%, var(--card));
+    display:flex; flex-direction:column; }
+/* O texto rola dentro de .ia-corpo (flex:1); o selo "N movimentações" (Resumo) e o botão
+   "Ver/editar" (Sugestão) ficam FORA da rolagem, ancorados na base VISÍVEL do card. */
+.cards-row .ia-card .ia-corpo { flex:1 1 auto; min-height:0; overflow-y:auto; }
+.cards-row .ia-card .mov-badge { align-self:flex-start; flex:0 0 auto; }
+.cards-row .ia-card .ia-acao-baixo { flex:0 0 auto; }
 .cards-row .ia-anexos { flex:10 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
     padding:10px 8px; background:color-mix(in srgb, var(--accent) 4%, var(--card));
     display:flex; flex-direction:column; align-items:center; text-align:center; }
+/* Clipe do card de Anexos (simples): centralizado verticalmente no espaço abaixo do rótulo */
+.cards-row .ia-anexos .anx-clip { margin-top:auto; margin-bottom:auto; }
 .cards-row .ia-anexos .anx-clip svg { width:30px; height:30px; }
 .cards-row .ia-actions { flex:13 1 0; min-width:0; display:flex; flex-direction:column; gap:8px; justify-content:flex-start; }
 .cards-row .ia-actions .btn-subtle, .cards-row .ia-actions .btn-grava { width:100%; justify-content:center; }
-.card-label { font-size:11px; font-weight:700; color:var(--accent); letter-spacing:.02em; margin-bottom:6px; }
+/* Rótulos: MESMO padrão do cabeçalho das tabelas (.fluent-table thead th) em todo o layout */
+.card-label { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px; }
+
+/* ===== Layout SIMPLES: cards retráteis (clique na linha do PAJ) ===== */
+.pj-simples .pj-toggle { cursor:pointer; }
+.pj-simples .pj-toggle:hover > td { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.pj-simples .pj-caret-cell { text-align:center; vertical-align:middle; padding-left:4px; padding-right:0; }
+.pj-caret { display:inline-flex; color:var(--text-tertiary); }
+.pj-caret svg { width:14px; height:14px; transition:transform .15s ease; }
+.pj-simples .pj-toggle.aberto .pj-caret svg { transform:rotate(90deg); color:var(--accent); }
+.pj-simples tr.pj-collapse { display:none; }
+.pj-simples tr.pj-collapse.pj-open { display:table-row; }
+/* Faixa alternada por PAJ (as 2 linhas de um PAJ compartilham o mesmo tom) */
+.pj-simples tr.pj-odd > td  { background: transparent; }
+.pj-simples tr.pj-even > td { background: color-mix(in srgb, var(--text) 4.5%, transparent); }
+
+/* ===== Layout COMPLETO: um PAJ por vez (carrossel) ===== */
+.pj-carousel { position:relative; padding:0 26px; --pjp-side:13rem; }
+.pj-track { min-width:0; }
+.pj-panel { display:none; padding:20px 24px; background: var(--card); }
+.pj-panel.ativo { display:block; }
+/* Setas ESTREITAS e ALTAS (barra longitudinal), ocupam pouca largura lateral */
+.pj-nav { position:absolute; top:50%; transform:translateY(-50%); width:18px; height:72%;
+          border:1px solid var(--stroke-strong); background:var(--card); color:var(--text-secondary); cursor:pointer;
+          display:flex; align-items:center; justify-content:center; border-radius:7px; padding:0; z-index:2;
+          transition:background .12s ease, color .12s ease; }
+.pj-nav:hover:not(:disabled) { background:var(--accent-soft); color:var(--accent); }
+.pj-nav:disabled { opacity:.3; cursor:default; }
+.pj-nav svg { width:13px; height:13px; }
+.pj-prev { left:0; }
+.pj-next { right:0; }
+.pj-counter { text-align:center; margin-top:12px; font-size:12.5px; color:var(--text-tertiary); }
+.pjp-sec { padding:14px 2px; border-bottom:1px solid var(--stroke); }
+.pjp-sec:last-child { border-bottom:none; padding-bottom:2px; }
+/* Primeira linha COLADA no topo do card (igual ao simples, cujo card tem padding 0):
+   cancela o padding-topo do painel e zera o padding vertical da seção -> cabeçalho
+   junto ao topo e sem sobra embaixo (só o padding das próprias células, como no simples). */
+.pjp-id { margin:-20px -24px 0; padding:0; overflow-x:auto; }
+.pjp-lbl { font-size:12px; font-weight:600; color:var(--text-secondary); }
+/* Linha 1 do completo = mini-tabela com o MESMO cabeçalho/divisor/espaçamento do simples
+   (a regra de padding das células fica junto de .pj-head > td, para não divergirem). */
+.pjp-contatos { display:flex; gap:6px; align-items:center; justify-content:center; }
+/* Mesmo modelo do simples: table-layout auto (ajusta ao conteúdo, nunca trunca) e rola
+   horizontalmente se faltar espaço (overflow-x na .pjp-id). Larguras uniformizadas por JS
+   (uniformizarColunasCompleto): mede o maior conteúdo de cada coluna entre TODOS os PAJs e
+   aplica a mesma largura a todos, para não variarem entre um PAJ e outro. */
+/* Linha 2: card vermelho só com a Descrição do trâmite (rótulo + conteúdo) */
+.pjp-desc-3 { font-size:13px; line-height:1.5; color:var(--text-secondary); white-space:pre-wrap; }
+/* Card "Tramitação" (linha 2): tom vermelho off-white, adapta ao tema */
+.pjp-tram-card { border:1px solid color-mix(in srgb, var(--c-red) 22%, var(--stroke));
+                 border-radius:10px; padding:12px 14px;
+                 background: color-mix(in srgb, var(--c-red) 8%, var(--card)); }
+/* Linha 3: Resumo IA (33%) + Sugestão IA (67%), mesma altura fixa (rolagem interna) */
+.cards-row.cards-full { align-items:stretch; }
+.cards-ia2 > .ia-card { height:252px; overflow:hidden; }
+.cards-ia2 > .ia-card:nth-child(1) { flex:33 1 0; }
+.cards-ia2 > .ia-card:nth-child(2) { flex:67 1 0; }
+/* Linha 4: Anexos (esquerda, ocupa o resto) + Ações (direita, largura = coluna Contatos) */
+.pjp-l4 { display:flex; gap:12px; align-items:flex-start; }
+.pjp-l4 .pjp-anx { flex:1 1 auto; min-width:0; }
+.pjp-l4 .pjp-acoes { flex:0 0 var(--pjp-side); width:var(--pjp-side); }
+.pjp-anx { display:flex; flex-direction:column; overflow:hidden; padding:10px 12px;
+           border:1px solid var(--stroke); border-radius:10px;
+           background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+/* Cabeçalho do card: rótulo (+clipe) à esquerda, botão "Adicionar" no canto superior direito */
+.pjp-anx-head { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:6px; }
+.pjp-anx-clip { width:15px; height:15px; flex:0 0 auto; }
+.pjp-anx.tem-anexo .pjp-anx-clip { color: var(--c-red); }
+/* Altura para ~3 linhas de arquivos; passando disso, rola dentro do card */
+.pjp-anx .pjp-anx-lista { overflow-y:auto; max-height:92px; }
+.pjp-anx .pjp-anx-lista table th { position:sticky; top:0; background:var(--card); }
+.pjp-acoes { display:flex; flex-direction:column; gap:8px; align-items:stretch; }
+.pjp-acoes .btn-subtle, .pjp-acoes .btn-grava { width:100%; justify-content:center; padding:7px 10px; font-size:13px; }
+.pjp-acoes .pill-conj { align-self:center; margin-bottom:2px; }
+
 .sug-dialog { width:60vw; max-width:60vw; padding:24px; }
 .sug-textarea { width:100%; min-height:200px; padding:12px; border-radius:8px; border:1px solid var(--stroke-strong);
                 background:var(--layer-alt); color:var(--text); font-size:14px; line-height:1.6; resize:vertical; }
@@ -554,22 +780,23 @@
     <h3 class="font-display" style="font-size:18px;margin:0;">
         Últimas movimentações — PAJ <span id="mov-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
     </h3>
+    <div class="mov-mais-lbl" style="margin-top:10px;">
+        Marque as movimentações que a <strong>IA</strong> deve considerar (as demais são ignoradas na análise).
+        <a href="#" onclick="movMarcarTodas(true);return false;">marcar todas</a> ·
+        <a href="#" onclick="movMarcarTodas(false);return false;">limpar</a>
+    </div>
     <div id="mov-lista" style="margin-top:8px;"></div>
     <div class="mov-mais">
-        <div class="mov-mais-lbl">
-            Marque as movimentações que a <strong>IA</strong> deve considerar (as demais são ignoradas na análise).
-            <a href="#" onclick="movMarcarTodas(true);return false;">marcar todas</a> ·
-            <a href="#" onclick="movMarcarTodas(false);return false;">limpar</a>
+        <div class="mov-mais-lbl" style="margin-bottom:6px;">
+            <strong>Recorte manual</strong> (opcional): cole abaixo SÓ o texto relevante para a IA. Se preenchido, PREVALECE sobre os checkboxes.
         </div>
         <textarea id="mov-recorte" class="mov-recorte" rows="3"
-                  placeholder="(opcional) Recorte manual: cole aqui SÓ o texto relevante para a IA. Se preenchido, PREVALECE sobre os checkboxes."></textarea>
-        <div class="mov-mais-btns">
-            <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção</button>
-            <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-        <p class="text-tertiary" style="font-size:11px;margin:8px 0 0;">Depois de salvar, clique em <strong>“Reanálise pela IA”</strong> na linha do PAJ para gerar a nova análise com a seleção.</p>
+                  placeholder="Cole aqui o trecho relevante…"></textarea>
+        <p class="text-tertiary" style="font-size:11px;margin:8px 0 0;">Depois de salvar, clique no botão <strong>“Reanálise pela IA”</strong> para disparar uma nova análise da IA com a seleção feita.</p>
     </div>
-    <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+    <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;">
+        <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;margin-right:auto;"></span>
+        <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção</button>
         <button class="btn-subtle" style="padding:6px 14px;" onclick="movFechar()">Fechar</button>
     </div>
   </div>
@@ -578,24 +805,23 @@
 <!-- Modal "Gravar para envio" (mensagem + meios) -->
 <div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
   <div class="fluent-card grava-dialog">
-    <h3 class="font-display" style="font-size:18px;margin:0;">Gravar para envio</h3>
+    <h3 class="font-display" style="font-size:18px;margin:0;">Gravar para envio — PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></h3>
     <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
-        PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
-        — o PAJ sai de "pendentes" e entra na fila; o disparo ocorre em "Enviar Agora".
+        Ao gravar, o PAJ sairá de "Pendentes" e entrará na fila em "Prontos para Envio".
     </p>
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
     <textarea id="grava-texto" class="sug-textarea" style="min-height:238px;" placeholder="Mensagem ao assistido…"></textarea>
     <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Anexos</div>
-        <div id="grava-anx-lista"></div>
-        <div style="margin-top:8px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
+            <div style="font-weight:600;font-size:13px;">Anexos</div>
             <input type="file" id="grava-anx-input" multiple style="display:none;"
                    accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="gravaAnxUpload(this)">
-            <button type="button" class="btn-subtle" style="padding:5px 12px;font-size:12px;"
-                    onclick="document.getElementById('grava-anx-input').click()">+ Adicionar anexo(s)</button>
-            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
-            <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
+            <button type="button" class="btn-accent" style="padding:5px 12px;font-size:12px;white-space:nowrap;"
+                    onclick="document.getElementById('grava-anx-input').click()">+ Adicionar arquivo(s)</button>
         </div>
+        <div id="grava-anx-lista"></div>
+        <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;display:block;margin-top:4px;"></span>
+        <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
     </div>
     <div style="margin-top:14px;">
         <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
@@ -632,6 +858,174 @@ const PARAGRAFOS = {{ paragrafos|tojson }};
 const COMUNICADOS = {{ comunicados|tojson }};
 const MEIOS_ENVIO = {{ meios_envio|tojson }};
 const PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};  // prazos (dias) pré-definidos; 0 = sem prazo
+
+// ========== Layout "Pendentes": simples (retrátil) e completo (carrossel) ==========
+// LAYOUT SIMPLES: clique na linha do PAJ abre/fecha a linha de análise/ações.
+function togglePaj(row, ev) {
+    // não alternar quando o clique foi num elemento interativo da linha (link, ícone de copiar, WhatsApp).
+    if (ev && ev.target && ev.target.closest('a, button, input, select, textarea, [data-copy], .wa-btn, .wa-badge, .anx-clip')) return;
+    row.classList.toggle('aberto');
+    const cards = row.nextElementSibling;
+    if (cards && cards.classList.contains('pj-cards')) cards.classList.toggle('pj-open');
+}
+// LAYOUT COMPLETO: navegação entre os PAJs (um por vez).
+function pjNav(delta) {
+    const car = document.getElementById('pj-carousel');
+    if (!car) return;
+    const panels = Array.prototype.slice.call(car.querySelectorAll('.pj-panel'));
+    if (!panels.length) return;
+    let cur = panels.findIndex(p => p.classList.contains('ativo'));
+    if (cur < 0) cur = 0;
+    const next = Math.min(panels.length - 1, Math.max(0, cur + delta));
+    if (next === cur) return;
+    panels[cur].classList.remove('ativo');
+    panels[next].classList.add('ativo');
+    pjSync(car, panels, next);
+    car.scrollIntoView({ block: 'nearest' });
+}
+function pjSync(car, panels, idx) {
+    const pos = document.getElementById('pj-pos');
+    if (pos) pos.textContent = idx + 1;
+    const prev = car.querySelector('.pj-prev'), nx = car.querySelector('.pj-next');
+    if (prev) prev.disabled = idx <= 0;
+    if (nx) nx.disabled = idx >= panels.length - 1;
+}
+(function () {
+    const car = document.getElementById('pj-carousel');
+    if (!car) return;
+    const panels = Array.prototype.slice.call(car.querySelectorAll('.pj-panel'));
+    pjSync(car, panels, 0);
+    // Setas do teclado navegam entre PAJs (exceto ao digitar ou com um modal aberto).
+    document.addEventListener('keydown', function (e) {
+        if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+        if (e.target && e.target.isContentEditable) return;
+        const modalAberto = Array.prototype.some.call(
+            document.querySelectorAll('.wa-overlay'),
+            o => getComputedStyle(o).display !== 'none');
+        if (modalAberto) return;
+        if (e.key === 'ArrowLeft') pjNav(-1);
+        else if (e.key === 'ArrowRight') pjNav(1);
+    });
+})();
+
+// ===== Uniformiza as larguras das colunas da 1ª linha entre TODOS os PAJs do carrossel =====
+// Cada painel é uma tabela própria (table-layout auto), então cada uma dimensiona as colunas
+// pelo próprio conteúdo -> variam de um PAJ para outro. Aqui medimos o MAIOR conteúdo de cada
+// coluna entre todos os PAJs e aplicamos como largura mínima igual em todas -> colunas uniformes,
+// sem truncar (rola horizontalmente se faltar espaço). Assistido (largura 100%) absorve a sobra.
+function uniformizarColunasCompleto(){
+    const tables = Array.prototype.slice.call(document.querySelectorAll('.pjp-id-table'));
+    if (!tables.length) return;
+    // Painéis inativos ficam display:none (não mensuráveis) -> tornar TODOS visíveis
+    // durante a medição. É síncrono (sem repaint intermediário), então não pisca.
+    const panels = Array.prototype.slice.call(document.querySelectorAll('.pj-panel'));
+    panels.forEach(p => p.style.display = 'block');
+    // 1) zera min-widths e encolhe as tabelas ao conteúdo para medir a largura natural
+    tables.forEach(t => {
+        t.querySelectorAll('td').forEach(td => td.style.minWidth = '');
+        t.style.width = 'auto';
+    });
+    const assistThs = tables.map(t => t.querySelector('thead th:nth-child(3)'));
+    assistThs.forEach(th => { if (th) { th.dataset._w = th.style.width || ''; th.style.width = 'auto'; } });
+    // 2) mede o maior por coluna
+    const rows = tables.map(t => Array.prototype.slice.call(t.querySelectorAll('tbody tr:first-child > td')));
+    const nCols = rows.length ? rows[0].length : 0;
+    const maxW = new Array(nCols).fill(0);
+    rows.forEach(r => r.forEach((td, i) => { maxW[i] = Math.max(maxW[i], Math.ceil(td.getBoundingClientRect().width)); }));
+    // 3) aplica como min-width em todas as tabelas e restaura larguras
+    rows.forEach(r => r.forEach((td, i) => { td.style.minWidth = maxW[i] + 'px'; }));
+    tables.forEach(t => { t.style.width = ''; });
+    assistThs.forEach(th => { if (th) { th.style.width = th.dataset._w || '100%'; } });
+    // restaura a visibilidade (só o painel .ativo aparece, via CSS)
+    panels.forEach(p => p.style.display = '');
+}
+(function(){
+    if (!document.querySelector('.pjp-id-table')) return;
+    uniformizarColunasCompleto();
+    // reexecuta quando as fontes terminarem de carregar (a largura do texto pode mudar)
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(uniformizarColunasCompleto);
+})();
+
+// ===== Anexos EMBUTIDOS no card (layout completo) — gerencia sem abrir o modal =====
+function _anxEsc(s){ const d=document.createElement('div'); d.textContent = s==null?'':s; return d.innerHTML; }
+function _anxTam(n){ n=+n||0; if(n<1024) return n+' B'; if(n<1048576) return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function anxCardRaiz(card){
+    const b = '/api/caixa/' + card.dataset.slug + '/paj/' + encodeURIComponent(card.dataset.paj);
+    return card.dataset.tipo === 'conjunto'
+        ? b + '/conjunto'
+        : b + '/tramite/' + encodeURIComponent(card.dataset.tramite || '');
+}
+function anxCardRender(card, anexos){
+    card.classList.toggle('tem-anexo', !!(anexos && anexos.length));  // clipe vermelho quando há anexos
+    const box = card.querySelector('.pjp-anx-lista');
+    if (!anexos || !anexos.length){
+        box.innerHTML = '<div class="text-tertiary" style="font-size:12.5px;padding:8px 0;">Nenhum anexo.</div>';
+        return;
+    }
+    const raiz = anxCardRaiz(card);
+    let h = '<table class="fluent-table anx-tabela" style="width:100%;font-size:12px;"><thead><tr>' +
+            '<th>Arquivo</th><th style="width:4.5rem;">Tamanho</th><th style="width:7rem;">Incluído em</th><th style="width:2rem;"></th>' +
+            '</tr></thead><tbody>';
+    anexos.forEach(a => {
+        const dl = a.arquivo ? (raiz + '/anexo/' + encodeURIComponent(a.arquivo)) : '';
+        const nome = dl ? '<a class="accent-link" href="'+dl+'" target="_blank" rel="noopener">'+_anxEsc(a.nome)+'</a>' : _anxEsc(a.nome);
+        h += '<tr><td style="word-break:break-word;">'+nome+'</td>' +
+             '<td>'+_anxTam(a.tamanho)+'</td>' +
+             '<td class="text-tertiary">'+_anxEsc((a.incluido_em||'').replace('T',' ').slice(0,16))+'</td>' +
+             '<td><button class="btn-subtle" style="padding:2px 7px;color:#dc2626;" title="Remover anexo" ' +
+             'data-id="'+_anxEsc(a.id)+'" onclick="anxCardRemover(this)">✕</button></td></tr>';
+    });
+    box.innerHTML = h + '</tbody></table>';
+}
+// Mantém coerentes os data-anexos dos botões do MESMO painel (Gravar / Ver-editar / clipe).
+function anxCardSync(card, anexos){
+    const panel = card.closest('.pj-panel'); if (!panel) return;
+    const js = JSON.stringify(anexos || []);
+    panel.querySelectorAll('[data-anexos]').forEach(el => el.setAttribute('data-anexos', js));
+}
+async function anxCardUpload(input){
+    const card = input.closest('.pjp-anx');
+    const EXTS = ['doc','docx','odt','png','jpg','jpeg','gif','pdf'];
+    const msg = card.querySelector('.pjp-anx-msg');
+    const fd = new FormData(); const rejLocal = []; let n = 0;
+    for (const f of input.files){
+        const ext = (f.name.split('.').pop() || '').toLowerCase();
+        if (EXTS.includes(ext)){ fd.append('arquivos', f); n++; } else rejLocal.push(f.name);
+    }
+    if (!n){ msg.textContent = 'Formato não permitido: ' + rejLocal.join(', ') + '.'; input.value=''; return; }
+    msg.textContent = 'Enviando…';
+    try{
+        const r = await fetch(anxCardRaiz(card) + '/anexos', { method:'POST', body:fd });
+        const d = await r.json();
+        if (d.ok){
+            anxCardRender(card, d.anexos || []);
+            anxCardSync(card, d.anexos || []);
+            const av = []; const rej = (d.rejeitados || []).concat(rejLocal);
+            if (rej.length) av.push('Recusado: ' + rej.join(', '));
+            if ((d.duplicados || []).length) av.push('Já constava: ' + d.duplicados.join(', '));
+            msg.textContent = av.join(' · ');
+        } else msg.textContent = 'Falha: ' + (d.erro || 'erro');
+    } catch(e){ msg.textContent = 'Erro: ' + e; }
+    input.value = '';
+}
+async function anxCardRemover(btn){
+    if (!confirm('Remover este anexo?')) return;
+    const card = btn.closest('.pjp-anx');
+    const msg = card.querySelector('.pjp-anx-msg');
+    try{
+        const r = await fetch(anxCardRaiz(card) + '/anexos/' + encodeURIComponent(btn.dataset.id) + '/remover', { method:'POST' });
+        const d = await r.json();
+        if (d.ok){ anxCardRender(card, d.anexos || []); anxCardSync(card, d.anexos || []); }
+        else msg.textContent = 'Falha: ' + (d.erro || 'erro');
+    } catch(e){ msg.textContent = 'Erro: ' + e; }
+}
+(function(){
+    document.querySelectorAll('.pjp-anx').forEach(card => {
+        let a = []; try { a = JSON.parse(card.dataset.anexos || '[]'); } catch(e){}
+        anxCardRender(card, a);
+    });
+})();
+
 // ---------- Copiar para a area de transferencia + toast ----------
 function mostrarToast(msg) {
     const c = document.getElementById('toast-container');

@@ -44,6 +44,7 @@ async def configuracoes(request: Request):
         n_movimentacoes=config_service.get_n_movimentacoes(),
         analise_concorrencia=config_service.get_analise_concorrencia(),
         analise_concorrencia_max=config_service.ANALISE_CONCORRENCIA_MAX,
+        layout_pendentes=config_service.get_layout_pendentes(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modos=config_service.get_envio_modos(),
         whatsapp_intervalo=config_service.get_whatsapp_intervalo_seg(),
@@ -71,6 +72,13 @@ async def set_analise_concorrencia(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "n": config_service.set_analise_concorrencia(n)}
+
+
+@router.post("/api/config/layout-pendentes", response_class=JSONResponse)
+async def set_layout_pendentes(payload: dict = Body(...)):
+    """Define o layout da tabela 'Pendentes': 'simples' (retrátil) ou 'completo' (carrossel)."""
+    v = (payload or {}).get("layout", config_service.LAYOUT_PENDENTES_PADRAO)
+    return {"ok": True, "layout": config_service.set_layout_pendentes(v)}
 
 
 @router.post("/api/config/envio-modo", response_class=JSONResponse)

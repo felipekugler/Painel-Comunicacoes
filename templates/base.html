@@ -123,6 +123,9 @@
 
         * { box-sizing: border-box; }
         html, body { overflow-x: hidden; max-width: 100%; }
+        /* Reserva sempre o espaço da barra de rolagem vertical -> a largura do conteúdo
+           não muda quando ela aparece/some (evita deslocar setas do carrossel, botões etc.). */
+        html { scrollbar-gutter: stable; }
 
         body {
             margin: 0;
@@ -252,6 +255,24 @@
             background: var(--accent-soft); color: var(--accent);
             font-size: 12px; font-weight: 600;
         }
+        /* Selo do "tipo" de texto padrão: pode ter várias linhas -> o fundo colorido
+           cobre TODO o texto (sem altura fixa; quebra e envolve todas as linhas). */
+        .pill-tipo {
+            display: inline-block; padding: 3px 9px; border-radius: 8px;
+            background: var(--accent-soft); color: var(--accent);
+            font-size: 12px; font-weight: 600; line-height: 1.35;
+            white-space: normal; overflow-wrap: anywhere;
+        }
+        /* Selo do modo de envio (por meio): âmbar = simulado, vermelho = real. */
+        .badge-modo { display:inline-block; font-size:10px; font-weight:800; letter-spacing:.04em;
+            padding:3px 8px; border-radius:6px; white-space:nowrap;
+            background:#fde68a; color:#713f12; border:1px solid #eab308; }
+        .badge-modo.badge-modo-real { background:#fecaca; color:#7f1d1d; border-color:#dc2626; }
+        /* Contador de itens no MESMO formato quadrado do selo (cor de acento). */
+        .pill-quad { display:inline-block; padding:3px 9px; border-radius:6px;
+            font-size:12px; font-weight:800; line-height:1.35;
+            background:var(--accent-soft); color:var(--accent);
+            border:1px solid color-mix(in srgb, var(--accent) 35%, transparent); }
 
         /* ---------- Tabela estilo lista Fluent ---------- */
         .fluent-table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -278,6 +299,8 @@
         .fluent-table tbody tr { transition: background 0.1s ease; }
         .fluent-table tbody tr:hover { background: color-mix(in srgb, var(--text) 4%, transparent); }
         .fluent-table tbody tr:last-child td { border-bottom: none; }
+        /* Tabela de ANEXOS: sempre COMPACTA (menos espaço entre linhas), em qualquer lugar */
+        .anx-tabela thead th, .anx-tabela tbody td { padding: 3px 8px; line-height: 1.3; }
 
         .text-secondary { color: var(--text-secondary); }
         .text-tertiary  { color: var(--text-tertiary); }
@@ -484,21 +507,23 @@
     <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->
     <div id="anx-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)anxFechar()">
       <div class="fluent-card" style="width:50vw;max-height:86vh;overflow:auto;">
-        <h3 class="font-display" style="font-size:18px;margin:0;">
-            Anexos — PAJ <span id="anx-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
-        </h3>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+            <h3 class="font-display" style="font-size:18px;margin:0;">
+                Anexos — PAJ <span id="anx-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+            </h3>
+            <div id="anx-add-box">
+                <input type="file" id="anx-input" multiple style="display:none;"
+                       accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxUpload(this)">
+                <button class="btn-accent" style="padding:6px 14px;font-size:12px;white-space:nowrap;"
+                        onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
+            </div>
+        </div>
         <p id="anx-hint" class="text-tertiary" style="font-size:12px;margin:4px 0 10px;">
             Documentos que serão enviados junto com a mensagem ao assistido.</p>
         <div id="anx-lista" style="margin-top:6px;"></div>
-        <div id="anx-add-box" style="margin-top:12px;">
-            <input type="file" id="anx-input" multiple style="display:none;"
-                   accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxUpload(this)">
-            <button class="btn-accent" style="padding:6px 14px;font-size:12px;"
-                    onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
-            <span id="anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
-            <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">
-                Formatos aceitos pelo Aplicativo SISDPU: <strong>DOC, DOCX, ODT, PNG, JPEG, GIF, PDF</strong>. Outros são recusados.</p>
-        </div>
+        <span id="anx-msg" class="text-tertiary" style="font-size:12px;display:block;margin-top:8px;"></span>
+        <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">
+            Formatos aceitos pelo Aplicativo SISDPU: <strong>DOC, DOCX, ODT, PNG, JPEG, GIF, PDF</strong>. Outros são recusados.</p>
         <div style="display:flex;justify-content:flex-end;margin-top:14px;">
             <button class="btn-accent" style="padding:6px 14px;" onclick="anxFechar()">Salvar</button>
         </div>
@@ -542,7 +567,7 @@
             box.innerHTML = '<div class="text-tertiary" style="font-size:13px;padding:8px 0;">Nenhum anexo.</div>';
             return;
         }
-        let h = '<table class="fluent-table" style="width:100%;font-size:12.5px;"><thead><tr>' +
+        let h = '<table class="fluent-table anx-tabela" style="width:100%;font-size:12.5px;"><thead><tr>' +
                 '<th>Arquivo</th><th style="width:5rem;">Tamanho</th><th style="width:9rem;">Incluído em</th>' +
                 (anxCtx.readonly ? '' : '<th style="width:2.5rem;"></th>') + '</tr></thead><tbody>';
         anexos.forEach(a => {
@@ -622,7 +647,7 @@
             box.innerHTML = '<div class="text-tertiary" style="font-size:12.5px;padding:4px 0;">Nenhum anexo.</div>';
             return;
         }
-        let h = '<table class="fluent-table" style="width:100%;font-size:12.5px;"><tbody>';
+        let h = '<table class="fluent-table anx-tabela" style="width:100%;font-size:12.5px;"><tbody>';
         anexos.forEach(a => {
             const dl = a.arquivo ? (gravaAnxRaiz() + '/anexo/' + encodeURIComponent(a.arquivo)) : '';
             const nome = dl ? '<a class="accent-link" href="' + dl + '" target="_blank" rel="noopener">' + anxEsc(a.nome) + '</a>' : anxEsc(a.nome);

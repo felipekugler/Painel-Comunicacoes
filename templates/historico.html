@@ -81,7 +81,7 @@
                     {% else %}—{% endif %}
                 </td>
                 <td data-sort="{{ (r.tipo or '~')|lower }}">
-                    {% if r.tipo %}<span class="pill" title="Texto padrão / classificação">{{ r.tipo }}</span>
+                    {% if r.tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ r.tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">

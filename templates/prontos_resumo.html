@@ -32,6 +32,7 @@
             <tr>
                 <th>Meio de contato</th>
                 <th class="text-center" style="width:10rem;">Mensagens gravadas</th>
+                <th style="width:10rem;">Situação</th>
                 <th style="width:9rem;">Ação</th>
             </tr>
         </thead>
@@ -50,6 +51,11 @@
                     </a>
                 </td>
                 <td class="text-center"><span class="pill">{{ l.qtd }}</span></td>
+                <td>
+                    <span class="badge-modo {{ 'badge-modo-real' if l.modo == 'real' else '' }}"
+                          title="Modo de disparo do {{ l.label }} (ajuste em Configurações).">
+                        {{ 'Envio real' if l.modo == 'real' else 'Envio simulado' }}</span>
+                </td>
                 <td>
                     <a class="btn-subtle" style="padding:4px 12px;font-size:12.5px;text-decoration:none;" href="/prontos/{{ l.slug }}">Abrir →</a>
                 </td>

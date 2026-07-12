@@ -262,10 +262,12 @@ async def enviar_mensagem(
     headless: bool = True,
     comprovante_dir: str | None = None,
     paj_ref: str = "",
+    mensagem_prazo: str | None = None,
 ) -> dict:
     """Envia uma mensagem de WhatsApp pelo perfil dedicado, em SEQUÊNCIA: primeiro o
     TEXTO (mensagem própria), depois os ANEXOS (lote único via "Documento", SEM
-    legenda). Modelo escolhido: 1 clique no painel → o Playwright envia tudo.
+    legenda) e, por fim, se `mensagem_prazo` for dado, uma 3ª mensagem informando o
+    prazo/urgência. Modelo escolhido: 1 clique no painel → o Playwright envia tudo.
     Se `comprovante_dir` for dado, gera o comprovante PDF de 2 páginas (dados do
     contato + conversa) nomeado com o PAJ (`paj_ref`) e o retorna em `comprovante`.
     Retorna {ok, status, detalhe, comprovante}. status: enviado|parcial|falha.
@@ -278,9 +280,10 @@ async def enviar_mensagem(
     if not intl:
         return {"ok": False, "status": "falha", "detalhe": "Número vazio/inválido."}
     texto = (mensagem or "").strip()
+    msg_prazo = (mensagem_prazo or "").strip()
     validos = [a for a in anexos if a.get("caminho") and Path(a["caminho"]).exists()]
     ausentes = [a for a in anexos if not (a.get("caminho") and Path(a["caminho"]).exists())]
-    if not texto and not validos:
+    if not texto and not validos and not msg_prazo:
         return {"ok": False, "status": "falha",
                 "detalhe": "Nada a enviar (sem texto e sem anexo válido)."}
 
@@ -332,6 +335,18 @@ async def enviar_mensagem(
                 # confirma pelo NOME do 1º arquivo (aparece na bolha do documento)
                 ok_anx = await _confirmar_enviado(page, payloads[0]["name"], timeout_seg=30)
                 etapas.append((f"{len(payloads)} anexo(s)", ok_anx))
+
+            # 3) MENSAGEM DE PRAZO (condicional) — digitada no chat já aberto e enviada por último
+            if msg_prazo:
+                compose = page.locator(_SEL_COMPOSE).first
+                await compose.click()
+                await page.wait_for_timeout(250)
+                await page.keyboard.type(msg_prazo)
+                await page.wait_for_timeout(250)
+                await page.keyboard.press("Enter")
+                ok_prz = await _confirmar_enviado(page, msg_prazo, timeout_seg=20)
+                etapas.append(("prazo", ok_prz))
+                await page.wait_for_timeout(600)
 
             todos_ok = bool(etapas) and all(ok for _, ok in etapas)
             algum_ok = any(ok for _, ok in etapas)

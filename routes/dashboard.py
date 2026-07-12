@@ -53,6 +53,7 @@ async def dashboard(request: Request, slug: str):
         paragrafos=paragrafos, comunicados=comunicados,
         meios_envio=envio_service.meios_disponiveis(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
+        layout_pendentes=config_service.get_layout_pendentes(),
         envio_modos_resumo=config_service.resumo_modos()))
 
 
@@ -78,7 +79,8 @@ async def prontos_home(request: Request):
     """Página de RESUMO: quantas mensagens gravadas há em cada meio (com link para
     abrir), ou aviso de que não há mensagens gravadas em nenhum meio."""
     counts = divcom_service.prontos_por_meio()
-    linhas = [{"slug": slug, "key": key, "label": lab, "qtd": counts.get(slug, 0)}
+    linhas = [{"slug": slug, "key": key, "label": lab, "qtd": counts.get(slug, 0),
+               "modo": config_service.get_envio_modo_meio(key)}
               for slug, key, lab in divcom_service.PRONTOS_MEIOS if counts.get(slug, 0)]
     template = request.app.state.jinja.get_template("prontos_resumo.html")
     return HTMLResponse(template.render(
@@ -108,6 +110,16 @@ async def prontos_envio(request: Request, meio: str):
             _vistos.add(p["caixa_slug"])
             caixas_filtro.append({"slug": p["caixa_slug"], "nome": p["caixa_nome"]})
     tipos_filtro = sorted({p.get("sugestao_tipo", "") for p in itens if p.get("sugestao_tipo")})
+    # Título do cabeçalho: prefixo + nome do meio (colorido com a cor identificadora).
+    _titulos = {
+        "app":      ("Prontos para enviar pelo ", "Aplicativo SISDPU", "--c-app"),
+        "whatsapp": ("Prontos para enviar pelo ", "WhatsApp",          "--c-zap"),
+        "email":    ("Prontos para enviar via ",  "e-mail",            "--c-mail"),
+        "telefone": ("Prontos para enviar por ",  "telefone",          "--c-tel"),
+        "carta":    ("Prontos para enviar por ",  "carta",             "--c-addr"),
+    }
+    titulo_pre, titulo_nome, meio_cor = _titulos.get(
+        meio, ("Prontos para enviar por ", label_por_slug[meio], "--text-secondary"))
     template = request.app.state.jinja.get_template("prontos.html")
     return HTMLResponse(template.render(
         request=request,
@@ -115,7 +127,12 @@ async def prontos_envio(request: Request, meio: str):
         prontos_app=prontos_app,
         prontos_wa=prontos_wa,
         meio_ativo=meio,
+        meio_key=key,
         meio_label=label_por_slug[meio],
+        titulo_pre=titulo_pre,
+        titulo_nome=titulo_nome,
+        meio_cor=meio_cor,
+        meio_modo=config_service.get_envio_modo_meio(key),
         meios_envio=meios,
         meio_labels={m["key"]: m["label"] for m in meios},
         caixas_filtro=caixas_filtro,
@@ -135,6 +152,18 @@ async def prontos_whatsapp_enviar(payload: dict = Body(...)):
     if not (slug and paj and tr):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
     return await divcom_service.enviar_whatsapp_tramite(slug, paj, tr)
+
+
+@router.post("/api/prontos/enviar-item", response_class=JSONResponse)
+async def prontos_enviar_item(payload: dict = Body(...)):
+    """Envio INDIVIDUAL de um item por UM meio (App/E-mail) a partir de Prontos.
+    Corpo: {slug, paj_norm, tipo, id_tramite, meio}. Bloqueia até concluir."""
+    p = payload or {}
+    slug, paj, tipo = p.get("slug", ""), p.get("paj_norm", ""), p.get("tipo", "tramite")
+    tr, meio = p.get("id_tramite", ""), p.get("meio", "")
+    if not (slug and paj and meio):
+        return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
+    return await divcom_service.enviar_item_meio(slug, paj, tipo, tr, meio)
 
 
 @router.post("/api/prontos/whatsapp/enviar-lote")
@@ -307,9 +336,11 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/gravar/remover", response_class=JSONResponse)
-async def remover_da_fila(slug: str, paj_norm: str, id_tramite: str):
-    """Tira uma tramitação da fila de envio (volta a pendente)."""
-    dados = divcom_service.remover_da_fila(slug, paj_norm, id_tramite)
+async def remover_da_fila(slug: str, paj_norm: str, id_tramite: str, payload: dict = Body(default={})):
+    """Tira uma tramitação da fila de envio. Se `meio` vier no corpo e houver outros
+    meios pendentes, remove só aquele meio; senão volta a pendente."""
+    meio = (payload or {}).get("meio") or None
+    dados = divcom_service.remover_da_fila(slug, paj_norm, id_tramite, meio)
     if not dados:
         return JSONResponse({"ok": False, "erro": "tramitação não encontrada"}, status_code=404)
     return {"ok": True}
@@ -357,8 +388,9 @@ async def gravar_conjunto(slug: str, paj_norm: str, payload: dict = Body(...)):
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/conjunto/gravar/remover", response_class=JSONResponse)
-async def remover_conjunto(slug: str, paj_norm: str):
-    dados = divcom_service.remover_conjunto_da_fila(slug, paj_norm)
+async def remover_conjunto(slug: str, paj_norm: str, payload: dict = Body(default={})):
+    meio = (payload or {}).get("meio") or None
+    dados = divcom_service.remover_conjunto_da_fila(slug, paj_norm, meio)
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}

@@ -24,24 +24,14 @@
     <span data-meio="whatsapp">{{ meio_icon('whatsapp', meio_labels.get('whatsapp','WhatsApp')) }}</span>
     <span data-meio="email">{{ meio_icon('email', meio_labels.get('email','E-mail')) }}</span>
 </div>
-<div class="flex items-end justify-between gap-4 flex-wrap mb-6">
-    <div>
-        <h1 class="font-display" style="font-size: 28px; margin: 0;">Prontos — {{ meio_label }}</h1>
-        <p class="text-secondary mt-1" style="font-size: 13px;">
-            PAJs gravados de <strong>todas as caixas</strong> para envio por <strong>{{ meio_label }}</strong>.
-            {% if meio_ativo in ('app','email') %}Marque e use <strong>"Enviar Agora"</strong> (lote).
-            {% elif meio_ativo == 'whatsapp' %}Envio <strong>assistido</strong>: 1 clique por linha — o painel envia texto e anexos e gera o <strong>comprovante (PDF)</strong>.
-            {% endif %}
-        </p>
-    </div>
-</div>
-
-<div class="section-head">
-    <span class="pill" id="pr-total">{{ prontos|length }}</span>
-    <span class="badge-modo" title="Modo de disparo por meio (ajuste em Configurações). REAL dispara de verdade.">
-        Envio: {{ envio_modos_resumo }}</span>
+<div class="section-head" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+    <h1 class="font-display" style="font-size:22px;margin:0;text-transform:uppercase;">{{ titulo_pre }}<span style="color:var({{ meio_cor }});">{{ titulo_nome }}</span></h1>
+    <span class="pill-quad" id="pr-total">{{ prontos|length }}</span>
+    <span class="badge-modo {{ 'badge-modo-real' if meio_modo == 'real' else '' }}"
+          title="Modo de disparo do {{ meio_label }} (ajuste em Configurações). Envio real dispara de verdade ao assistido.">
+        {{ 'Envio real' if meio_modo == 'real' else 'Envio simulado' }}</span>
     {% if prontos %}
-    <div style="margin-left:auto;">
+    <div style="margin-left:auto;text-align:right;">
         <button class="btn-accent" id="btn-enviar" onclick="{% if meio_ativo == 'whatsapp' %}enviarLoteWhatsapp(){% else %}enviarSelecionados(){% endif %}" disabled>
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:16px;height:16px;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
@@ -53,7 +43,14 @@
 </div>
 
 {% if prontos_app %}
-<p class="text-tertiary" style="font-size:12px;margin:0 0 8px;">Clique nos cabeçalhos para ordenar. Marque os PAJs e use "Enviar Agora".</p>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 8px;width:100%;">
+    <p class="text-tertiary" style="font-size:12px;margin:0;">Clique nos cabeçalhos para ordenar. Marque os PAJs e use "Enviar Agora".</p>
+    <div style="font-size:12px;white-space:nowrap;">
+        <a href="#" class="accent-link" onclick="marcarVisiveis(true);return false;">Marcar todos</a>
+        <span class="text-tertiary"> · </span>
+        <a href="#" class="accent-link" onclick="marcarVisiveis(false);return false;">Limpar</a>
+    </div>
+</div>
 <div class="fluent-card" style="overflow-x:auto;">
     <table class="fluent-table">
         <thead>
@@ -62,12 +59,12 @@
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">Ofício<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Caixa de origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Origem<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width: 16rem;">Mensagem</th>
+                <th style="min-width: 16rem; width:100%;">Mensagem</th>
                 <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width: 3rem;">Anexos<span class="sort-arrow"></span></th>
                 <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width: 6rem;">Prazo<span class="sort-arrow"></span></th>
-                <th style="width: 8rem;">Ações</th>
+                <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
         <tbody>
@@ -99,8 +96,10 @@
                 <td data-sort="{{ paj.paj }}">
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
+                    {% if paj.envio_meios %}<div class="pj-meios">
+                        {% for mk in paj.envio_meios %}<span class="{{ '' if mk == meio_key else 'meio-dim' }}" title="Pendente por {{ meio_labels.get(mk, mk) }}{% if mk == meio_key %} (esta página){% endif %}">{{ meio_icon(mk, meio_labels.get(mk, mk)) }}</span>{% endfor %}
+                    </div>{% endif %}
                     {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
-                    {% if paj.envio_urgente %}<div class="mt-1"><span class="pill-urgente" title="Urgente — prioridade na fila de envio">⚡ Urgente</span></div>{% endif %}
                     {% if paj.envio_falhas %}<div class="mt-1" style="display:flex;flex-direction:column;gap:3px;">
                         {% for meio, det in paj.envio_falhas.items() %}
                         <span title="{{ det }}" style="display:block;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;">⚠ {{ meio_labels.get(meio, meio) }}: {{ det }}</span>
@@ -115,7 +114,7 @@
                           style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
                 <td>
-                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                    {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">
@@ -143,27 +142,38 @@
                     {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<div class="mt-1"><span class="sl-badge" title="Somente Leitura">SL</span></div>{% endif %}
                 </td>
                 <td>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-slug="{{ paj.caixa_slug }}"
-                                data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                    <div class="wa-acao" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+                        <button class="btn-meio-enviar" style="--btn-cor:var({{ meio_cor }});"
+                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
                                 data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                data-mensagem="{{ paj.envio_mensagem }}"
-                                data-meios='{{ paj.envio_meios|tojson }}'
-                                data-anexos='{{ paj.anexos|tojson }}'
-                                data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
-                                data-prazo-app="{{ paj.envio_prazo_app }}"
-                                data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
-                                data-prazo-email="{{ paj.envio_prazo_email }}"
-                                data-app="{{ 1 if c.app_sisdpu else 0 }}"
-                                data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                data-email="{{ 1 if c.email else 0 }}"
-                                onclick="gravarAbrir(this)">Editar</button>
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-slug="{{ paj.caixa_slug }}"
-                                data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                onclick="removerDaFila(this)"
-                                title="Tirar da fila (volta a pendente na caixa de origem)">Remover</button>
+                                data-meio="{{ meio_key }}" data-meiolabel="{{ meio_label }}"
+                                onclick="enviarItem(this)">
+                            {{ meio_icon(meio_key, meio_label) }} Enviar por {{ meio_label }}
+                        </button>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                    data-slug="{{ paj.caixa_slug }}"
+                                    data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                    data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                    data-mensagem="{{ paj.envio_mensagem }}"
+                                    data-meios='{{ paj.envio_meios|tojson }}'
+                                    data-anexos='{{ paj.anexos|tojson }}'
+                                    data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                    data-prazo-app="{{ paj.envio_prazo_app }}"
+                                    data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
+                                    data-prazo-email="{{ paj.envio_prazo_email }}"
+                                    data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                                    data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                    data-email="{{ 1 if c.email else 0 }}"
+                                    onclick="gravarAbrir(this)">Editar</button>
+                            <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                    data-slug="{{ paj.caixa_slug }}"
+                                    data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                    data-meio="{{ meio_key }}" data-meiolabel="{{ meio_label }}"
+                                    data-multi="{{ 1 if (paj.envio_meios|length) > 1 else 0 }}"
+                                    onclick="removerDaFila(this)"
+                                    title="Remover o envio por {{ meio_label }} deste PAJ">Remover</button>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -174,6 +184,14 @@
 {% endif %}{# fim tabela App/E-mail #}
 
 {% if prontos_wa %}
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:0 0 8px;width:100%;">
+    <p class="text-tertiary" style="font-size:12px;margin:0;">Clique nos cabeçalhos para ordenar. Marque os PAJs e use "Enviar Agora".</p>
+    <div style="font-size:12px;white-space:nowrap;">
+        <a href="#" class="accent-link" onclick="marcarVisiveis(true);return false;">Marcar todos</a>
+        <span class="text-tertiary"> · </span>
+        <a href="#" class="accent-link" onclick="marcarVisiveis(false);return false;">Limpar</a>
+    </div>
+</div>
 <div class="fluent-card" style="overflow-x:auto;">
     <table class="fluent-table">
         <thead>
@@ -182,12 +200,12 @@
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Caixa de origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Origem<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width:15rem;">Mensagem</th>
+                <th style="min-width:15rem; width:100%;">Mensagem</th>
                 <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:3rem;">Anexos<span class="sort-arrow"></span></th>
                 <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Prazo<span class="sort-arrow"></span></th>
-                <th style="min-width:14rem;">Ação</th>
+                <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
         <tbody>
@@ -204,7 +222,10 @@
                 <td data-sort="{{ paj.paj }}">
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
                        style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
-                    {% if paj.envio_urgente %}<div class="mt-1"><span class="pill-urgente" title="Urgente">⚡ Urgente</span></div>{% endif %}
+                    {% if paj.envio_meios %}<div class="pj-meios">
+                        {% for mk in paj.envio_meios %}<span class="{{ '' if mk == meio_key else 'meio-dim' }}" title="Pendente por {{ meio_labels.get(mk, mk) }}{% if mk == meio_key %} (esta página){% endif %}">{{ meio_icon(mk, meio_labels.get(mk, mk)) }}</span>{% endfor %}
+                    </div>{% endif %}
+                    {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
                     {% if paj.envio_falhas and paj.envio_falhas.get('whatsapp') %}
                     <div class="mt-1"><span title="{{ paj.envio_falhas['whatsapp'] }}" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ {{ paj.envio_falhas['whatsapp'] }}</span></div>
                     {% endif %}
@@ -217,7 +238,7 @@
                           style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
                 <td>
-                    {% if paj.sugestao_tipo %}<span class="pill" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                    {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
                 <td class="text-secondary" style="font-size:12.5px;">
@@ -243,7 +264,7 @@
                     {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}
                 </td>
                 <td>
-                    <div class="wa-acao" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                    <div class="wa-acao" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
                         {% if paj.whatsapp_estado == 'ativo' %}
                         <button class="btn-wa-enviar"
                                 data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
@@ -253,19 +274,23 @@
                         {% else %}
                         <span class="text-tertiary" style="font-size:12px;">Cadastre o nº de WhatsApp na caixa de origem</span>
                         {% endif %}
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                data-mensagem="{{ paj.envio_mensagem }}" data-meios='{{ paj.envio_meios|tojson }}'
-                                data-anexos='{{ paj.anexos|tojson }}' data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
-                                data-prazo-app="{{ paj.envio_prazo_app }}" data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
-                                data-prazo-email="{{ paj.envio_prazo_email }}"
-                                data-app="{{ 1 if c.app_sisdpu else 0 }}" data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                data-email="{{ 1 if c.email else 0 }}" onclick="gravarAbrir(this)">Editar</button>
-                        <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
-                                data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
-                                data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                                onclick="removerDaFila(this)" title="Tirar da fila">Remover</button>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                    data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                    data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                    data-mensagem="{{ paj.envio_mensagem }}" data-meios='{{ paj.envio_meios|tojson }}'
+                                    data-anexos='{{ paj.anexos|tojson }}' data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                    data-prazo-app="{{ paj.envio_prazo_app }}" data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
+                                    data-prazo-email="{{ paj.envio_prazo_email }}"
+                                    data-app="{{ 1 if c.app_sisdpu else 0 }}" data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                                    data-email="{{ 1 if c.email else 0 }}" onclick="gravarAbrir(this)">Editar</button>
+                            <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
+                                    data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
+                                    data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                    data-meio="{{ meio_key }}" data-meiolabel="{{ meio_label }}"
+                                    data-multi="{{ 1 if (paj.envio_meios|length) > 1 else 0 }}"
+                                    onclick="removerDaFila(this)" title="Remover o envio por {{ meio_label }} deste PAJ">Remover</button>
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -292,12 +317,16 @@
 <style>
 @keyframes spin { to { transform: rotate(360deg); } }
 .section-head { display:flex; align-items:center; gap:10px; margin:0 0 12px; flex-wrap:wrap; }
-.badge-modo { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 8px; border-radius:6px;
-              background:#fde68a; color:#713f12; border:1px solid #eab308; }
+/* .badge-modo / .badge-modo-real agora em base.html (compartilhado com a página-resumo) */
 .caixa-chip { display:inline-flex; align-items:center; font-size:11.5px; font-weight:600; padding:2px 8px;
               border-radius:999px; background:var(--accent-soft); color:var(--accent); white-space:nowrap; }
 .meio-ic { display:inline-flex; }
 .meio-ic svg { width:19px; height:19px; }
+/* Ícones dos meios PENDENTES do PAJ (abaixo do número), em todas as tabelas de Prontos.
+   O meio DESTA página fica destacado; os demais (pendentes em outras tabelas) esmaecidos. */
+.pj-meios { display:flex; gap:5px; align-items:center; margin-top:4px; }
+.pj-meios .meio-ic svg { width:16px; height:16px; }
+.pj-meios .meio-dim { opacity:.4; }
 .pill-conj-x { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
                border-radius:999px; background:color-mix(in srgb, var(--c-addr) 20%, transparent); color:var(--c-addr); }
 .clamp3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
@@ -318,6 +347,20 @@
 .btn-wa-enviar:disabled { opacity:.65; cursor:default; }
 .btn-wa-enviar .meio-ic { color:#fff !important; }
 .btn-wa-enviar .meio-ic svg { width:16px; height:16px; }
+/* Botão de envio individual por meio (App/E-mail) — usa a cor do meio via --btn-cor. */
+.btn-meio-enviar { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border:1px solid transparent;
+                   border-radius:6px; background:var(--btn-cor,#2563eb); color:#fff; font-weight:600; font-size:12.5px;
+                   cursor:pointer; transition:filter .12s ease; }
+.btn-meio-enviar:hover { filter:brightness(1.07); }
+.btn-meio-enviar:disabled { opacity:.65; cursor:default; }
+.btn-meio-enviar .meio-ic { color:#fff !important; }
+.btn-meio-enviar .meio-ic svg { width:16px; height:16px; }
+.meio-enviado-ok { font-weight:700; font-size:12.5px; }
+/* Coluna Ações uniforme em todas as tabelas: botões do MESMO tamanho (preenchem a coluna) */
+.wa-acao { width:100%; }
+.wa-acao > .btn-wa-enviar, .wa-acao > .btn-meio-enviar { width:100%; justify-content:center; white-space:nowrap; }
+.wa-acao > div { width:100%; display:flex; gap:6px; }
+.wa-acao > div > .btn-subtle { flex:1 1 0; justify-content:center; text-align:center; }
 .wa-enviado-ok { color:var(--c-zap,#16a34a); font-weight:700; font-size:12.5px; }
 .wa-pdf-link { display:inline-flex; align-items:center; gap:5px; font-size:12.5px; font-weight:600;
                color:var(--c-mail,#2563eb); text-decoration:none; margin-left:6px;
@@ -622,13 +665,19 @@ async function gravarSalvar() {
     } catch (e) { alert('Erro ao gravar: ' + e); }
 }
 async function removerDaFila(btn) {
-    if (!confirm('Tirar da fila de envio? Volta para "pendentes" na caixa de origem.')) return;
+    const meio = btn.dataset.meio || '';
+    const rotulo = btn.dataset.meiolabel || 'este meio';
+    const multi = btn.dataset.multi === '1';
+    const msg = multi
+        ? 'Remover o envio por ' + rotulo + ' deste PAJ?\n\nEle continua na fila dos demais meios (não volta para "Pendentes").'
+        : 'Remover o envio por ' + rotulo + ' deste PAJ?\n\nComo é o único meio, ele volta para "Pendentes" na caixa de origem.';
+    if (!confirm(msg)) return;
     try {
         const slug = btn.dataset.slug;
         const url = (btn.dataset.tipo === 'conjunto')
             ? '/api/caixa/' + slug + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/conjunto/gravar/remover'
             : '/api/caixa/' + slug + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/tramite/' + encodeURIComponent(btn.dataset.tramite || '') + '/gravar/remover';
-        const r = await fetch(url, { method: 'POST' });
+        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({meio}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro: ' + e); }
@@ -738,7 +787,7 @@ function chipCaixa(it) {
 }
 function pillTipo(it) {
     const sp = document.createElement('span');
-    if (it.sugestao_tipo) { sp.className = 'pill'; sp.title = 'Texto padrão / classificação'; sp.textContent = it.sugestao_tipo; }
+    if (it.sugestao_tipo) { sp.className = 'pill-tipo'; sp.title = 'Texto padrão / classificação'; sp.textContent = it.sugestao_tipo; }
     else { sp.className = 'text-tertiary'; sp.style.fontSize = '12px'; sp.textContent = 'texto específico'; }
     return sp;
 }
@@ -949,6 +998,38 @@ async function enviarWhatsapp(btn) {
         } else {
             btn.disabled = false; btn.innerHTML = orig;
             alert('Falha no envio pelo WhatsApp:\n' + (d.detalhe || d.erro || 'erro'));
+        }
+    } catch (e) {
+        btn.disabled = false; btn.innerHTML = orig;
+        alert('Erro: ' + e);
+    }
+}
+
+// ---------- Envio INDIVIDUAL por meio (App / E-mail), 1 clique por linha ----------
+async function enviarItem(btn) {
+    const cell = btn.closest('.wa-acao');
+    const rotulo = btn.dataset.meiolabel || 'este meio';
+    if (!confirm('Enviar esta mensagem por ' + rotulo + ' agora?')) return;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = 'Enviando…';
+    try {
+        const r = await fetch('/api/prontos/enviar-item', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
+                tipo: btn.dataset.tipo || 'tramite', id_tramite: btn.dataset.tramite || '',
+                meio: btn.dataset.meio
+            })
+        });
+        const d = await r.json();
+        if (d.ok) {
+            if (cell) cell.innerHTML = '<span class="meio-enviado-ok" style="color:var(' +
+                ('{{ meio_cor }}') + ');">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
+            mostrarToast(rotulo + ' ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
+        } else {
+            btn.disabled = false; btn.innerHTML = orig;
+            alert('Falha no envio por ' + rotulo + ':\n' + (d.detalhe || d.erro || 'erro'));
         }
     } catch (e) {
         btn.disabled = false; btn.innerHTML = orig;

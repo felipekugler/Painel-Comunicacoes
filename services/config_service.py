@@ -34,6 +34,12 @@ ANALISE_CONCORRENCIA_MAX = 8
 # Apenas valores POSITIVOS (>=1); o 0 é RESERVADO para "Urgente".
 PRAZOS_PREDEF_PADRAO = [5, 10, 15, 30]
 
+# Layout da tabela "Pendentes" no dashboard da caixa:
+# - "simples": linha por PAJ; a análise/ações ficam numa linha RETRÁTIL (clique p/ abrir).
+# - "completo": um PAJ por vez, em largura total, navegável por setas (carrossel).
+LAYOUT_PENDENTES_PADRAO = "simples"
+LAYOUTS_PENDENTES = ("simples", "completo")
+
 CAIXA_DIVCOM_GRUPO = "01 - PREV_DIVCOM"
 
 _COMUNICADOS_SEED = [
@@ -91,6 +97,7 @@ def _default() -> dict:
     return {
         "n_movimentacoes": N_MOVIMENTACOES_PADRAO,
         "analise_concorrencia": ANALISE_CONCORRENCIA_PADRAO,
+        "layout_pendentes": LAYOUT_PENDENTES_PADRAO,
         "comunicados_rev": 1,
         "comunicados": [{"id": uuid.uuid4().hex[:8], **c} for c in _COMUNICADOS_SEED],
         "paragrafos": [{"id": uuid.uuid4().hex[:8], **p} for p in _PARAGRAFOS_SEED],
@@ -107,6 +114,7 @@ def ler_config() -> dict:
             d = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             d.setdefault("n_movimentacoes", N_MOVIMENTACOES_PADRAO)
             d.setdefault("analise_concorrencia", ANALISE_CONCORRENCIA_PADRAO)
+            d.setdefault("layout_pendentes", LAYOUT_PENDENTES_PADRAO)
             d.setdefault("comunicados", [])
             d.setdefault("paragrafos", [])
             d.setdefault("comunicados_rev", 1)
@@ -170,6 +178,19 @@ def set_analise_concorrencia(n: int) -> int:
     d["analise_concorrencia"] = max(1, min(int(n), ANALISE_CONCORRENCIA_MAX))
     _gravar(d)
     return d["analise_concorrencia"]
+
+
+# ---------------- layout da tabela "Pendentes" ----------------
+def get_layout_pendentes() -> str:
+    v = ler_config().get("layout_pendentes", LAYOUT_PENDENTES_PADRAO)
+    return v if v in LAYOUTS_PENDENTES else LAYOUT_PENDENTES_PADRAO
+
+
+def set_layout_pendentes(v: str) -> str:
+    d = ler_config()
+    d["layout_pendentes"] = v if v in LAYOUTS_PENDENTES else LAYOUT_PENDENTES_PADRAO
+    _gravar(d)
+    return d["layout_pendentes"]
 
 
 # ---------------- prazos pré-definidos (badges do "Gravar para envio") ----------------

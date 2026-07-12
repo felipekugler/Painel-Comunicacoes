@@ -371,15 +371,36 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
     return box
 
 
-def remover_da_fila(slug: str, paj_norm: str, id_tramite: str) -> dict:
-    """Tira uma tramitação da fila de envio (volta a ser "pendente")."""
+def _remover_meio_ou_zerar(envio: dict, meio: str | None) -> dict:
+    """Remove APENAS `meio` da lista `envio.meios` (e sua falha, se houver). Se `meio`
+    não for informado, não estiver na lista, ou for o ÚNICO meio, ZERA o envio inteiro
+    (volta a "pendente"). Retorna o novo dict de envio ({} = pendente)."""
+    envio = envio or {}
+    meios = list(envio.get("meios") or [])
+    if meio:
+        if meio not in meios:
+            return envio  # nada a remover (no-op, não zera por engano)
+        if len(meios) > 1:
+            meios.remove(meio)
+            envio["meios"] = meios
+            if isinstance(envio.get("falhas"), dict):
+                envio["falhas"].pop(meio, None)
+            return envio
+        return {}  # era o único meio -> volta a "pendente"
+    return {}  # sem meio informado -> zera tudo (remoção completa)
+
+
+def remover_da_fila(slug: str, paj_norm: str, id_tramite: str, meio: str | None = None) -> dict:
+    """Tira uma tramitação da fila de envio. Se `meio` for dado e o PAJ tiver OUTROS
+    meios pendentes, remove só aquele meio (continua gravado nos demais); senão (único
+    meio ou sem meio) volta a ser "pendente" na caixa de origem."""
     box = _ler_box(slug, paj_norm)
     if not box:
         return {}
     s = _achar_solic(box, id_tramite)
     if not s:
         return {}
-    s["envio"] = {}
+    s["envio"] = _remover_meio_ou_zerar(s.get("envio"), meio)
     _gravar_box(slug, box)
     return box
 
@@ -1117,11 +1138,13 @@ def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
     return box
 
 
-def remover_conjunto_da_fila(slug: str, paj_norm: str) -> dict:
+def remover_conjunto_da_fila(slug: str, paj_norm: str, meio: str | None = None) -> dict:
+    """Igual a remover_da_fila, mas para o CONJUNTO: remove só `meio` se houver outros
+    pendentes; senão volta o conjunto a "pendente" (triagem)."""
     box = _ler_box(slug, paj_norm)
     if not box or not box.get("conjunto"):
         return {}
-    box["conjunto"]["envio"] = {}
+    box["conjunto"]["envio"] = _remover_meio_ou_zerar(box["conjunto"].get("envio"), meio)
     _gravar_box(slug, box)
     return box
 
@@ -1729,10 +1752,11 @@ def _achar_item_fila(fila: list[dict], paj_norm: str, tipo: str, id_tramite: str
     return None
 
 
-async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
-    """Dispara UM item da fila (tramitação ou conjunto), por cada meio; registra no
-    histórico global + no box e o remove da fila. Yields eventos de log e, por
-    último, o sentinela {"_status": <status>}. Deve rodar DENTRO do _sync_lock."""
+async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
+    """Dispara UM item da fila (tramitação ou conjunto); registra no histórico global +
+    no box e remove da fila os meios enviados. Se `meio_unico` for dado, envia SÓ aquele
+    meio (os demais permanecem na fila). Yields eventos de log e, por último, o sentinela
+    {"_status": <status>}. Deve rodar DENTRO do _sync_lock."""
     from services import envio_service, historico_service
     paj_norm = t["paj_norm"]
     conjunto = t.get("tipo") == "conjunto"
@@ -1740,7 +1764,10 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
     # WhatsApp é ASSISTIDO (enviado 1-a-1 na aba WhatsApp), NÃO entra no lote autônomo.
     meios_todos = t.get("envio_meios", []) or []
     wa_presente = "whatsapp" in meios_todos
-    meios = [m for m in meios_todos if m != "whatsapp"]
+    if meio_unico:
+        meios = [meio_unico] if (meio_unico in meios_todos and meio_unico != "whatsapp") else []
+    else:
+        meios = [m for m in meios_todos if m != "whatsapp"]
     mensagem = t.get("envio_mensagem", "")
     nome = t.get("assistido") or "s/ nome"
     etiqueta = (f"conjunto de {len(ids)} tramitações" if conjunto
@@ -1853,13 +1880,21 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo=""):
                 if conjunto:
                     entry["tramite_ids"] = ids
                 alvo.setdefault("enviados", []).append(entry)
-            if fail_meios or wa_presente:
-                # WhatsApp permanece na fila (é enviado na aba WhatsApp); falhas idem.
+            # Meios NÃO processados agora (envio por meio único) permanecem na fila,
+            # junto com os que FALHARAM e o WhatsApp (sempre assistido).
+            nao_proc = [m for m in meios_todos if m != "whatsapp" and m not in meios]
+            restantes = nao_proc + fail_meios + (["whatsapp"] if wa_presente else [])
+            if restantes:
                 envio = alvo.get("envio") or {}
-                envio["meios"] = fail_meios + (["whatsapp"] if wa_presente else [])
-                if fail_meios:
-                    envio["falhas"] = falhas      # {meio: detalhe} — marcação da falha
-                    envio["falha_em"] = ultimo_ts
+                envio["meios"] = restantes
+                # preserva falhas dos meios não processados + registra as novas falhas
+                prev_falhas = {m: dd for m, dd in (envio.get("falhas") or {}).items() if m in nao_proc}
+                prev_falhas.update(falhas)
+                if prev_falhas:
+                    envio["falhas"] = prev_falhas   # {meio: detalhe} — marcação da falha
+                    envio["falha_em"] = ultimo_ts or envio.get("falha_em", "")
+                else:
+                    envio.pop("falhas", None)
                 alvo["envio"] = envio
             else:
                 alvo["envio"] = {}                # tudo OK → sai da fila
@@ -1905,6 +1940,13 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
 
     modo = config_service.get_envio_modo_meio("whatsapp")
 
+    # 3ª mensagem (prazo): sempre há prazo (0 = urgente). Enviada por último.
+    prazo_wa = _prazo_ok(envio.get("prazo_whatsapp", 5))
+    if prazo_wa == 0:
+        msg_prazo = "Favor atender com urgência."
+    else:
+        msg_prazo = f"Prazo de {prazo_wa} dia{'s' if prazo_wa != 1 else ''}."
+
     if not _pode_exclusivo():
         return {"ok": False, "status": "falha",
                 "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
@@ -1913,13 +1955,14 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         if modo == "simulado":
             await asyncio.sleep(0.4)
             res = {"ok": True, "status": "simulado", "comprovante": None,
-                   "detalhe": f"[simulado] WhatsApp para {assistido or numero}"}
+                   "detalhe": f"[simulado] WhatsApp para {assistido or numero} · {msg_prazo}"}
         else:
             if headless is None:
                 headless = config_service.get_whatsapp_headless()
             res = await whatsapp_client.enviar_mensagem(
                 numero=numero, mensagem=mensagem, anexos=anexos_ctx,
-                headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm)
+                headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm,
+                mensagem_prazo=msg_prazo)
 
         if not res.get("ok"):
             box2 = _ler_box(slug, paj_norm)
@@ -2137,6 +2180,33 @@ async def enviar_selecao_stream(selecao: list[dict]):
                "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
         yield {"done": True, "resumo": {"ok": True, "enviados": enviados, "falhas": falhas,
                                         "modo": modo, "duracao": round(dur, 1)}}
+
+
+async def enviar_item_meio(slug: str, paj_norm: str, tipo: str, id_tramite: str, meio: str) -> dict:
+    """Envio INDIVIDUAL de UM item (tramitação/conjunto) por UM meio (App/E-mail),
+    a partir da página "Prontos". Bloqueia até concluir (App real abre o navegador).
+    Registra no histórico e remove só esse meio da fila. Retorna {ok,status,detalhe}."""
+    caixa = config_service.get_caixa(slug)
+    if not caixa:
+        return {"ok": False, "status": "falha", "detalhe": "Caixa desconhecida."}
+    it = _achar_item_fila(listar_fila(slug), paj_norm, tipo or "tramite", id_tramite or "")
+    if not it:
+        return {"ok": False, "status": "falha", "detalhe": "Item não está na fila."}
+    if meio not in (it.get("envio_meios") or []):
+        return {"ok": False, "status": "falha", "detalhe": "Meio não pendente neste item."}
+    if not _pode_exclusivo():
+        return {"ok": False, "status": "falha",
+                "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
+    modo = config_service.get_envio_modo()
+    status, detalhe = "falha", ""
+    async with _sync_lock:
+        async for ev in _enviar_item_stream(slug, caixa, it, modo, meio_unico=meio):
+            if "_status" in ev:
+                status = ev["_status"]
+            elif ev.get("level") in ("ok", "erro"):
+                detalhe = ev.get("msg", "").strip()
+    return {"ok": status in ("enviado", "simulado", "parcial"),
+            "status": status, "detalhe": detalhe or status}
 
 
 # ==================== reset do painel ====================
