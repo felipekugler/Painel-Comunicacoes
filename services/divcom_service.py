@@ -847,6 +847,18 @@ def _sols_pendentes(box: dict) -> list[dict]:
     return [s for s in box.get("solicitacoes", []) if _sol_pendente(s)]
 
 
+def _marcar_membros_conjunto(box: dict, ids: list[str], entry: dict) -> None:
+    """Carimba CADA tramitação-membro de um conjunto com um registro de `enviados`,
+    além do próprio objeto do conjunto. Sem isso, o estado "enviado" vive só no
+    conjunto; se ele for desfeito depois (ex.: chegou tramitação nova → a triagem
+    fica stale), as membros perderiam a marca e reviveriam na triagem mesmo já tendo
+    sido contatadas. Com a marca por tramitação, `_sol_pendente` as exclui sempre."""
+    ids = set(ids or [])
+    for s in box.get("solicitacoes", []):
+        if s.get("id_tramite") in ids:
+            s.setdefault("enviados", []).append({**entry, "via_conjunto": True})
+
+
 def _chave_sol(chave_movs: str, com_rev: str, sol: dict) -> str:
     """Chave de cache canônica de UMA tramitação (solicitação).
 
@@ -1884,6 +1896,10 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                 if conjunto:
                     entry["tramite_ids"] = ids
                 alvo.setdefault("enviados", []).append(entry)
+                # Carimba também cada tramitação-membro (sobrevive ao desfazer do
+                # conjunto — impede reviver tramitação já contatada em conjunto).
+                if conjunto:
+                    _marcar_membros_conjunto(box, ids, entry)
             # Meios NÃO processados agora (envio por meio único) permanecem na fila,
             # junto com os que FALHARAM e o WhatsApp (sempre assistido).
             nao_proc = [m for m in meios_todos if m != "whatsapp" and m not in meios]
@@ -2020,6 +2036,9 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                      "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome}
             if conjunto:
                 entry["tramite_ids"] = ids
+                # carimba também cada tramitação-membro (sobrevive ao desfazer do
+                # conjunto — impede reviver tramitação já contatada em conjunto).
+                _marcar_membros_conjunto(box2, ids, entry)
             alvo.setdefault("enviados", []).append(entry)
             # remove SÓ o WhatsApp da fila; preserva outros meios (app/email) pendentes.
             e2 = alvo.get("envio") or {}
