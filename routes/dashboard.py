@@ -149,9 +149,11 @@ async def prontos_whatsapp_enviar(payload: dict = Body(...)):
     slug = (payload or {}).get("slug", "")
     paj = (payload or {}).get("paj_norm", "")
     tr = (payload or {}).get("id_tramite", "")
-    if not (slug and paj and tr):
+    tipo = (payload or {}).get("tipo", "tramite") or "tramite"
+    # conjunto não tem id_tramite único (usa tramite_ids); só exige slug + paj_norm nesse caso
+    if not (slug and paj) or (tipo != "conjunto" and not tr):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
-    return await divcom_service.enviar_whatsapp_tramite(slug, paj, tr)
+    return await divcom_service.enviar_whatsapp_tramite(slug, paj, tr, tipo)
 
 
 @router.post("/api/prontos/enviar-item", response_class=JSONResponse)

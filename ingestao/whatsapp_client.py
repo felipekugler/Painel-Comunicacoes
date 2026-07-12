@@ -340,10 +340,16 @@ async def enviar_mensagem(
             if msg_prazo:
                 compose = page.locator(_SEL_COMPOSE).first
                 await compose.click()
-                await page.wait_for_timeout(250)
+                await page.wait_for_timeout(300)
                 await page.keyboard.type(msg_prazo)
-                await page.wait_for_timeout(250)
-                await page.keyboard.press("Enter")
+                await page.wait_for_timeout(400)
+                # envia clicando no botão "Enviar" (mesmo padrão comprovado do passo 1,
+                # que aparece no rodapé assim que há texto no compose); Enter é fallback
+                botao_prz = page.locator(_SEL_SEND_FOOTER)
+                if await botao_prz.count():
+                    await botao_prz.first.click()
+                else:
+                    await page.keyboard.press("Enter")
                 ok_prz = await _confirmar_enviado(page, msg_prazo, timeout_seg=20)
                 etapas.append(("prazo", ok_prz))
                 await page.wait_for_timeout(600)

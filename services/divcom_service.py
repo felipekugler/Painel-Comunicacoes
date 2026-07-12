@@ -1903,45 +1903,53 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
 
 
 async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
-                                  headless: bool | None = None) -> dict:
-    """Envio ASSISTIDO por WhatsApp de UMA tramitação (fora do lote autônomo).
+                                  tipo: str = "tramite", headless: bool | None = None) -> dict:
+    """Envio ASSISTIDO por WhatsApp de UMA tramitação OU conjunto (fora do lote).
 
     Modelo: 1 clique no painel → o Playwright abre a conversa (Chrome dedicado, na
     máquina do servidor), envia TEXTO e depois os ANEXOS, gera o comprovante PDF
     (2 páginas: dados do contato + conversa) e registra no histórico + em `enviados`
-    do trâmite, limpando a fila. Respeita o modo do meio (simulado × real).
-    Retorna {ok, status, detalhe, comprovante, comprovante_nome}."""
+    do alvo (tramitação ou conjunto), limpando a fila. Respeita o modo do meio
+    (simulado × real). Retorna {ok, status, detalhe, comprovante, comprovante_nome}."""
     from ingestao import whatsapp_client
     from services import historico_service
 
     caixa = config_service.get_caixa(slug)
     if not caixa:
         return {"ok": False, "status": "falha", "detalhe": "Caixa desconhecida."}
-    box = _ler_box(slug, paj_norm)
-    sol = _achar_solic(box, id_tramite) if box else None
-    if not sol:
-        return {"ok": False, "status": "falha", "detalhe": "Tramitação não encontrada."}
 
-    envio = sol.get("envio") or {}
-    mensagem = (envio.get("mensagem") or sol.get("sugestao_editada")
-                or sol.get("sugestao_ia") or "").strip()
+    tipo = "conjunto" if tipo == "conjunto" else "tramite"
+    conjunto = tipo == "conjunto"
+    # Item ENRIQUECIDO da fila (resolve mensagem/anexos/prazo/ids p/ tramitação E conjunto).
+    t = _achar_item_fila(listar_fila(slug), paj_norm, tipo, id_tramite or "")
+    if not t:
+        return {"ok": False, "status": "falha",
+                "detalhe": "Item não está na fila (tramitação/conjunto não encontrado)."}
+    if "whatsapp" not in (t.get("envio_meios") or []):
+        return {"ok": False, "status": "falha",
+                "detalhe": "WhatsApp não está pendente neste item."}
+
+    ids = t.get("tramite_ids") or ([id_tramite] if id_tramite else [])
+    ref_anexo = "" if conjunto else (ids[0] if ids else "")
+    mensagem = (t.get("envio_mensagem") or t.get("sugestao_atual") or "").strip()
+
     cont = ler_contato(paj_norm)
     numeros = cont.get("whatsapp_numeros") or []
     if not numeros:
         return {"ok": False, "status": "falha",
                 "detalhe": "PAJ sem número de WhatsApp cadastrado."}
     numero = numeros[0]
-    assistido = cont.get("assistido") or sol.get("assistido") or ""
-    paj = box.get("paj", "")
+    assistido = t.get("assistido") or cont.get("assistido") or ""
+    paj = t.get("paj", "")
 
-    anexos_meta = sol.get("anexos", []) or []
-    anexos_ctx = [{**a, "caminho": str(caminho_anexo(paj_norm, "tramite", id_tramite,
+    anexos_meta = t.get("anexos", []) or []
+    anexos_ctx = [{**a, "caminho": str(caminho_anexo(paj_norm, tipo, ref_anexo,
                    a.get("arquivo", "")))} for a in anexos_meta]
 
     modo = config_service.get_envio_modo_meio("whatsapp")
 
     # 3ª mensagem (prazo): sempre há prazo (0 = urgente). Enviada por último.
-    prazo_wa = _prazo_ok(envio.get("prazo_whatsapp", 5))
+    prazo_wa = _prazo_ok(t.get("envio_prazo_whatsapp", 5))
     if prazo_wa == 0:
         msg_prazo = "Favor atender com urgência."
     else:
@@ -1950,6 +1958,11 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
     if not _pode_exclusivo():
         return {"ok": False, "status": "falha",
                 "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
+
+    def _achar_alvo(box):
+        if not box:
+            return None
+        return box.get("conjunto") if conjunto else _achar_solic(box, id_tramite)
 
     async with _sync_lock:
         if modo == "simulado":
@@ -1966,12 +1979,12 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
 
         if not res.get("ok"):
             box2 = _ler_box(slug, paj_norm)
-            s2 = _achar_solic(box2, id_tramite) if box2 else None
-            if s2:
-                e = s2.get("envio") or {}
+            alvo = _achar_alvo(box2)
+            if alvo is not None:
+                e = alvo.get("envio") or {}
                 e["falhas"] = {"whatsapp": res.get("detalhe", "falha")}
                 e["falha_em"] = _dt.datetime.now().isoformat(timespec="seconds")
-                s2["envio"] = e
+                alvo["envio"] = e
                 _gravar_box(slug, box2)
             return res
 
@@ -1981,35 +1994,37 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         reg = historico_service.registrar({
             "envio_id": envio_id,
             "paj_norm": paj_norm, "paj": paj, "assistido": assistido,
-            "oficio": sol.get("oficio_origem", ""),
-            "id_tramite": id_tramite, "tramite_ids": [id_tramite],
-            "conjunto": False, "tramite_data": sol.get("data_envio", ""),
-            "tipo": sol.get("sugestao_tipo", ""),
+            "oficio": t.get("oficio", ""),
+            "id_tramite": (ids[0] if len(ids) == 1 else ""), "tramite_ids": ids,
+            "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
+            "tipo": t.get("sugestao_tipo", ""),
             "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
             "meio": "whatsapp", "meios": ["whatsapp"],
-            "prazo": _prazo_ok(envio.get("prazo_whatsapp", 5)),
+            "prazo": prazo_wa,
             "mensagem": mensagem, "anexos": anexos_meta,
-            "anexo_tipo": "tramite", "anexo_ref": id_tramite,
-            "url_detalhe": sol.get("url_detalhe", ""),
+            "anexo_tipo": tipo, "anexo_ref": ref_anexo,
+            "url_detalhe": t.get("url_detalhe", ""),
             "status": res.get("status", "enviado"), "detalhe": res.get("detalhe", ""),
             "comprovante": comp_nome,  # nome do PDF em dados/_comprovantes_whatsapp/
             "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
         })
         box2 = _ler_box(slug, paj_norm)
-        s2 = _achar_solic(box2, id_tramite) if box2 else None
-        if s2:
+        alvo = _achar_alvo(box2)
+        if alvo is not None:
             entry = {"em": reg["ts"], "meios": ["whatsapp"], "mensagem": mensagem,
                      "status": res.get("status", "enviado"), "envio_id": envio_id,
                      "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome}
-            s2.setdefault("enviados", []).append(entry)
+            if conjunto:
+                entry["tramite_ids"] = ids
+            alvo.setdefault("enviados", []).append(entry)
             # remove SÓ o WhatsApp da fila; preserva outros meios (app/email) pendentes.
-            e2 = s2.get("envio") or {}
+            e2 = alvo.get("envio") or {}
             restantes = [m for m in (e2.get("meios") or []) if m != "whatsapp"]
             if restantes:
                 e2["meios"] = restantes
-                s2["envio"] = e2
+                alvo["envio"] = e2
             else:
-                s2["envio"] = {}
+                alvo["envio"] = {}
             _gravar_box(slug, box2)
         return {**res, "comprovante_nome": comp_nome, "historico_id": reg["id"]}
 
@@ -2020,7 +2035,8 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
     de {slug, paj_norm, id_tramite, paj?}. Emite eventos SSE; reaproveita
     `enviar_whatsapp_tramite` (que trava/valida/gera comprovante+histórico por item).
     Erros não param o lote (o item fica na fila com a falha)."""
-    itens = [s for s in (selecao or []) if s.get("slug") and s.get("paj_norm") and s.get("id_tramite")]
+    itens = [s for s in (selecao or []) if s.get("slug") and s.get("paj_norm")
+             and (s.get("id_tramite") or s.get("tipo") == "conjunto")]
     if not itens:
         yield {"level": "info", "msg": "Nada a enviar (seleção vazia)."}
         yield {"done": True, "resumo": {"ok": True, "enviados": 0, "falhas": 0}}
@@ -2037,7 +2053,8 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
         paj_lbl = it.get("paj") or it.get("paj_norm")
         yield {"level": "novo", "msg": f"[{i}/{len(itens)}] {paj_lbl} — abrindo conversa…"}
         try:
-            res = await enviar_whatsapp_tramite(it["slug"], it["paj_norm"], it["id_tramite"])
+            res = await enviar_whatsapp_tramite(it["slug"], it["paj_norm"],
+                                                it.get("id_tramite", ""), it.get("tipo", "tramite"))
         except Exception as e:  # noqa: BLE001
             res = {"ok": False, "detalhe": str(e)}
         if res.get("ok"):

@@ -268,7 +268,8 @@
                         {% if paj.whatsapp_estado == 'ativo' %}
                         <button class="btn-wa-enviar"
                                 data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
-                                data-tramite="{{ paj.id_tramite }}" onclick="enviarWhatsapp(this)">
+                                data-tipo="{{ paj.tipo }}"
+                                data-tramite="{{ paj.id_tramite|default('') }}" onclick="enviarWhatsapp(this)">
                             {{ meio_icon('whatsapp', 'WhatsApp') }} Enviar no WhatsApp
                         </button>
                         {% else %}
@@ -975,6 +976,7 @@ function confAdiar(g) {
 async function enviarWhatsapp(btn) {
     const cell = btn.closest('.wa-acao');
     const slug = btn.dataset.slug, paj = btn.dataset.paj, tramite = btn.dataset.tramite || '';
+    const tipo = btn.dataset.tipo || 'tramite';
     if (!confirm('Enviar esta mensagem pelo WhatsApp agora?\n\nO painel vai abrir a conversa, enviar o TEXTO e depois os ANEXOS, e gerar o comprovante (PDF).')) return;
     btn.disabled = true;
     const orig = btn.innerHTML;
@@ -982,7 +984,7 @@ async function enviarWhatsapp(btn) {
     try {
         const r = await fetch('/api/prontos/whatsapp/enviar', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: slug, paj_norm: paj, id_tramite: tramite })
+            body: JSON.stringify({ slug: slug, paj_norm: paj, id_tramite: tramite, tipo: tipo })
         });
         const d = await r.json();
         if (d.ok) {
@@ -1043,7 +1045,7 @@ async function enviarLoteWhatsapp() {
     if (!itens.length) { mostrarToast('Marque ao menos um PAJ'); return; }
     if (!confirm('Enviar ' + itens.length + ' mensagem(ns) pelo WhatsApp EM LOTE?\n\n'
         + 'O painel abre cada conversa e envia automaticamente, com um intervalo entre as mensagens (configurável em Configurações). Pode levar alguns minutos.')) return;
-    const selecao = itens.map(i => ({ slug: i.slug, paj_norm: i.paj_norm, id_tramite: i.id_tramite || '', paj: i.paj }));
+    const selecao = itens.map(i => ({ slug: i.slug, paj_norm: i.paj_norm, id_tramite: i.id_tramite || '', tipo: i.tipo || 'tramite', paj: i.paj }));
     const modal = document.getElementById('sse-modal');
     const log = document.getElementById('sse-log');
     const st = document.getElementById('sse-status');
