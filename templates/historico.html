@@ -45,24 +45,24 @@
     <table class="fluent-table" id="hist-tabela">
         <thead>
             <tr>
-                <th class="sortable" data-col="0" data-type="num" onclick="ordenarTabela(this)" style="width:9.5rem;">Data/hora<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="0" data-type="num" onclick="ordenarTabela(this)" style="width:5.5rem;">Data/hora<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Assistido<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Caixa de origem<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width:16rem;">Mensagem</th>
-                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Anexos<span class="sort-arrow"></span></th>
-                <th class="text-center" style="width:6rem;">Prazo</th>
-                <th class="sortable text-center" data-col="9" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Meios<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="10" data-type="text" onclick="ordenarTabela(this)" style="width:6.5rem;">Status<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:12rem; min-width:12rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Origem<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:11.7rem; min-width:11.7rem;">Tipo<span class="sort-arrow"></span></th>
+                <th style="min-width:7rem; width:100%;">Mensagem</th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:3rem;">Anexo<span class="sort-arrow"></span></th>
+                <th class="text-center" style="width:5rem;">Prazo</th>
+                <th class="sortable text-center" data-col="9" data-type="text" onclick="ordenarTabela(this)" style="width:3.5rem;">Meios<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="10" data-type="text" onclick="ordenarTabela(this)" style="width:4.5rem;">Status<span class="sort-arrow"></span></th>
                 <th class="text-center" style="width:7rem;">Comprovante</th>
             </tr>
         </thead>
         <tbody>
             {% for r in registros %}
             <tr class="hist-row">
-                <td class="text-secondary" style="white-space:nowrap;" data-sort="{{ r.ts }}">{{ r.ts | data_hora_br }}</td>
+                <td class="text-secondary" style="white-space:normal;" data-sort="{{ r.ts }}">{{ r.ts | data_hora_br }}</td>
                 <td data-sort="{{ r.paj }}">
                     {% if r.url_detalhe %}
                     <a href="{{ r.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
@@ -117,7 +117,7 @@
                         {% if not r.meios %}<span class="text-tertiary">—</span>{% endif %}
                     </div>
                 </td>
-                <td data-sort="{{ r.status }}">
+                <td class="text-center" data-sort="{{ r.status }}">
                     {%- set cor = {'enviado':'var(--c-zap)','simulado':'#a06d00','parcial':'var(--c-red)','falha':'var(--c-red)'}.get(r.status, 'var(--text-secondary)') -%}
                     <span style="font-size:11.5px;font-weight:700;color:{{ cor }};">{{ r.status|upper }}</span>
                 </td>
@@ -129,9 +129,8 @@
                     </a>
                     {% elif r.mov_seq %}
                         {% if r.url_detalhe %}
-                        <a class="mov-link" target="_blank" rel="noopener"
-                           href="{{ r.url_detalhe }}{% if r.mov_anchor %}#{{ r.mov_anchor }}{% endif %}"
-                           title="Movimentação nº {{ r.mov_seq }} gerada no PAJ pelo App — abrir detalhamento{% if r.mov_anchor %} e rolar até ela{% endif %}">Mov {{ r.mov_seq }}</a>
+                        <a class="mov-link" target="_blank" rel="noopener" href="{{ r.url_detalhe }}"
+                           title="Movimentação nº {{ r.mov_seq }} gerada no PAJ pelo App — abrir detalhamento">Mov {{ r.mov_seq }}</a>
                         {% else %}
                         <span class="mov-link" title="Movimentação nº {{ r.mov_seq }} gerada no PAJ pelo App">Mov {{ r.mov_seq }}</span>
                         {% endif %}

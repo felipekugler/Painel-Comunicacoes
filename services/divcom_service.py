@@ -1858,9 +1858,8 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                 "prazo": prazo_por_meio.get(meio, 5),
                 "somente_leitura": bool(t.get("envio_somente_leitura")) if meio == "app_sisdpu" else False,
                 # nº da movimentação criada no PAJ pelo App (auto-movimenta) — vira "Mov N"
-                # na coluna Comprovante do histórico. Só o App devolve mov_seq/mov_anchor.
+                # na coluna Comprovante do histórico. Só o App devolve mov_seq.
                 "mov_seq": r.get("mov_seq") if meio == "app_sisdpu" else None,
-                "mov_anchor": r.get("mov_anchor") if meio == "app_sisdpu" else "",
                 "status": st, "detalhe": detalhe,
                 # reservados p/ controle futuro de resposta/baixa (por meio):
                 "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
