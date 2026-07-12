@@ -900,6 +900,55 @@ async def _anexar_documentos(page: Page, anexos: list[dict]) -> list[str]:
     return anexados
 
 
+# Lê o MAIOR nº de sequência da tabela de movimentações do detalhamento (mesmos
+# critérios do _JS_DETALHAR_PAJ: seq numérico + célula de data DD/MM/AAAA). Após o
+# envio pelo App (que auto-movimenta o PAJ), a movimentação recém-criada é a de
+# maior seq.
+_JS_MAX_SEQ_MOV = r"""
+() => {
+    let best = null, bestRow = null;
+    for (const tr of document.querySelectorAll("table tbody tr")) {
+        const cells = tr.querySelectorAll(":scope > td");
+        if (cells.length < 6) continue;
+        const seq = (cells[0].textContent || "").trim();
+        const data = (cells[2].textContent || "").trim();
+        if (!/^\d{1,4}$/.test(seq)) continue;
+        if (!/\d{2}\/\d{2}\/\d{4}/.test(data)) continue;
+        const n = parseInt(seq, 10);
+        if (best === null || n > best) { best = n; bestRow = tr; }
+    }
+    if (best === null) return null;
+    // Âncora p/ o link do histórico rolar até a movimentação: id do <tr> se houver,
+    // senão o id da própria tabela (a mov mais recente é a 1ª linha dela).
+    let anchor = "";
+    if (bestRow) {
+        anchor = bestRow.id || "";
+        if (!anchor) { const t = bestRow.closest("table"); anchor = (t && t.id) || ""; }
+    }
+    return { seq: best, anchor: anchor };
+}
+"""
+
+
+async def _ler_seq_notificacao(page, id_processo: str) -> dict:
+    """Após o envio pelo App (o PAJ é auto-movimentado), lê o nº de sequência da
+    movimentação recém-criada = a de MAIOR seq no detalhamento, e a ÂNCORA da linha
+    (id do <tr>/tabela) p/ o link do histórico rolar até ela. Best-effort: navega ao
+    detalhamento (dados frescos) e lê; qualquer erro devolve {'seq': None, 'anchor': ''}."""
+    try:
+        url = f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_processo}"
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        with contextlib.suppress(Exception):
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        await page.wait_for_timeout(300)
+        r = await _eval_seguro(page, _JS_MAX_SEQ_MOV)
+        if isinstance(r, dict) and r.get("seq") is not None:
+            return {"seq": int(r["seq"]), "anchor": str(r.get("anchor") or "")}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"seq": None, "anchor": ""}
+
+
 async def notificar_assistido(
     id_processo: str,
     mensagem: str,
@@ -1096,8 +1145,14 @@ async def notificar_assistido(
                     "detalhe": ("Impossível enviar nova mensagem pelo aplicativo neste momento, "
                                 "pois há mensagem anterior pendente de visualização pelo assistido.")}
         if est.get("sucesso") or "detalhamentoProcesso.xhtml" in est.get("url", ""):
-            return {"ok": True, "status": "enviado",
-                    "detalhe": f"Notificação enviada com sucesso → {resumo}"}
+            info = await _ler_seq_notificacao(page, id_processo)
+            mov_seq = info.get("seq")
+            mov_anchor = info.get("anchor") or ""
+            detalhe = f"Notificação enviada com sucesso → {resumo}"
+            if mov_seq is not None:
+                detalhe += f" · Mov {mov_seq}"
+            return {"ok": True, "status": "enviado", "detalhe": detalhe,
+                    "mov_seq": mov_seq, "mov_anchor": mov_anchor}
     return {"ok": False, "status": "falha",
             "detalhe": "Não confirmei o envio (timeout aguardando 'enviada com sucesso')."}
 
