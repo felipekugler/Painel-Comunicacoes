@@ -287,6 +287,21 @@ def get_whatsapp_headless() -> bool:
     return bool(ler_config().get("whatsapp_headless", False))
 
 
+# ---------------- abrir o painel em tela cheia ----------------
+def get_abrir_tela_cheia() -> bool:
+    """Se True, o lançador (Painel-DIVCOM.bat → abrir_painel.py) abre o painel em
+    TELA CHEIA (Chrome/Edge --start-fullscreen, equivalente ao F11 no arranque).
+    Padrão False (abre como aba do navegador padrão)."""
+    return bool(ler_config().get("abrir_tela_cheia", False))
+
+
+def set_abrir_tela_cheia(v: bool) -> bool:
+    d = ler_config()
+    d["abrir_tela_cheia"] = bool(v)
+    _gravar(d)
+    return d["abrir_tela_cheia"]
+
+
 def get_whatsapp_intervalo_seg() -> int:
     """Intervalo (segundos) entre mensagens no ENVIO EM LOTE por WhatsApp — para
     imitar ritmo humano e reduzir risco de banimento. Padrão 25s (mín. 5)."""

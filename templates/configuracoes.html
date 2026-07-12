@@ -202,6 +202,20 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Abertura do painel</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Ao abrir pelo atalho <strong>Painel-DIVCOM</strong>, iniciar em <strong>tela cheia</strong>
+            (equivalente ao F11, via Chrome/Edge) em vez de abrir como aba comum do navegador.
+            Vale a partir da <strong>próxima abertura</strong> pelo atalho.
+        </p>
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;">
+            <input type="checkbox" id="abrir-tela-cheia" onchange="salvarTelaCheia()" {{ 'checked' if abrir_tela_cheia else '' }}>
+            <span>Abrir em tela cheia</span>
+            <span id="tela-cheia-msg" class="text-tertiary" style="font-size:12px;"></span>
+        </label>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Prazos de resposta pré-definidos</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             Botões de atalho oferecidos ao gravar o envio (ao lado do campo <strong>Prazo (dias)</strong>), para cada meio.
@@ -564,6 +578,13 @@ async function salvarWaIntervalo(){
     const d=await r.json();
     if(d.ok){ el.value=d.seg; document.getElementById('wa-intervalo-msg').textContent='salvo ✓'; toast('Intervalo salvo'); }
     else alert('Erro: '+(d.erro||'falha'));
+}
+async function salvarTelaCheia(){
+    const on=document.getElementById('abrir-tela-cheia').checked;
+    const r=await fetch('/api/config/abrir-tela-cheia',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({on:on})});
+    const d=await r.json();
+    if(d.ok){ document.getElementById('tela-cheia-msg').textContent='salvo ✓ (vale na próxima abertura)'; toast(on?'Abrirá em tela cheia':'Abrirá como aba'); }
+    else { alert('Erro ao salvar'); }
 }
 async function definirModo(meio, modo, btn){
     if (modo === 'real' && !confirm('Ativar envio REAL neste meio?\n\nAs mensagens passarão a ser DISPARADAS DE VERDADE ao assistido no "Enviar Agora".\n\nContinuar?')) return;

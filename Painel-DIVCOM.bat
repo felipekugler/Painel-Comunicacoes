@@ -25,7 +25,7 @@ rem Checa se o servidor ja esta rodando (netstat na porta 8002)
 netstat -ano -p TCP | findstr /R /C:":8002 .* LISTENING" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo Servidor ja esta rodando. Abrindo browser...
-    start "" "%URL%"
+    call :abrirbrowser
     goto :fim
 )
 
@@ -37,7 +37,17 @@ rem Aguarda 4s pro servidor subir
 timeout /T 4 /NOBREAK >nul
 
 echo Abrindo browser em %URL%
-start "" "%URL%"
+call :abrirbrowser
+
+goto :fim
+
+rem Abre o painel respeitando a preferencia "abrir_tela_cheia" (Configuracoes).
+rem O abrir_painel.py le a config e abre em tela cheia (Chrome --start-fullscreen)
+rem ou como aba do navegador padrao. Se algo falhar, cai no navegador padrao.
+:abrirbrowser
+"%PYTHON%" "%ROOT%abrir_painel.py"
+if %ERRORLEVEL% NEQ 0 start "" "%URL%"
+exit /b
 
 :fim
 endlocal

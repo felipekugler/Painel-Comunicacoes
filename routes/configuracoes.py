@@ -48,6 +48,7 @@ async def configuracoes(request: Request):
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         envio_modos=config_service.get_envio_modos(),
         whatsapp_intervalo=config_service.get_whatsapp_intervalo_seg(),
+        abrir_tela_cheia=config_service.get_abrir_tela_cheia(),
         comunicados=config_service.listar_comunicados(),  # gerais
         paragrafos=config_service.listar_paragrafos(),    # gerais
         caixas_disponiveis=caixas_disp,
@@ -97,6 +98,14 @@ async def set_whatsapp_intervalo(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "seg": config_service.set_whatsapp_intervalo_seg(n)}
+
+
+@router.post("/api/config/abrir-tela-cheia", response_class=JSONResponse)
+async def set_abrir_tela_cheia(payload: dict = Body(...)):
+    """Liga/desliga a abertura do painel em TELA CHEIA no lançador (Painel-DIVCOM.bat).
+    Vale a partir da PRÓXIMA vez que o painel for aberto pelo atalho."""
+    on = bool((payload or {}).get("on"))
+    return {"ok": True, "on": config_service.set_abrir_tela_cheia(on)}
 
 
 @router.post("/api/config/prazos-predefinidos", response_class=JSONResponse)
