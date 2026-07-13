@@ -138,8 +138,7 @@ async def prontos_envio(request: Request, meio: str):
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
-        envio_modos_resumo=config_service.resumo_modos(),
-        menu_recolhido=True))  # tabela larga: abre com o menu recolhido (igual ao Histórico)
+        envio_modos_resumo=config_service.resumo_modos()))
 
 
 @router.post("/api/prontos/whatsapp/enviar")

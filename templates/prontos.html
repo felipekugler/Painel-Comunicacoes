@@ -60,10 +60,7 @@
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">Ofício<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Origem<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width: 11.7rem; min-width: 11.7rem;">Tipo<span class="sort-arrow"></span></th>
                 <th class="text-center" style="width:6rem;">Mensagem</th>
-                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Anexo<span class="sort-arrow"></span></th>
-                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Prazo<span class="sort-arrow"></span></th>
                 <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
@@ -115,34 +112,10 @@
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
                           style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
-                <td>
-                    {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
-                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
-                </td>
                 <td class="text-center">
                     {% if paj.envio_mensagem %}
-                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar a mensagem">Abrir</button>
+                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar os detalhes da mensagem">Abrir</button>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                <td class="text-center" data-sort="{{ paj.n_anexos }}">
-                    {% if paj.n_anexos %}
-                    <button class="anx-clip tem"
-                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                            data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
-                            onclick="anxAbrir(this)"
-                            title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-                        </svg>
-                        <span class="anx-n">{{ paj.n_anexos }}</span>
-                    </button>
-                    {% else %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                {% set _p = paj.envio_prazo_app if meio_ativo == 'app' else paj.envio_prazo_email %}
-                <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ _p }}">
-                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}{% endif %}
-                    {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<div class="mt-1"><span class="sl-badge" title="Somente Leitura">SL</span></div>{% endif %}
                 </td>
                 <td>
                     <div class="wa-acao" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
@@ -183,9 +156,34 @@
             </tr>
             {% if paj.envio_mensagem %}
             <tr class="pr-msg-row" style="display:none;">
-                <td colspan="10" class="msg-accordion">
+                <td colspan="7" class="msg-accordion">
                     <div class="msg-accordion-in">
-                        <span class="msg-accordion-lbl">Mensagem — PAJ {{ paj.paj }}</span>
+                        <div class="msg-meta">
+                            <span class="msg-meta-item"><span class="msg-meta-k">Tipo</span>
+                                {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                                {% else %}<span class="text-tertiary" style="font-size:12.5px;">texto específico</span>{% endif %}
+                            </span>
+                            {% set _pm = paj.envio_prazo_whatsapp if meio_ativo == 'whatsapp' else (paj.envio_prazo_app if meio_ativo == 'app' else paj.envio_prazo_email) %}
+                            <span class="msg-meta-item"><span class="msg-meta-k">Prazo</span>
+                                {% if _pm == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _pm }} dia(s){% endif %}
+                                {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<span class="sl-badge" title="Somente Leitura">SL</span>{% endif %}
+                            </span>
+                            <span class="msg-meta-item"><span class="msg-meta-k">Anexos</span>
+                                {% if paj.n_anexos %}
+                                <button class="anx-clip tem"
+                                        data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                        data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                        data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+                                        onclick="anxAbrir(this)" title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                                    </svg>
+                                    <span class="anx-n">{{ paj.n_anexos }}</span>
+                                </button>
+                                {% else %}<span class="text-tertiary" style="font-size:12.5px;">nenhum</span>{% endif %}
+                            </span>
+                        </div>
+                        <div class="msg-accordion-lbl" style="margin-top:12px;">Conteúdo da mensagem</div>
                         <div class="msg-full">{{ paj.envio_mensagem }}</div>
                     </div>
                 </td>
@@ -215,10 +213,7 @@
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Origem<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:11.7rem; min-width:11.7rem;">Tipo<span class="sort-arrow"></span></th>
                 <th class="text-center" style="width:6rem;">Mensagem</th>
-                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Anexo<span class="sort-arrow"></span></th>
-                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Prazo<span class="sort-arrow"></span></th>
                 <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
@@ -253,33 +248,10 @@
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
                           style="background:color-mix(in srgb, {{ _cor }} 16%, transparent);color:{{ _cor }};">{{ paj.caixa_nome }}</span>
                 </td>
-                <td>
-                    {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
-                    {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
-                </td>
                 <td class="text-center">
                     {% if paj.envio_mensagem %}
-                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar a mensagem">Abrir</button>
+                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar os detalhes da mensagem">Abrir</button>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                <td class="text-center" data-sort="{{ paj.n_anexos }}">
-                    {% if paj.n_anexos %}
-                    <button class="anx-clip tem"
-                            data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
-                            data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                            data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
-                            onclick="anxAbrir(this)"
-                            title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-                        </svg>
-                        <span class="anx-n">{{ paj.n_anexos }}</span>
-                    </button>
-                    {% else %}<span class="text-tertiary">—</span>{% endif %}
-                </td>
-                <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ paj.envio_prazo_whatsapp }}">
-                    {% set _p = paj.envio_prazo_whatsapp %}
-                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}{% endif %}
                 </td>
                 <td>
                     <div class="wa-acao" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
@@ -316,9 +288,34 @@
             </tr>
             {% if paj.envio_mensagem %}
             <tr class="pr-msg-row" style="display:none;">
-                <td colspan="10" class="msg-accordion">
+                <td colspan="7" class="msg-accordion">
                     <div class="msg-accordion-in">
-                        <span class="msg-accordion-lbl">Mensagem — PAJ {{ paj.paj }}</span>
+                        <div class="msg-meta">
+                            <span class="msg-meta-item"><span class="msg-meta-k">Tipo</span>
+                                {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
+                                {% else %}<span class="text-tertiary" style="font-size:12.5px;">texto específico</span>{% endif %}
+                            </span>
+                            {% set _pm = paj.envio_prazo_whatsapp if meio_ativo == 'whatsapp' else (paj.envio_prazo_app if meio_ativo == 'app' else paj.envio_prazo_email) %}
+                            <span class="msg-meta-item"><span class="msg-meta-k">Prazo</span>
+                                {% if _pm == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _pm }} dia(s){% endif %}
+                                {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<span class="sl-badge" title="Somente Leitura">SL</span>{% endif %}
+                            </span>
+                            <span class="msg-meta-item"><span class="msg-meta-k">Anexos</span>
+                                {% if paj.n_anexos %}
+                                <button class="anx-clip tem"
+                                        data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+                                        data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                                        data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
+                                        onclick="anxAbrir(this)" title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                                    </svg>
+                                    <span class="anx-n">{{ paj.n_anexos }}</span>
+                                </button>
+                                {% else %}<span class="text-tertiary" style="font-size:12.5px;">nenhum</span>{% endif %}
+                            </span>
+                        </div>
+                        <div class="msg-accordion-lbl" style="margin-top:12px;">Conteúdo da mensagem</div>
                         <div class="msg-full">{{ paj.envio_mensagem }}</div>
                     </div>
                 </td>
@@ -371,6 +368,12 @@
 .msg-accordion-in { padding: 12px 16px; border-left: 3px solid var(--accent); }
 .msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); }
 .msg-accordion .msg-full { margin-top:6px; max-width:900px; }
+/* Linha de metadados (Tipo · Prazo · Anexos) no topo do acordeão */
+.msg-meta { display:flex; flex-wrap:wrap; gap:8px 26px; align-items:center;
+            padding-bottom:10px; border-bottom:1px solid var(--stroke); }
+.msg-meta-item { display:inline-flex; align-items:center; gap:8px; font-size:13px; }
+.msg-meta-k { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+              color:var(--text-tertiary); }
 .btn-grava { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid transparent;
              border-radius:6px; background:#16a34a; color:#fff; font-weight:600; font-size:14px;
              cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
