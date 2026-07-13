@@ -22,9 +22,7 @@ async def historico(request: Request):
                 _url_cache[chave] = divcom_service.url_detalhe_do_paj(chave[0], chave[1])
             r["url_detalhe"] = _url_cache.get(chave, "")
     template = request.app.state.jinja.get_template("historico.html")
-    # Histórico tem tabela larga → abre com o menu recolhido (libera a largura da tela).
-    return HTMLResponse(template.render(request=request, registros=registros,
-                                        menu_recolhido=True))
+    return HTMLResponse(template.render(request=request, registros=registros))
 
 
 @router.post("/api/historico/{historico_id}/refazer-movimentacao", response_class=JSONResponse)
