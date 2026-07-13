@@ -1875,6 +1875,10 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     ok_meios, fail_meios, falhas, ok_ids = [], [], {}, []
     algum_real = False
     ultimo_ts = ""
+    id_proc = t.get("id", "")
+    tramitar_grupo = t.get("envio_tramitar_grupo", "") or ""
+    app_mov_seq = None       # nº da auto-movimentação do App (p/ o registro do box)
+    app_tram_caixa = ""      # caixa efetivamente tramitada (p/ o registro do box)
     for meio in meios:
         r = await envio_service.enviar(meio, ctx)
         st = r.get("status", "falha")
@@ -1884,6 +1888,54 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
         if r.get("ok"):
             # Registra no Histórico SÓ o que foi efetivamente enviado (ou simulado).
             # Falhas NÃO são registradas — a falha já fica visível/acionável em Prontos.
+            mov_seq = r.get("mov_seq") if meio == "app_sisdpu" else None
+            # PIPELINE (só o App, e só em envio REAL): o App AUTO-MOVIMENTA o PAJ; se
+            # foi escolhida uma caixa no "Gravar para envio", TRAMITAMOS logo em seguida,
+            # referenciando essa movimentação. Tudo registrado no log passo-a-passo.
+            log, pipe = [], {}
+            if meio == "app_sisdpu":
+                _log_passo(log, "Envio pelo Aplicativo SISDPU", True, detalhe)
+                if st == "enviado":
+                    ok_mov = mov_seq is not None
+                    mov_det = (f'mov. "{mov_seq}" criada automaticamente pelo App' if ok_mov
+                               else "App não retornou o número da movimentação")
+                    _log_passo(log, "Movimentação automática do PAJ (App SISDPU)", ok_mov, mov_det)
+                    yield _evento_passo("Movimentação automática do PAJ (App SISDPU)", ok_mov, mov_det)
+                    pipe["mov_status"] = "movimentado" if ok_mov else "desconhecido"
+                    if ok_mov and id_proc:
+                        pipe["mov_url"] = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
+                        app_mov_seq = mov_seq
+                    if tramitar_grupo and ok_mov and id_proc:
+                        yield {"level": "muted", "msg": f"     tramitando o PAJ → {tramitar_grupo}…"}
+                        tramr = await _tramitar_referenciando_mov(
+                            id_proc, t["paj"], tramitar_grupo, mov_seq,
+                            prazo_por_meio.get("app_sisdpu", 5), log)
+                        pipe.update({
+                            "tram_grupo": tramitar_grupo,
+                            "tram_caixa": tramr["tram_caixa"], "tram_status": tramr["tram_status"],
+                            "tram_detalhe": tramr["tram_detalhe"], "tram_url": tramr["tram_url"],
+                            "tram_descricao": tramr["tram_descricao"],
+                        })
+                        yield _evento_passo("Tramitação do PAJ", tramr["tram_status"] == "tramitado",
+                                            f"→ {tramitar_grupo}: {tramr['tram_detalhe']}")
+                        if tramr["tram_status"] == "tramitado":
+                            app_tram_caixa = tramr["tram_caixa"]
+                    elif tramitar_grupo and not ok_mov:
+                        pipe.update({"tram_grupo": tramitar_grupo, "tram_status": "nao_realizada",
+                                     "tram_detalhe": "Tramitação cancelada: movimentação automática não confirmada."})
+                        _log_passo(log, "Tramitação do PAJ", False, pipe["tram_detalhe"])
+                        yield _evento_passo("Tramitação do PAJ", False, pipe["tram_detalhe"])
+                    else:
+                        pipe["tram_status"] = "nao_solicitada"
+                        _log_passo(log, "Tramitação do PAJ", None,
+                                   "não solicitada (nenhuma caixa escolhida no envio)")
+                        yield _evento_passo("Tramitação do PAJ", None,
+                                            "não solicitada (nenhuma caixa escolhida no envio)")
+                else:  # simulado
+                    pipe["mov_status"] = "nao_aplicavel"
+                    pipe["tram_status"] = "nao_solicitada"
+                    _log_passo(log, "Movimentação/Tramitação", None, "modo simulado — não executadas")
+                    yield _evento_passo("Movimentação/Tramitação", None, "modo simulado — não executadas")
             reg = historico_service.registrar({
                 **base_reg,
                 "meio": meio, "meios": [meio],
@@ -1891,10 +1943,13 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                 "somente_leitura": bool(t.get("envio_somente_leitura")) if meio == "app_sisdpu" else False,
                 # nº da movimentação criada no PAJ pelo App (auto-movimenta) — vira "Mov N"
                 # na coluna Comprovante do histórico. Só o App devolve mov_seq.
-                "mov_seq": r.get("mov_seq") if meio == "app_sisdpu" else None,
+                "mov_seq": mov_seq,
+                "id_processo": id_proc,         # p/ "refazer" tramitação
+                "log": log,
                 "status": st, "detalhe": detalhe,
                 # reservados p/ controle futuro de resposta/baixa (por meio):
                 "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+                **pipe,
             })
             ultimo_ts = reg["ts"]
             ok_meios.append(meio)
@@ -1923,6 +1978,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                 entry = {"em": ultimo_ts, "meios": ok_meios, "mensagem": mensagem,
                          "status": ("enviado" if algum_real else "simulado"),
                          "envio_id": envio_id, "historico_ids": ok_ids, "anexos": anexos_meta,
+                         "mov_seq": app_mov_seq, "tram_caixa": app_tram_caixa,
                          "somente_leitura": bool(t.get("envio_somente_leitura")) if "app_sisdpu" in ok_meios else False}
                 if conjunto:
                     entry["tramite_ids"] = ids
@@ -1961,6 +2017,47 @@ def _log_passo(log: list, etapa: str, ok: bool | None, detalhe: str) -> None:
         "ok": (None if ok is None else bool(ok)),
         "detalhe": str(detalhe or "")[:600],
     })
+
+
+def _evento_passo(etapa: str, ok: bool | None, detalhe: str, prefixo: str = "     ") -> dict:
+    """Formata um passo como evento SSE (linha do popup de progresso)."""
+    icone = "✓" if ok else ("✗" if ok is False else "•")
+    nivel = "ok" if ok else ("erro" if ok is False else "muted")
+    txt = f"{prefixo}{icone} {etapa}" + (f": {detalhe}" if detalhe else "")
+    return {"level": nivel, "msg": txt}
+
+
+def _passo(log: list, emit, etapa: str, ok: bool | None, detalhe: str) -> None:
+    """Registra o passo no log do histórico E, se houver `emit`, transmite ao popup
+    em tempo real. `emit(evento_dict)` é fornecido pelos fluxos em streaming."""
+    _log_passo(log, etapa, ok, detalhe)
+    if emit is not None:
+        emit(_evento_passo(etapa, ok, detalhe))
+
+
+async def _drenar_com_passos(coro_factory):
+    """Executa uma coroutine que emite passos via `emit(evento)` numa fila interna e
+    YIELDA os eventos em TEMPO REAL (para SSE). `coro_factory(emit)` deve devolver a
+    coroutine a rodar. Ao final, yielda {"_result": <retorno da coroutine>}."""
+    fila_ev: asyncio.Queue = asyncio.Queue()
+    _FIM = object()
+
+    def emit(evento: dict) -> None:
+        fila_ev.put_nowait(evento)
+
+    async def _run():
+        try:
+            return await coro_factory(emit)
+        finally:
+            fila_ev.put_nowait(_FIM)
+
+    tarefa = asyncio.create_task(_run())
+    while True:
+        ev = await fila_ev.get()
+        if ev is _FIM:
+            break
+        yield ev
+    yield {"_result": await tarefa}
 
 
 def _montar_descricao_mov(meio_label: str, mensagem: str, numero: str,
@@ -2022,11 +2119,42 @@ def _prazo_tramitacao(prazo_envio) -> tuple[str, str]:
     return data, desc
 
 
+async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: str,
+                                      mov_seq, prazo, log: list, rotulo: str = "Tramitação do PAJ",
+                                      emit=None) -> dict:
+    """Tramita o PAJ para `tramitar_grupo`, referenciando a movimentação `mov_seq` e
+    preenchendo o prazo de conclusão (deriva de `prazo`). Registra o passo em `log` e,
+    se houver `emit`, transmite ao popup em tempo real.
+    Retorna dict com tram_status/tram_caixa/tram_detalhe/tram_url/tram_descricao.
+    Usado tanto pela movimentação manual (WhatsApp) quanto pela auto-movimentação (App)."""
+    res = {"tram_caixa": "", "tram_status": "pendente", "tram_detalhe": "",
+           "tram_url": "", "tram_descricao": ""}
+    tram_desc = _descricao_tramitacao(mov_seq)
+    res["tram_descricao"] = tram_desc
+    prazo_data, prazo_desc = _prazo_tramitacao(prazo)
+    if emit is not None:
+        emit({"level": "muted", "msg": f"     tramitando o PAJ → {tramitar_grupo}…"})
+    try:
+        tram = await sisdpu_client.tramitar_paj(
+            [{"id": id_proc, "numero": paj}], grupo=tramitar_grupo,
+            descricao=tram_desc, prazo_data=prazo_data, prazo_desc=prazo_desc)
+    except Exception as e:  # noqa: BLE001
+        tram = {"ok": False, "status": "falha", "detalhe": f"exceção: {e}"}
+    res["tram_status"] = "tramitado" if tram.get("ok") else "falha"
+    res["tram_caixa"] = tramitar_grupo if tram.get("ok") else ""
+    res["tram_detalhe"] = tram.get("detalhe", "")
+    if tram.get("ok"):
+        res["tram_url"] = f"{sisdpu_client.SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
+    _passo(log, emit, rotulo, tram.get("ok"),
+           f"→ {tramitar_grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+    return res
+
+
 async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
                                   anexos_meta: list[dict], comprovante_caminho: str | None,
                                   comp_nome: str, tramitar_grupo: str, log: list,
                                   numero: str = "", prazo: int | None = None,
-                                  anexos_arquivos: list[dict] | None = None) -> dict:
+                                  anexos_arquivos: list[dict] | None = None, emit=None) -> dict:
     """Após um envio bem-sucedido: (1) MOVIMENTA o PAJ documentando o envio (fase
     'Mensagem ao assistido', descrição por template) anexando à movimentação OS MESMOS
     ANEXOS da mensagem (`anexos_arquivos`, com caminho) MAIS o comprovante, todos como
@@ -2042,7 +2170,7 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     paj = t.get("paj", "")
     if not id_proc:
         res["mov_detalhe"] = "PAJ sem id de processo — movimentação não realizada."
-        _log_passo(log, "Movimentação", False, res["mov_detalhe"])
+        _passo(log, emit, "Movimentação", False, res["mov_detalhe"])
         return res
     # Descrição PADRÃO da movimentação (mesma no envio e no "refazer").
     nomes = [a.get("nome", "") for a in (anexos_meta or []) if a.get("nome")]
@@ -2059,6 +2187,8 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     if comprovante_caminho and Path(comprovante_caminho).exists():
         mov_anexos.append({"nome": comp_nome or Path(comprovante_caminho).name,
                            "caminho": str(comprovante_caminho), "tipo": "pdf"})
+    if emit is not None:
+        emit({"level": "muted", "msg": "     movimentando o PAJ (documentando o envio)…"})
     try:
         mov = await sisdpu_client.movimentar_paj(
             [{"id": id_proc, "numero": paj}], descricao, anexos=mov_anexos, descricao_html=True)
@@ -2069,49 +2199,41 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     res["mov_detalhe"] = mov.get("detalhe", "")
     if mov.get("ok"):
         res["mov_url"] = f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
-    _log_passo(log, "Movimentação do PAJ", mov.get("ok"), mov.get("detalhe", ""))
+    _passo(log, emit, "Movimentação do PAJ", mov.get("ok"),
+           (f'mov. "{res["mov_seq"]}" — {mov.get("detalhe", "")}' if mov.get("ok") else mov.get("detalhe", "")))
     if mov_anexos:
         nomes_anx = ", ".join(a["nome"] for a in mov_anexos)
-        _log_passo(log, "Juntada de anexos à movimentação", mov.get("ok"),
-                   (f"{len(mov_anexos)} anexo(s) como 'Correspondência': {nomes_anx}") if mov.get("ok")
-                   else "não anexado (movimentação falhou)")
+        _passo(log, emit, "Juntada de anexos à movimentação", mov.get("ok"),
+               (f"{len(mov_anexos)} anexo(s) como 'Correspondência': {nomes_anx}") if mov.get("ok")
+               else "não anexado (movimentação falhou)")
     if not mov.get("ok"):
         if tramitar_grupo:
             res["tram_status"] = "nao_realizada"
             res["tram_detalhe"] = "Tramitação cancelada: movimentação não teve êxito."
-            _log_passo(log, "Tramitação do PAJ", False, res["tram_detalhe"])
+            _passo(log, emit, "Tramitação do PAJ", False, res["tram_detalhe"])
         return res
     if tramitar_grupo:
-        tram_desc = _descricao_tramitacao(res["mov_seq"])
-        res["tram_descricao"] = tram_desc  # guardado no histórico (tooltip da coluna "Tramitado")
-        prazo_data, prazo_desc = _prazo_tramitacao(prazo)
-        try:
-            tram = await sisdpu_client.tramitar_paj(
-                [{"id": id_proc, "numero": paj}], grupo=tramitar_grupo,
-                descricao=tram_desc, prazo_data=prazo_data, prazo_desc=prazo_desc)
-        except Exception as e:  # noqa: BLE001
-            tram = {"ok": False, "status": "falha", "detalhe": f"exceção: {e}"}
-        res["tram_status"] = "tramitado" if tram.get("ok") else "falha"
-        res["tram_caixa"] = tramitar_grupo if tram.get("ok") else ""
-        res["tram_detalhe"] = tram.get("detalhe", "")
-        if tram.get("ok"):
-            res["tram_url"] = f"{SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
-        _log_passo(log, "Tramitação do PAJ", tram.get("ok"),
-                   f"→ {tramitar_grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+        tramr = await _tramitar_referenciando_mov(
+            id_proc, paj, tramitar_grupo, res["mov_seq"], prazo, log, emit=emit)
+        res.update({k: tramr[k] for k in
+                    ("tram_caixa", "tram_status", "tram_detalhe", "tram_url", "tram_descricao")})
     else:
-        _log_passo(log, "Tramitação do PAJ", None, "não solicitada (nenhuma caixa escolhida no envio)")
+        _passo(log, emit, "Tramitação do PAJ", None, "não solicitada (nenhuma caixa escolhida no envio)")
     return res
 
 
 async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
-                                  tipo: str = "tramite", headless: bool | None = None) -> dict:
+                                  tipo: str = "tramite", headless: bool | None = None,
+                                  emit=None) -> dict:
     """Envio ASSISTIDO por WhatsApp de UMA tramitação OU conjunto (fora do lote).
 
     Modelo: 1 clique no painel → o Playwright abre a conversa (Chrome dedicado, na
     máquina do servidor), envia TEXTO e depois os ANEXOS, gera o comprovante PDF
     (2 páginas: dados do contato + conversa) e registra no histórico + em `enviados`
     do alvo (tramitação ou conjunto), limpando a fila. Respeita o modo do meio
-    (simulado × real). Retorna {ok, status, detalhe, comprovante, comprovante_nome}."""
+    (simulado × real). Se `emit` for dado, transmite cada passo (envio → comprovante →
+    movimentação → tramitação) ao popup em tempo real.
+    Retorna {ok, status, detalhe, comprovante, comprovante_nome}."""
     from ingestao import whatsapp_client
     from services import historico_service
 
@@ -2172,8 +2294,8 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         if modo != "simulado":
             conf = await sisdpu_client.checar_conflito_sessao(t.get("id") or None)
             if conf.get("conflito"):
-                _log_passo(log, "Checagem de sessão do SISDPU", False,
-                           "conflito detectado — envio abortado antes de enviar a mensagem")
+                _passo(log, emit, "Checagem de sessão do SISDPU", False,
+                       "conflito detectado — envio abortado antes de enviar a mensagem")
                 box2 = _ler_box(slug, paj_norm)
                 alvo = _achar_alvo(box2)
                 if alvo is not None:
@@ -2192,12 +2314,14 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         else:
             if headless is None:
                 headless = config_service.get_whatsapp_headless()
+            if emit is not None:
+                emit({"level": "muted", "msg": f"     abrindo a conversa e enviando a mensagem a {assistido or numero}…"})
             res = await whatsapp_client.enviar_mensagem(
                 numero=numero, mensagem=mensagem, anexos=anexos_ctx,
                 headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm,
                 mensagem_prazo=msg_prazo,
                 mensagem_referencia=(f"Contato referente ao PAJ {paj}" if paj else ""))
-        _log_passo(log, "Envio da mensagem (WhatsApp)", res.get("ok"), res.get("detalhe", ""))
+        _passo(log, emit, "Envio da mensagem (WhatsApp)", res.get("ok"), res.get("detalhe", ""))
 
         if not res.get("ok"):
             box2 = _ler_box(slug, paj_norm)
@@ -2213,19 +2337,19 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         comprovante = res.get("comprovante")
         comp_nome = Path(comprovante).name if comprovante else ""
         if modo != "simulado":
-            _log_passo(log, "Comprovante de envio (PDF)", bool(comprovante),
-                       comp_nome if comprovante else "não foi possível gerar o comprovante")
+            _passo(log, emit, "Comprovante de envio (PDF)", bool(comprovante),
+                   comp_nome if comprovante else "não foi possível gerar o comprovante")
 
         # PIPELINE: movimenta (documenta o envio) e, se escolhido, tramita — só em modo
         # REAL (o SISDPU é sempre real; em simulado não mexemos no PAJ).
         if modo != "simulado":
             mov_tram = await _movimentar_e_tramitar(
                 t, "WhatsApp", mensagem, anexos_meta, comprovante, comp_nome, tramitar_grupo, log,
-                numero=numero, prazo=prazo_wa, anexos_arquivos=anexos_ctx)
+                numero=numero, prazo=prazo_wa, anexos_arquivos=anexos_ctx, emit=emit)
         else:
             mov_tram = {"mov_seq": None, "mov_status": "nao_aplicavel", "mov_detalhe": "",
                         "tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": ""}
-            _log_passo(log, "Movimentação/Tramitação", None, "modo simulado — não executadas")
+            _passo(log, emit, "Movimentação/Tramitação", None, "modo simulado — não executadas")
 
         envio_id = uuid.uuid4().hex[:12]
         reg = historico_service.registrar({
@@ -2448,9 +2572,15 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
             await asyncio.sleep(intervalo)
         paj_lbl = it.get("paj") or it.get("paj_norm")
         yield {"level": "novo", "msg": f"[{i}/{len(itens)}] {paj_lbl} — abrindo conversa…"}
+        res = {"ok": False, "detalhe": "falha"}
         try:
-            res = await enviar_whatsapp_tramite(it["slug"], it["paj_norm"],
-                                                it.get("id_tramite", ""), it.get("tipo", "tramite"))
+            async for ev in _drenar_com_passos(lambda emit: enviar_whatsapp_tramite(
+                    it["slug"], it["paj_norm"], it.get("id_tramite", ""),
+                    it.get("tipo", "tramite"), emit=emit)):
+                if "_result" in ev:
+                    res = ev["_result"] or {"ok": False, "detalhe": "sem retorno"}
+                else:
+                    yield ev
         except Exception as e:  # noqa: BLE001
             res = {"ok": False, "detalhe": str(e)}
         if res.get("ok"):
@@ -2595,31 +2725,58 @@ async def enviar_selecao_stream(selecao: list[dict]):
                                         "modo": modo, "duracao": round(dur, 1)}}
 
 
-async def enviar_item_meio(slug: str, paj_norm: str, tipo: str, id_tramite: str, meio: str) -> dict:
-    """Envio INDIVIDUAL de UM item (tramitação/conjunto) por UM meio (App/E-mail),
-    a partir da página "Prontos". Bloqueia até concluir (App real abre o navegador).
-    Registra no histórico e remove só esse meio da fila. Retorna {ok,status,detalhe}."""
+async def enviar_item_meio_stream(slug: str, paj_norm: str, tipo: str, id_tramite: str, meio: str):
+    """Versão STREAMING do envio individual por UM meio (App/E-mail): yielda os passos
+    (envio → movimentação → tramitação) em TEMPO REAL para o popup e, por último,
+    {"done": True, "resultado": {ok,status,detalhe}}."""
+    def _fim(detalhe, status="falha", ok=False):
+        return {"done": True, "resultado": {"ok": ok, "status": status, "detalhe": detalhe}}
+
     caixa = config_service.get_caixa(slug)
     if not caixa:
-        return {"ok": False, "status": "falha", "detalhe": "Caixa desconhecida."}
+        yield _fim("Caixa desconhecida."); return
     it = _achar_item_fila(listar_fila(slug), paj_norm, tipo or "tramite", id_tramite or "")
     if not it:
-        return {"ok": False, "status": "falha", "detalhe": "Item não está na fila."}
+        yield _fim("Item não está na fila."); return
     if meio not in (it.get("envio_meios") or []):
-        return {"ok": False, "status": "falha", "detalhe": "Meio não pendente neste item."}
+        yield _fim("Meio não pendente neste item."); return
     if not _pode_exclusivo():
-        return {"ok": False, "status": "falha",
-                "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
+        yield _fim("Há uma operação em andamento (sincronização/envio). Aguarde."); return
     modo = config_service.get_envio_modo()
     status, detalhe = "falha", ""
     async with _sync_lock:
         async for ev in _enviar_item_stream(slug, caixa, it, modo, meio_unico=meio):
             if "_status" in ev:
                 status = ev["_status"]
-            elif ev.get("level") in ("ok", "erro"):
-                detalhe = ev.get("msg", "").strip()
-    return {"ok": status in ("enviado", "simulado", "parcial"),
-            "status": status, "detalhe": detalhe or status}
+            else:
+                if ev.get("level") in ("ok", "erro"):
+                    detalhe = ev.get("msg", "").strip()
+                yield ev
+    yield {"done": True, "resultado": {"ok": status in ("enviado", "simulado", "parcial"),
+                                       "status": status, "detalhe": detalhe or status}}
+
+
+async def enviar_item_meio(slug: str, paj_norm: str, tipo: str, id_tramite: str, meio: str) -> dict:
+    """Envio INDIVIDUAL de UM item por UM meio (App/E-mail). Bloqueia até concluir.
+    Wrapper NÃO-streaming sobre `enviar_item_meio_stream` (mantém a API antiga)."""
+    resultado = {"ok": False, "status": "falha", "detalhe": "falha"}
+    async for ev in enviar_item_meio_stream(slug, paj_norm, tipo, id_tramite, meio):
+        if ev.get("done"):
+            resultado = ev["resultado"]
+    return resultado
+
+
+async def enviar_whatsapp_tramite_stream(slug: str, paj_norm: str, id_tramite: str,
+                                         tipo: str = "tramite"):
+    """Versão STREAMING do envio individual por WhatsApp: yielda os passos (envio →
+    comprovante → movimentação → tramitação) em TEMPO REAL e, por último,
+    {"done": True, "resultado": <dict de enviar_whatsapp_tramite>}."""
+    async for ev in _drenar_com_passos(lambda emit: enviar_whatsapp_tramite(
+            slug, paj_norm, id_tramite, tipo, emit=emit)):
+        if "_result" in ev:
+            yield {"done": True, "resultado": ev["_result"] or {"ok": False, "detalhe": "sem retorno"}}
+        else:
+            yield ev
 
 
 # ==================== reset do painel ====================
