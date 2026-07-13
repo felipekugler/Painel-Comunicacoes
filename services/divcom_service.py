@@ -1393,6 +1393,11 @@ def _evento_modo_ia() -> dict:
             "msg": "Modo Simples (sem envio ao Claude CLI — sincronização sem IA)."}
 
 
+def _sep() -> dict:
+    """Linha em branco (separador visual) no popup de sincronização."""
+    return {"level": "sep", "msg": ""}
+
+
 async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
     """Sincroniza UMA caixa (por slug), emitindo eventos de progresso."""
     caixa = config_service.get_caixa(slug)
@@ -1467,14 +1472,16 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         yield {"level": "ok", "msg": f"Caixa carregada: {total_pajs} PAJ(s) e {total_envios} tramitação(ões)."}
         yield {"level": ("novo" if n_novos else "info"),
                "msg": f"{n_novos} tramitação(ões) nova(s) desde a última sincronização."}
-        if comunicados:
-            yield {"level": "info", "msg": f"{len(comunicados)} comunicado(s) padrão aplicável(is) a esta caixa."}
 
         pajs_atuais: set[str] = set()
         trabalhos_ia: list[dict] = []  # análises coletadas na Fase 1, rodadas em paralelo na Fase 2
+        if por_paj:
+            yield _sep(); yield _sep()  # separa o cabeçalho da lista de PAJs
         i = 0
         for paj_norm, itens_paj in por_paj.items():
             i += 1
+            if i > 1:
+                yield _sep()  # 1 linha em branco entre PAJs
             paj = itens_paj[0].get("paj", "")
             upsert_paj(slug, paj, itens_paj, em_caixa=True)
             pajs_atuais.add(paj_norm)
@@ -1545,6 +1552,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         # Cada job cobre UM PAJ (box) — assim cada arquivo JSON é escrito por uma
         # única tarefa (sem corrida de escrita); o paralelismo é ENTRE PAJs.
         if trabalhos_ia:
+            yield _sep(); yield _sep()  # separa a lista de PAJs da fase de análise
             conc = config_service.get_analise_concorrencia()
             paralelo = f"até {conc} em paralelo" if conc > 1 else "uma de cada vez (sequencial)"
             yield {"level": "info",
@@ -1611,12 +1619,14 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                         _gravar_box(slug, d)
                         saidos.append(d.get("paj", ""))
         if saidos:
+            yield _sep(); yield _sep()
             yield {"level": "info", "msg": f"{len(saidos)} PAJ(s) saíram da caixa: {', '.join(saidos)}"}
 
         dur = time.monotonic() - t0
         resumo = {"ok": True, "slug": slug, "grupo": nome_grupo,
                   "qtd_pajs": len(pajs_atuais), "qtd_solicitacoes": total_envios,
                   "novos": n_novos, "saidos": len(saidos), "duracao": round(dur, 1)}
+        yield _sep(); yield _sep()
         yield {"level": "ok",
                "msg": f"Concluído em {dur:.0f}s — {len(pajs_atuais)} PAJ(s), "
                       f"{n_novos} novo(s), {len(saidos)} saíram."}

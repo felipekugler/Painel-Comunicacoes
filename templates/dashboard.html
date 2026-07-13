@@ -1945,6 +1945,13 @@ function syncBtnEstado(rodando) {
 function syncAppend(level, msg) {
     const log = document.getElementById('sync-log');
     const line = document.createElement('div');
+    if (level === 'sep') {  // separador: linha em branco, sem carimbo de hora
+        line.className = 'sync-sep';
+        line.innerHTML = '&nbsp;';
+        log.appendChild(line);
+        log.scrollTop = log.scrollHeight;
+        return;
+    }
     line.className = 'sync-line sync-' + (level || 'info');
     const ts = new Date().toLocaleTimeString('pt-BR');
     line.innerHTML = '<span class="sync-ts">' + ts + '</span>' +
