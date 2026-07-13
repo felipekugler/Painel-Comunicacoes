@@ -300,6 +300,10 @@
             border-bottom: 1px solid var(--stroke);
             vertical-align: top;
         }
+        /* Tabelas Prontos (.pr-row) e Histórico (.hist-row): conteúdo das células
+           centralizado verticalmente. Não afeta as demais tabelas (dashboard/anexos). */
+        .fluent-table tbody tr.pr-row > td,
+        .fluent-table tbody tr.hist-row > td { vertical-align: middle; }
         .fluent-table th.sortable { cursor: pointer; user-select: none; }
         .fluent-table th.sortable:hover { color: var(--text); }
         .fluent-table th .sort-arrow {
