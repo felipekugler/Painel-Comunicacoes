@@ -1387,10 +1387,8 @@ def _evento_modo_ia() -> dict:
     (`analise_service.disponivel()`) — se a IA está ligada mas o Claude não foi
     detectado, roda como Simples."""
     if analise_service.disponivel():
-        return {"level": "info",
-                "msg": "Modo IA (com envio ao Claude CLI para resumo, classificação e sugestão)."}
-    return {"level": "info",
-            "msg": "Modo Simples (sem envio ao Claude CLI — sincronização sem IA)."}
+        return {"level": "info", "msg": "Modo IA (com envio ao Claude CLI)"}
+    return {"level": "info", "msg": "Modo Simples (sem envio ao Claude CLI)"}
 
 
 def _sep() -> dict:
@@ -1487,7 +1485,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
             pajs_atuais.add(paj_norm)
             novos_neste = [it for it in itens_paj if it.get("id_tramite") in novos_ids]
 
-            assistido, resumo_contatos, det = "", "", {}
+            assistido, det = "", {}
             id_proc = itens_paj[0].get("id", "")
             if id_proc:
                 try:
@@ -1499,23 +1497,10 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                 if det:
                     cont = atualizar_contato_do_detalhe(paj_norm, det)
                     assistido = cont.get("assistido", "")
-                    c = cont.get("contatos", {})
-                    marcas = []
-                    if c.get("app_sisdpu"):
-                        marcas.append("App")
-                    if cont.get("telefones"):
-                        marcas.append(f"{len(cont['telefones'])} tel")
-                    if cont.get("emails"):
-                        marcas.append("e-mail")
-                    if cont.get("enderecos"):
-                        marcas.append("endereço")
-                    resumo_contatos = ", ".join(marcas) or "sem contatos"
 
             etiqueta = "NOVO" if novos_neste else "atualizado"
-            extra = f" · {len(novos_neste)} tramitação(ões) nova(s)" if novos_neste else ""
             yield {"level": ("novo" if novos_neste else "muted"),
-                   "msg": f"[{i}/{total_pajs}] {etiqueta} • PAJ {paj} — "
-                          f"{assistido or 's/ nome'} · {resumo_contatos}{extra}"}
+                   "msg": f"[{i}/{total_pajs}] {etiqueta} • PAJ {paj} — {assistido or 's/ nome'}"}
 
             # Análise POR TRAMITAÇÃO (cada tramitação tem seu resumo + sugestão).
             # Aqui apenas COLETAMOS o que precisa ser analisado; as chamadas de IA
@@ -1530,9 +1515,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                 box = _ler_box(slug, paj_norm)
                 pend = _sols_pendentes(box)
                 if len(pend) >= 2:
-                    yield {"level": "muted",
-                           "msg": f"     {len(pend)} tramitações pendentes → análise adiada para a triagem "
-                                  "(IA não chamada agora)."}
+                    pass  # 2+ pendentes → análise vai para a triagem (não agenda IA aqui)
                 elif movs_ia:
                     # Só agenda se ALGUMA tramitação PENDENTE está com o cache
                     # desatualizado. NÃO reprocessa gravadas/enviadas (análise
