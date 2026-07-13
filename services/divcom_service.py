@@ -1381,7 +1381,19 @@ def _ids_em_caixa(slug: str) -> set[str]:
     return ids
 
 
-async def sincronizar_stream(slug: str):
+def _evento_modo_ia() -> dict:
+    """Linha inicial do popup de sincronização informando o modo em vigor:
+    Modo IA (envia ao Claude CLI) × Modo Simples (não envia). Reflete o efetivo
+    (`analise_service.disponivel()`) — se a IA está ligada mas o Claude não foi
+    detectado, roda como Simples."""
+    if analise_service.disponivel():
+        return {"level": "info",
+                "msg": "Modo IA (com envio ao Claude CLI para resumo, classificação e sugestão)."}
+    return {"level": "info",
+            "msg": "Modo Simples (sem envio ao Claude CLI — sincronização sem IA)."}
+
+
+async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
     """Sincroniza UMA caixa (por slug), emitindo eventos de progresso."""
     caixa = config_service.get_caixa(slug)
     if not caixa:
@@ -1402,6 +1414,8 @@ async def sincronizar_stream(slug: str):
 
     async with _sync_lock:
         t0 = time.monotonic()
+        if anunciar_modo:
+            yield _evento_modo_ia()
         yield {"level": "info", "msg": f'{nome_caixa}: conectando ao SISDPU e abrindo "{nome_grupo}"…'}
 
         try:
@@ -1628,11 +1642,12 @@ async def sincronizar_todas_stream():
         return
 
     t0 = time.monotonic()
+    yield _evento_modo_ia()
     tot_pajs = tot_novos = tot_saidos = 0
     falhas = 0
     for idx, cx in enumerate(caixas, 1):
         yield {"level": "novo", "msg": f"══ [{idx}/{len(caixas)}] {cx['nome']} ══"}
-        async for ev in sincronizar_stream(cx["slug"]):
+        async for ev in sincronizar_stream(cx["slug"], anunciar_modo=False):
             if ev.get("done"):
                 r = ev.get("resumo", {}) or {}
                 if r.get("ok"):
@@ -1923,8 +1938,22 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
         r = await envio_service.enviar(meio, ctx)
         st = r.get("status", "falha")
         detalhe = r.get("detalhe", st)
-        yield {"level": ("ok" if r.get("ok") else "erro"),
-               "msg": f"     {envio_service.label_meio(meio)}: {detalhe}"}
+        # O App devolve "... · Mov N" no fim do detalhe; a mov. vira ETAPA dedicada abaixo.
+        if meio == "app_sisdpu":
+            detalhe = re.sub(r"\s*·\s*Mov\s+\S+\s*$", "", detalhe)
+        # Linha de ENVIO enxuta para o App (sem nome/somente_leitura); demais meios: genérica.
+        if meio == "app_sisdpu":
+            p_app = prazo_por_meio.get("app_sisdpu", 5)
+            prazo_lbl = "urgente" if p_app == 0 else f"prazo {p_app}d"
+            if r.get("ok"):
+                env_txt = (f"Notificação enviada com sucesso no aplicativo · {prazo_lbl}" if st == "enviado"
+                           else f"Notificação enviada no aplicativo (simulado) · {prazo_lbl}")
+                yield {"level": "ok", "msg": f"     ✓ {env_txt}"}
+            else:
+                yield {"level": "erro", "msg": f"     ✗ Notificação pelo aplicativo falhou: {detalhe}"}
+        else:
+            yield {"level": ("ok" if r.get("ok") else "erro"),
+                   "msg": f"     {envio_service.label_meio(meio)}: {detalhe}"}
         if r.get("ok"):
             # Registra no Histórico SÓ o que foi efetivamente enviado (ou simulado).
             # Falhas NÃO são registradas — a falha já fica visível/acionável em Prontos.
@@ -1934,43 +1963,43 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
             # referenciando essa movimentação. Tudo registrado no log passo-a-passo.
             log, pipe = [], {}
             if meio == "app_sisdpu":
-                _log_passo(log, "Envio pelo Aplicativo SISDPU", True, detalhe)
+                _log_passo(log, "Notificação no aplicativo", True, env_txt)
                 if st == "enviado":
                     ok_mov = mov_seq is not None
-                    mov_det = (f'mov. "{mov_seq}" criada automaticamente pelo App' if ok_mov
-                               else "App não retornou o número da movimentação")
-                    _log_passo(log, "Movimentação automática do PAJ (App SISDPU)", ok_mov, mov_det)
-                    yield _evento_passo("Movimentação automática do PAJ (App SISDPU)", ok_mov, mov_det)
+                    mov_det = (f'criada automaticamente após notificação · "mov. {mov_seq}"' if ok_mov
+                               else "o App não retornou o número da movimentação")
+                    _log_passo(log, "Movimentação", ok_mov, mov_det)
+                    yield _evento_passo("Movimentação", ok_mov, mov_det)
                     pipe["mov_status"] = "movimentado" if ok_mov else "desconhecido"
                     if ok_mov and id_proc:
                         pipe["mov_url"] = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
                         app_mov_seq = mov_seq
                     if tramitar_grupo and ok_mov and id_proc:
-                        yield {"level": "muted", "msg": f"     tramitando o PAJ → {tramitar_grupo}…"}
+                        prazo_data, _pd = _prazo_tramitacao(p_app)
                         tramr = await _tramitar_referenciando_mov(
-                            id_proc, t["paj"], tramitar_grupo, mov_seq,
-                            prazo_por_meio.get("app_sisdpu", 5), log)
+                            id_proc, t["paj"], tramitar_grupo, mov_seq, p_app, log)
                         pipe.update({
                             "tram_grupo": tramitar_grupo,
                             "tram_caixa": tramr["tram_caixa"], "tram_status": tramr["tram_status"],
                             "tram_detalhe": tramr["tram_detalhe"], "tram_url": tramr["tram_url"],
                             "tram_descricao": tramr["tram_descricao"],
                         })
-                        yield _evento_passo("Tramitação do PAJ", tramr["tram_status"] == "tramitado",
-                                            f"→ {tramitar_grupo}: {tramr['tram_detalhe']}")
                         if tramr["tram_status"] == "tramitado":
                             app_tram_caixa = tramr["tram_caixa"]
+                            yield _evento_passo("Tramitação do PAJ", True,
+                                                f'realizada para a caixa "{tramitar_grupo}" · concluir até {prazo_data}')
+                        else:
+                            yield _evento_passo("Tramitação do PAJ", False,
+                                                f'falhou para a caixa "{tramitar_grupo}": {tramr["tram_detalhe"]}')
                     elif tramitar_grupo and not ok_mov:
                         pipe.update({"tram_grupo": tramitar_grupo, "tram_status": "nao_realizada",
                                      "tram_detalhe": "Tramitação cancelada: movimentação automática não confirmada."})
-                        _log_passo(log, "Tramitação do PAJ", False, pipe["tram_detalhe"])
-                        yield _evento_passo("Tramitação do PAJ", False, pipe["tram_detalhe"])
+                        _log_passo(log, "Tramitação do PAJ", False, "cancelada (movimentação não confirmada)")
+                        yield _evento_passo("Tramitação do PAJ", False, "cancelada (movimentação não confirmada)")
                     else:
                         pipe["tram_status"] = "nao_solicitada"
-                        _log_passo(log, "Tramitação do PAJ", None,
-                                   "não solicitada (nenhuma caixa escolhida no envio)")
-                        yield _evento_passo("Tramitação do PAJ", None,
-                                            "não solicitada (nenhuma caixa escolhida no envio)")
+                        _log_passo(log, "Tramitação do PAJ", None, "não solicitada")
+                        yield _evento_passo("Tramitação do PAJ", None, "não solicitada")
                 else:  # simulado
                     pipe["mov_status"] = "nao_aplicavel"
                     pipe["tram_status"] = "nao_solicitada"
@@ -2185,8 +2214,11 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     res["tram_detalhe"] = tram.get("detalhe", "")
     if tram.get("ok"):
         res["tram_url"] = f"{sisdpu_client.SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
-    _passo(log, emit, rotulo, tram.get("ok"),
-           f"→ {tramitar_grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+        _passo(log, emit, rotulo, True,
+               f'realizada para a caixa "{tramitar_grupo}" · concluir até {prazo_data}')
+    else:
+        _passo(log, emit, rotulo, False,
+               f'falhou para a caixa "{tramitar_grupo}": {tram.get("detalhe", "")}')
     return res
 
 
@@ -2239,18 +2271,17 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     res["mov_detalhe"] = mov.get("detalhe", "")
     if mov.get("ok"):
         res["mov_url"] = f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
-    _passo(log, emit, "Movimentação do PAJ", mov.get("ok"),
-           (f'mov. "{res["mov_seq"]}" — {mov.get("detalhe", "")}' if mov.get("ok") else mov.get("detalhe", "")))
+    _passo(log, emit, "Movimentação", mov.get("ok"),
+           (f'registrada · "mov. {res["mov_seq"]}"' if mov.get("ok") else mov.get("detalhe", "")))
     if mov_anexos:
-        nomes_anx = ", ".join(a["nome"] for a in mov_anexos)
         _passo(log, emit, "Juntada de anexos à movimentação", mov.get("ok"),
-               (f"{len(mov_anexos)} anexo(s) como 'Correspondência': {nomes_anx}") if mov.get("ok")
-               else "não anexado (movimentação falhou)")
+               (f"{len(mov_anexos)} anexo(s) como Correspondência" if mov.get("ok")
+                else "não anexado (movimentação falhou)"))
     if not mov.get("ok"):
         if tramitar_grupo:
             res["tram_status"] = "nao_realizada"
             res["tram_detalhe"] = "Tramitação cancelada: movimentação não teve êxito."
-            _passo(log, emit, "Tramitação do PAJ", False, res["tram_detalhe"])
+            _passo(log, emit, "Tramitação do PAJ", False, "cancelada (movimentação não teve êxito)")
         return res
     if tramitar_grupo:
         tramr = await _tramitar_referenciando_mov(
@@ -2258,7 +2289,7 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
         res.update({k: tramr[k] for k in
                     ("tram_caixa", "tram_status", "tram_detalhe", "tram_url", "tram_descricao")})
     else:
-        _passo(log, emit, "Tramitação do PAJ", None, "não solicitada (nenhuma caixa escolhida no envio)")
+        _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
     return res
 
 
@@ -2613,6 +2644,7 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
         paj_lbl = it.get("paj") or it.get("paj_norm")
         yield {"level": "novo", "msg": f"[{i}/{len(itens)}] {paj_lbl} — abrindo conversa…"}
         res = {"ok": False, "detalhe": "falha"}
+        n_passos = 0
         try:
             async for ev in _drenar_com_passos(lambda emit: enviar_whatsapp_tramite(
                     it["slug"], it["paj_norm"], it.get("id_tramite", ""),
@@ -2620,15 +2652,20 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
                 if "_result" in ev:
                     res = ev["_result"] or {"ok": False, "detalhe": "sem retorno"}
                 else:
+                    n_passos += 1
                     yield ev
         except Exception as e:  # noqa: BLE001
             res = {"ok": False, "detalhe": str(e)}
         if res.get("ok"):
             enviados += 1
-            yield {"level": "ok", "msg": f"     ✓ {res.get('detalhe', 'enviado')}"}
+            # sucesso: as etapas (envio → comprovante → movimentação → tramitação) já
+            # foram transmitidas uma a uma; não repetir um "✓ resumo" redundante aqui.
         else:
             falhas += 1
-            yield {"level": "erro", "msg": f"     ✗ {res.get('detalhe') or res.get('erro') or 'falha'}"}
+            # só sinaliza ✗ se NENHUMA etapa foi emitida (falhas que retornam cedo, ex.:
+            # "PAJ sem número de WhatsApp"); se houve etapa, ela já mostrou o erro.
+            if not n_passos:
+                yield {"level": "erro", "msg": f"     ✗ {res.get('detalhe') or res.get('erro') or 'falha'}"}
     dur = time.monotonic() - t0
     yield {"level": "ok",
            "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
