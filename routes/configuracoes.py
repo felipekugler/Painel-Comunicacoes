@@ -14,7 +14,7 @@ from fastapi import APIRouter, Body, File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ingestao import sisdpu_client
-from services import config_service, divcom_service, historico_service
+from services import analise_service, config_service, divcom_service, historico_service
 
 router = APIRouter()
 
@@ -53,6 +53,8 @@ async def configuracoes(request: Request):
         envio_modos=config_service.get_envio_modos(),
         whatsapp_intervalo=config_service.get_whatsapp_intervalo_seg(),
         abrir_tela_cheia=config_service.get_abrir_tela_cheia(),
+        ia_ativa=config_service.get_ia_ativa(),
+        claude_instalado=analise_service.claude_instalado(),
         comunicados=config_service.listar_comunicados(),  # gerais
         paragrafos=config_service.listar_paragrafos(),    # gerais
         caixas_disponiveis=caixas_disp,
@@ -102,6 +104,14 @@ async def set_whatsapp_intervalo(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "seg": config_service.set_whatsapp_intervalo_seg(n)}
+
+
+@router.post("/api/config/ia-modo", response_class=JSONResponse)
+async def set_ia_modo(payload: dict = Body(...)):
+    """Alterna entre 'Modo Simples' (sem IA) e 'Modo com IA'. Corpo: {ia: bool}."""
+    on = bool((payload or {}).get("ia"))
+    ativa = config_service.set_ia_ativa(on)
+    return {"ok": True, "ia_ativa": ativa, "claude_instalado": analise_service.claude_instalado()}
 
 
 @router.post("/api/config/abrir-tela-cheia", response_class=JSONResponse)

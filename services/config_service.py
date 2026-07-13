@@ -324,6 +324,21 @@ def set_abrir_tela_cheia(v: bool) -> bool:
     return d["abrir_tela_cheia"]
 
 
+# ---------------- modo de IA (Modo Simples × Modo com IA) ----------------
+def get_ia_ativa() -> bool:
+    """Se True (padrão), o painel usa a IA (Claude CLI) para resumo/classificação/
+    sugestão. Se False (Modo Simples), opera sem IA — o servidor escreve as mensagens
+    e usa os modelos padrão manualmente. Toggle do usuário em Configurações → IA."""
+    return bool(ler_config().get("ia_ativa", True))
+
+
+def set_ia_ativa(v: bool) -> bool:
+    d = ler_config()
+    d["ia_ativa"] = bool(v)
+    _gravar(d)
+    return d["ia_ativa"]
+
+
 def get_whatsapp_intervalo_seg() -> int:
     """Intervalo (segundos) entre mensagens no ENVIO EM LOTE por WhatsApp — para
     imitar ritmo humano e reduzir risco de banimento. Padrão 25s (mín. 5)."""

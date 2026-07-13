@@ -46,9 +46,17 @@ def _resolver_claude_cmd() -> list[str]:
 CLAUDE_CMD: list[str] = _resolver_claude_cmd()
 
 
+def claude_instalado() -> bool:
+    """True se o binario `claude` (CLI) esta acessivel no PATH desta maquina."""
+    return shutil.which("claude") is not None
+
+
 def disponivel() -> bool:
-    """True se o binario `claude` esta acessivel e a analise esta ativa."""
-    return ANALISE_ATIVA and shutil.which("claude") is not None
+    """True quando a IA pode e DEVE ser usada: master switch de ambiente (ANALISE_ATIVA),
+    o toggle do usuario (Configuracoes -> IA, 'Modo com IA') E o `claude` instalado.
+    No 'Modo Simples' (toggle desligado) retorna False e o painel opera sem IA."""
+    from services import config_service  # import tardio evita acoplamento de ordem
+    return ANALISE_ATIVA and config_service.get_ia_ativa() and claude_instalado()
 
 
 _INSTRUCOES = (

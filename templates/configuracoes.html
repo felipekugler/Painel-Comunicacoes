@@ -77,6 +77,7 @@
 <!-- ===================== Barra de abas ===================== -->
 <div class="cfg-tabs" role="tablist">
     <button class="cfg-tab" data-tab="geral" onclick="abrirTab('geral')">Configurações Gerais</button>
+    <button class="cfg-tab" data-tab="ia" onclick="abrirTab('ia')">Configuração de IA</button>
     <button class="cfg-tab" data-tab="caixas" onclick="abrirTab('caixas')">Caixas para Sincronização</button>
     <button class="cfg-tab" data-tab="gerais" onclick="abrirTab('gerais')">Mensagens Gerais</button>
     {% for cx in caixas %}
@@ -335,6 +336,59 @@
             <button class="btn-subtle" style="white-space:nowrap;color:#fff;background:var(--c-red);border-color:transparent;"
                     onclick="resetarPainel(true)">Reset total</button>
         </div>
+    </div>
+</div>
+
+<!-- ===================== Aba: Configuração de IA ===================== -->
+<div class="cfg-panel" data-panel="ia">
+    <div class="fluent-card" style="padding:22px;max-width:760px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configuração de IA</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            O painel funciona em <strong>dois modos</strong>. Escolha conforme você tenha (ou não) uma conta
+            de IA (Claude) conectada nesta máquina — nem todos precisarão da IA para usar o painel.
+        </p>
+        <div id="ia-seg" class="modo-seg">
+            <button type="button" class="{{ 'ativo' if not ia_ativa else '' }}" onclick="definirIaModo(false, this)">Modo Simples</button>
+            <button type="button" class="{{ 'ativo' if ia_ativa else '' }}" onclick="definirIaModo(true, this)">Modo com IA</button>
+        </div>
+        <p id="ia-status" class="text-tertiary" style="font-size:12px;margin-top:10px;">
+            {% if ia_ativa %}Modo com IA ativado.{% else %}Modo Simples ativado (IA desligada).{% endif %}
+        </p>
+        {% if not claude_instalado %}
+        <p style="font-size:12.5px;margin-top:8px;padding:8px 10px;border-radius:8px;color:var(--c-red);
+                  border:1px solid color-mix(in srgb, var(--c-red) 40%, transparent);
+                  background:color-mix(in srgb, var(--c-red) 8%, transparent);">
+            O Claude CLI <strong>não foi detectado</strong> nesta máquina. No “Modo com IA”, as análises só
+            serão geradas depois que o Claude estiver instalado e conectado; enquanto isso, o painel opera
+            normalmente como no Modo Simples.
+        </p>
+        {% endif %}
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que a IA faz no painel</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
+            No <strong>Modo com IA</strong>, ao sincronizar cada PAJ a IA analisa as últimas movimentações e:
+        </p>
+        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
+            <li><strong>Resumo</strong>: resume a providência de contato necessária com o assistido.</li>
+            <li><strong>Classificação (Tipo)</strong>: enquadra a tramitação num <em>comunicado padrão</em>, quando cabível.</li>
+            <li><strong>Sugestão de mensagem</strong>: redige uma mensagem pronta ao assistido, adaptada ao caso.</li>
+            <li><strong>Anexo automático</strong>: ao classificar num comunicado com anexo padrão vinculado, inclui o anexo na tramitação.</li>
+        </ul>
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que continua funcionando sem IA (Modo Simples)</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
+            <strong>Todo o núcleo do painel</strong> permanece operacional — apenas não há geração automática
+            de resumo/classificação/sugestão. Você escreve a mensagem ou usa os modelos padrão manualmente:
+        </p>
+        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
+            <li>Sincronização das caixas (lista de PAJs, movimentações e prazos).</li>
+            <li>Contatos do assistido: telefone, e-mail, endereço e WhatsApp.</li>
+            <li><strong>Comunicados e parágrafos padrão manuais</strong> (com seus anexos vinculados).</li>
+            <li>Gravar para envio, envio por App SISDPU / WhatsApp e comprovante.</li>
+            <li>Movimentação e tramitação no SISDPU; histórico, anexos, refazer e log.</li>
+        </ul>
     </div>
 </div>
 
@@ -613,6 +667,19 @@ async function definirLayout(v, btn){
             btn.classList.add('ativo');
             toast('Layout salvo: ' + (d.layout === 'completo' ? 'Completo' : 'Simples'));
         } else alert('Falha ao salvar o layout.');
+    } catch(e){ alert('Erro: ' + e); }
+}
+async function definirIaModo(on, btn){
+    try {
+        const r = await fetch('/api/config/ia-modo', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ia:on})});
+        const d = await r.json();
+        if (d.ok) {
+            btn.parentElement.querySelectorAll('button').forEach(b => b.classList.remove('ativo'));
+            btn.classList.add('ativo');
+            const st = document.getElementById('ia-status');
+            if (st) st.textContent = d.ia_ativa ? 'Modo com IA ativado.' : 'Modo Simples ativado (IA desligada).';
+            toast(d.ia_ativa ? 'Modo com IA ativado' : 'Modo Simples ativado');
+        } else alert('Falha ao alterar o modo de IA.');
     } catch(e){ alert('Erro: ' + e); }
 }
 async function salvarWaIntervalo(){
