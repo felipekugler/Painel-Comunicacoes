@@ -100,14 +100,16 @@
                         {% for mk in paj.envio_meios %}<span class="{{ '' if mk == meio_key else 'meio-dim' }}" title="Pendente por {{ meio_labels.get(mk, mk) }}{% if mk == meio_key %} (esta página){% endif %}">{{ meio_icon(mk, meio_labels.get(mk, mk)) }}</span>{% endfor %}
                     </div>{% endif %}
                     {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
+                <td data-sort="{{ paj.assistido }}">
+                    <div class="col-assistido-flex">{{ paj.assistido or "—" }}</div>
                     {% if paj.envio_falhas %}<div class="mt-1" style="display:flex;flex-direction:column;gap:3px;">
                         {% for meio, det in paj.envio_falhas.items() %}
                         <span title="{{ det }}" style="display:block;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;">⚠ {{ meio_labels.get(meio, meio) }}: {{ det }}</span>
                         {% endfor %}
                     </div>{% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
-                <td><div class="col-assistido-flex">{{ paj.assistido or "—" }}</div></td>
                 <td>
                     {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
@@ -238,12 +240,14 @@
                         {% for mk in paj.envio_meios %}<span class="{{ '' if mk == meio_key else 'meio-dim' }}" title="Pendente por {{ meio_labels.get(mk, mk) }}{% if mk == meio_key %} (esta página){% endif %}">{{ meio_icon(mk, meio_labels.get(mk, mk)) }}</span>{% endfor %}
                     </div>{% endif %}
                     {% if paj.tipo == 'conjunto' %}<div class="mt-1"><span class="pill-conj-x" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações">🔗 {{ paj.n_tramites }} conjunto</span></div>{% endif %}
+                </td>
+                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
+                <td data-sort="{{ paj.assistido }}">
+                    <div class="col-assistido-flex">{{ paj.assistido or "—" }}</div>
                     {% if paj.envio_falhas and paj.envio_falhas.get('whatsapp') %}
                     <div class="mt-1"><span title="{{ paj.envio_falhas['whatsapp'] }}" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ {{ paj.envio_falhas['whatsapp'] }}</span></div>
                     {% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
-                <td><div class="col-assistido-flex">{{ paj.assistido or "—" }}</div></td>
                 <td>
                     {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
@@ -1055,72 +1059,91 @@ function confAdiar(g) {
     abrirConflitoModal(conflitos, semConflito);
 }
 
-// ---------- WhatsApp: envio assistido por linha (1 clique → sequência) ----------
+// ---------- Consumidor SSE genérico: abre o popup e mostra o passo a passo ----------
+// Retorna o objeto `resultado` do evento final {done:true, resultado:{...}}.
+async function enviarComPopup(url, corpo, tituloInicial) {
+    const modal = document.getElementById('sse-modal');
+    const log = document.getElementById('sse-log');
+    const st = document.getElementById('sse-status');
+    const fechar = document.getElementById('sse-fechar');
+    log.innerHTML = ''; st.textContent = tituloInicial || '— em andamento…'; fechar.style.display = 'none';
+    modal.style.display = 'flex';
+    let resultado = { ok: false, detalhe: 'sem retorno' };
+    try {
+        const resp = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(corpo)
+        });
+        const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+        while (true) {
+            const { done, value } = await reader.read(); if (done) break;
+            buf += dec.decode(value, { stream: true }); let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+                const linha = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                if (!linha.startsWith('data: ')) continue;
+                let d; try { d = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+                if (d.done) { resultado = d.resultado || resultado; st.textContent = '— concluído'; continue; }
+                const div = document.createElement('div');
+                div.className = 'sync-line sync-' + (d.level || 'info');
+                div.textContent = d.msg || ''; log.appendChild(div); log.scrollTop = log.scrollHeight;
+            }
+        }
+    } catch (e) {
+        const div = document.createElement('div'); div.className = 'sync-line sync-erro';
+        div.textContent = 'Erro: ' + e; log.appendChild(div); st.textContent = '— erro';
+        resultado = { ok: false, detalhe: String(e) };
+    }
+    fechar.style.display = '';
+    return resultado;
+}
+
+// ---------- WhatsApp: envio assistido por linha (1 clique → popup passo a passo) ----------
 async function enviarWhatsapp(btn) {
     const cell = btn.closest('.wa-acao');
     const slug = btn.dataset.slug, paj = btn.dataset.paj, tramite = btn.dataset.tramite || '';
     const tipo = btn.dataset.tipo || 'tramite';
-    if (!confirm('Enviar esta mensagem pelo WhatsApp agora?\n\nO painel vai abrir a conversa, enviar o TEXTO e depois os ANEXOS, e gerar o comprovante (PDF).')) return;
-    btn.disabled = true;
-    const orig = btn.innerHTML;
-    // Se já houver um envio em andamento, este entra na FILA e roda em seguida
-    // (o backend aguarda a vez em vez de recusar) — por isso pode levar mais que ~30s.
-    btn.innerHTML = 'Enviando… (aguarda a vez se houver fila)';
-    try {
-        const r = await fetch('/api/prontos/whatsapp/enviar', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slug: slug, paj_norm: paj, id_tramite: tramite, tipo: tipo })
-        });
-        const d = await r.json();
-        if (d.ok) {
-            let html = '<span class="wa-enviado-ok">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
-            if (d.comprovante_nome) {
-                html += '<a class="wa-pdf-link" target="_blank" title="Abrir comprovante (PDF)" href="/comprovante/whatsapp/'
-                    + encodeURIComponent(d.comprovante_nome) + '">'
-                    + '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>'
-                    + 'Comprovante PDF</a>';
-            }
-            if (cell) cell.innerHTML = html;
-            mostrarToast('WhatsApp ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
-        } else {
-            btn.disabled = false; btn.innerHTML = orig;
-            alert('Falha no envio pelo WhatsApp:\n' + (d.detalhe || d.erro || 'erro'));
-        }
-    } catch (e) {
-        btn.disabled = false; btn.innerHTML = orig;
-        alert('Erro: ' + e);
-    }
-}
-
-// ---------- Envio INDIVIDUAL por meio (App / E-mail), 1 clique por linha ----------
-async function enviarItem(btn) {
-    const cell = btn.closest('.wa-acao');
-    const rotulo = btn.dataset.meiolabel || 'este meio';
-    if (!confirm('Enviar esta mensagem por ' + rotulo + ' agora?')) return;
+    if (!confirm('Enviar esta mensagem pelo WhatsApp agora?\n\nO painel vai abrir a conversa, enviar o TEXTO e depois os ANEXOS, gerar o comprovante (PDF), movimentar e (se escolhido) tramitar o PAJ.\n\nO andamento aparece no popup, passo a passo.')) return;
     btn.disabled = true;
     const orig = btn.innerHTML;
     btn.innerHTML = 'Enviando…';
-    try {
-        const r = await fetch('/api/prontos/enviar-item', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
-                tipo: btn.dataset.tipo || 'tramite', id_tramite: btn.dataset.tramite || '',
-                meio: btn.dataset.meio
-            })
-        });
-        const d = await r.json();
-        if (d.ok) {
-            if (cell) cell.innerHTML = '<span class="meio-enviado-ok" style="color:var(' +
-                ('{{ meio_cor }}') + ');">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
-            mostrarToast(rotulo + ' ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
-        } else {
-            btn.disabled = false; btn.innerHTML = orig;
-            alert('Falha no envio por ' + rotulo + ':\n' + (d.detalhe || d.erro || 'erro'));
+    const d = await enviarComPopup('/api/prontos/whatsapp/enviar',
+        { slug: slug, paj_norm: paj, id_tramite: tramite, tipo: tipo },
+        '— enviando pelo WhatsApp…');
+    if (d.ok) {
+        let html = '<span class="wa-enviado-ok">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
+        if (d.comprovante_nome) {
+            html += '<a class="wa-pdf-link" target="_blank" title="Abrir comprovante (PDF)" href="/comprovante/whatsapp/'
+                + encodeURIComponent(d.comprovante_nome) + '">'
+                + '<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>'
+                + 'Comprovante PDF</a>';
         }
-    } catch (e) {
+        if (cell) cell.innerHTML = html;
+        mostrarToast('WhatsApp ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
+    } else {
         btn.disabled = false; btn.innerHTML = orig;
-        alert('Erro: ' + e);
+        mostrarToast('Falha no envio pelo WhatsApp — veja o log no popup');
+    }
+}
+
+// ---------- Envio INDIVIDUAL por meio (App / E-mail), 1 clique → popup passo a passo ----------
+async function enviarItem(btn) {
+    const cell = btn.closest('.wa-acao');
+    const rotulo = btn.dataset.meiolabel || 'este meio';
+    if (!confirm('Enviar esta mensagem por ' + rotulo + ' agora?\n\nO andamento (envio → movimentação → tramitação) aparece no popup, passo a passo.')) return;
+    btn.disabled = true;
+    const orig = btn.innerHTML;
+    btn.innerHTML = 'Enviando…';
+    const d = await enviarComPopup('/api/prontos/enviar-item',
+        { slug: btn.dataset.slug, paj_norm: btn.dataset.paj, tipo: btn.dataset.tipo || 'tramite',
+          id_tramite: btn.dataset.tramite || '', meio: btn.dataset.meio },
+        '— enviando por ' + rotulo + '…');
+    if (d.ok) {
+        if (cell) cell.innerHTML = '<span class="meio-enviado-ok" style="color:var(' +
+            ('{{ meio_cor }}') + ');">✅ ' + (d.status === 'simulado' ? 'Simulado' : 'Enviado') + '</span>';
+        mostrarToast(rotulo + ' ' + (d.status === 'simulado' ? '(simulado)' : 'enviado'));
+    } else {
+        btn.disabled = false; btn.innerHTML = orig;
+        mostrarToast('Falha no envio por ' + rotulo + ' — veja o log no popup');
     }
 }
 
