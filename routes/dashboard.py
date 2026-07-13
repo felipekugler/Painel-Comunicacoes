@@ -138,7 +138,8 @@ async def prontos_envio(request: Request, meio: str):
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
-        envio_modos_resumo=config_service.resumo_modos()))
+        envio_modos_resumo=config_service.resumo_modos(),
+        menu_recolhido=True))  # tabela larga: abre com o menu recolhido (igual ao Histórico)
 
 
 @router.post("/api/prontos/whatsapp/enviar", response_class=JSONResponse)
@@ -327,14 +328,33 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
     somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
     prazos = payload.get("prazos") if isinstance(payload, dict) else None
+    tramitar_grupo = payload.get("tramitar_grupo", "") if isinstance(payload, dict) else ""
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."},
                             status_code=400)
     dados = divcom_service.gravar_para_envio(slug, paj_norm, id_tramite, mensagem, meios,
-                                             somente_leitura=somente_leitura, prazos=prazos)
+                                             somente_leitura=somente_leitura, prazos=prazos,
+                                             tramitar_grupo=tramitar_grupo)
     if not dados:
         return JSONResponse({"ok": False, "erro": "tramitação não encontrada"}, status_code=404)
     return {"ok": True}
+
+
+@router.get("/api/grupos-unidade", response_class=JSONResponse)
+async def grupos_unidade(refresh: int = 0):
+    """Lista as caixas de GRUPO da unidade (p/ o dropdown de tramitação no modal Gravar).
+    Usa cache em config; busca no SISDPU se vazio ou refresh=1."""
+    from ingestao import sisdpu_client
+    cache = config_service.get_grupos_unidade()
+    if refresh or not cache:
+        try:
+            grupos = await sisdpu_client.listar_grupos_unidade()
+            if grupos:
+                cache = config_service.set_grupos_unidade(grupos)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": bool(cache), "grupos": cache,
+                    "favoritos": config_service.get_grupos_favoritos(), "erro": str(e)}
+    return {"ok": True, "grupos": cache, "favoritos": config_service.get_grupos_favoritos()}
 
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/tramite/{id_tramite}/gravar/remover", response_class=JSONResponse)
@@ -380,10 +400,12 @@ async def gravar_conjunto(slug: str, paj_norm: str, payload: dict = Body(...)):
     meios = payload.get("meios", []) if isinstance(payload, dict) else []
     somente_leitura = bool(payload.get("somente_leitura")) if isinstance(payload, dict) else False
     prazos = payload.get("prazos") if isinstance(payload, dict) else None
+    tramitar_grupo = payload.get("tramitar_grupo", "") if isinstance(payload, dict) else ""
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."}, status_code=400)
     dados = divcom_service.gravar_conjunto(slug, paj_norm, payload.get("mensagem", ""), meios,
-                                           somente_leitura=somente_leitura, prazos=prazos)
+                                           somente_leitura=somente_leitura, prazos=prazos,
+                                           tramitar_grupo=tramitar_grupo)
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}

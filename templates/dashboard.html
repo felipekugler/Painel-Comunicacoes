@@ -67,7 +67,7 @@
     <div class="card-label">Resumo IA</div>
     <div class="ia-corpo">
         {% if paj.resumo_ia %}
-        <div class="text-secondary {{ '' if full else 'clamp6' }}"{% if not full %} title="{{ paj.resumo_ia }}"{% endif %}>{{ paj.resumo_ia }}</div>
+        <div class="text-secondary {{ '' if full else 'clamp6' }}" style="white-space:pre-wrap;"{% if not full %} title="{{ paj.resumo_ia }}"{% endif %}>{{ paj.resumo_ia }}</div>
         {% else %}
         <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
         {% endif %}
@@ -92,9 +92,10 @@
     <div class="card-label">Sugestão IA</div>
     <div class="ia-corpo">
         {% if paj.sugestao_atual %}
-        {% if paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill-tipo" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
+        {% if paj.sugestao_alerta %}<div class="sug-alerta-label" style="font-size:11px;margin-bottom:4px;">Conferência manual necessária</div>
+        {% elif paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill-tipo" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
         {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
-        <div class="text-secondary {{ '' if full else 'clamp6' }}" style="font-size:12.5px;"{% if not full %} title="{{ paj.sugestao_atual }}"{% endif %}>{{ paj.sugestao_atual }}</div>
+        <div class="text-secondary {{ '' if full else 'clamp6' }} {{ 'sug-alerta' if paj.sugestao_alerta else '' }}" style="font-size:12.5px;white-space:pre-wrap;"{% if not full %} title="{{ paj.sugestao_atual }}"{% endif %}>{{ paj.sugestao_atual }}</div>
         {% else %}
         <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
         {% endif %}
@@ -138,7 +139,7 @@
 </div>
 {% endmacro %}
 
-{% macro acoes_paj(paj, c) %}
+{% macro acoes_paj(paj, c, inline_meios=false) %}
     {% if paj.tipo == 'conjunto' %}
     <div style="text-align:center;margin-bottom:2px;"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
     <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
@@ -175,15 +176,34 @@
             data-tramite="{{ paj.id_tramite }}"
             data-mensagem="{{ paj.sugestao_atual }}"
             data-anexos='{{ paj.anexos|tojson }}'
+            data-tramitar="{{ paj.envio_tramitar_grupo|default('') }}"
             data-app="{{ 1 if c.app_sisdpu else 0 }}"
             data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
             data-email="{{ 1 if c.email else 0 }}"
-            onclick="gravarAbrir(this)" title="Gravar para envio em lote">
+            onclick="{{ 'gravarInlineSalvar(this)' if inline_meios else 'gravarAbrir(this)' }}" title="Gravar para envio em lote">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
             <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
         </svg>
         Gravar para envio
     </button>
+{% endmacro %}
+
+{#-- Descrição do trâmite com o cabeçalho "[data/hora] - [remetente]" acima do texto.
+     Absorve as antigas colunas "Envio" e "Remetente". Para conjunto, um bloco por trâmite. --#}
+{% macro tram_desc(paj, desc_class='desc-tram clamp3') %}
+{% if paj.tipo == 'conjunto' %}
+    {% for dt in paj.descricoes_tramites %}
+    <div class="tram-item">
+        <div class="tram-meta">{{ paj.datas_tramites[loop.index0] | data_hora_br }} - {{ paj.remetentes_tramites[loop.index0] or "—" }}</div>
+        {% if dt %}<div class="{{ desc_class }}" title="{{ dt }}">{{ dt }}</div>{% else %}<div class="text-tertiary" style="font-size:12.5px;">Sem descrição de trâmite.</div>{% endif %}
+    </div>
+    {% else %}
+    <span class="text-tertiary">—</span>
+    {% endfor %}
+{% else %}
+    <div class="tram-meta">{{ paj.envio_data | data_br }}{% if paj.envio_hora %} {{ paj.envio_hora }}{% endif %} - {{ paj.remetente or "—" }}</div>
+    {% if paj.descricao_tramite %}<div class="{{ desc_class }}" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>{% else %}<div class="text-tertiary" style="font-size:12.5px;">Sem descrição de trâmite.</div>{% endif %}
+{% endif %}
 {% endmacro %}
 
 {% block content %}
@@ -313,8 +333,6 @@
                             <th>PAJ</th>
                             <th>Ofício</th>
                             <th style="width:100%;">Assistido</th>
-                            <th>Envio</th>
-                            <th>Remetente</th>
                             <th>Prazo</th>
                             <th class="text-center" colspan="5">Contatos</th>
                         </tr>
@@ -323,17 +341,8 @@
                         <tr>
                             <td><a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener"
                                    class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a></td>
-                            <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ paj.oficio or "—" }}</td>
-                            <td style="white-space:nowrap;" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</td>
-                            <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
-                                {% if paj.tipo == 'conjunto' %}
-                                {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
-                                {% else %}
-                                <div>{{ paj.envio_data | data_br }}</div>
-                                {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
-                                {% endif %}
-                            </td>
-                            <td class="text-secondary" style="font-size:12px;white-space:nowrap;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
+                            <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio">{{ paj.oficio or "—" }}</div></td>
+                            <td><div class="col-assistido" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</div></td>
                             <td>
                                 {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
                             </td>
@@ -350,46 +359,54 @@
             <div class="pjp-sec pjp-tram">
                 <div class="pjp-tram-card">
                     <div class="card-label">Descrição do trâmite</div>
-                    {% if paj.tipo == 'conjunto' %}
-                        {% set _descs = paj.descricoes_tramites | select | list %}
-                        <div class="pjp-desc-3 clamp3" title="{{ _descs | join(' · ') }}">{% for dt in _descs %}{{ dt }}{% if not loop.last %} · {% endif %}{% endfor %}{% if not _descs %}Sem descrição de trâmite.{% endif %}</div>
-                    {% elif paj.descricao_tramite %}
-                        <div class="pjp-desc-3 clamp3" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>
-                    {% else %}
-                        <div class="pjp-desc-3 text-tertiary">Sem descrição de trâmite.</div>
-                    {% endif %}
+                    {{ tram_desc(paj, desc_class='pjp-desc-3 clamp3') }}
                 </div>
             </div>
-            {#-- Linha 3: Resumo IA (33%) + Sugestão IA (67%) --#}
+            {#-- Linha 3: Resumo IA + Sugestão IA + Anexos (movido da linha 4) --#}
             <div class="pjp-sec pjp-ia">
-                <div class="cards-row cards-full cards-ia2">
+                <div class="cards-row cards-full cards-ia3">
                     {{ card_resumo(paj, full=true) }}
                     {{ card_sugestao(paj, c, full=true) }}
+                    <div class="ia-card pjp-anx {{ 'tem-anexo' if paj.tem_anexo else '' }}"
+                         data-slug="{{ caixa.slug }}" data-paj="{{ paj.paj_norm }}"
+                         data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
+                         data-anexos='{{ paj.anexos|tojson }}'>
+                        <div class="pjp-anx-head">
+                            <div class="card-label" style="display:flex;align-items:center;gap:5px;margin:0;">
+                                <svg class="pjp-anx-clip" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                                </svg>
+                                Anexos
+                            </div>
+                            <input type="file" class="pjp-anx-input" multiple style="display:none;"
+                                   accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxCardUpload(this)">
+                            <button type="button" class="btn-accent" style="padding:3px 9px;font-size:12px;white-space:nowrap;"
+                                    onclick="this.previousElementSibling.click()">+ Adicionar arquivo(s)</button>
+                        </div>
+                        <div class="pjp-anx-lista"></div>
+                        <span class="pjp-anx-msg text-tertiary" style="font-size:11px;display:block;margin-top:4px;"></span>
+                    </div>
                 </div>
             </div>
-            {#-- Linha 4: Anexos (esquerda) + Ações (direita, largura = coluna Contatos) --#}
+            {#-- Linha 4: Meios de envio + Tramitação + Ações. As escolhas de meio/prazo/tramitação
+                 ficam INLINE aqui (no completo, "Gravar para envio" lê destes cards — sem modal). --#}
             <div class="pjp-sec pjp-l4">
-                <div class="ia-card pjp-anx {{ 'tem-anexo' if paj.tem_anexo else '' }}"
-                     data-slug="{{ caixa.slug }}" data-paj="{{ paj.paj_norm }}"
-                     data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
-                     data-anexos='{{ paj.anexos|tojson }}'>
-                    <div class="pjp-anx-head">
-                        <div class="card-label" style="display:flex;align-items:center;gap:5px;margin:0;">
-                            <svg class="pjp-anx-clip" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
-                            </svg>
-                            Anexos
-                        </div>
-                        <input type="file" class="pjp-anx-input" multiple style="display:none;"
-                               accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxCardUpload(this)">
-                        <button type="button" class="btn-accent" style="padding:3px 9px;font-size:12px;white-space:nowrap;"
-                                onclick="this.previousElementSibling.click()">+ Adicionar arquivo(s)</button>
-                    </div>
-                    <div class="pjp-anx-lista"></div>
-                    <span class="pjp-anx-msg text-tertiary" style="font-size:11px;display:block;margin-top:4px;"></span>
+                <div class="pjp-meios-card">
+                    <div class="card-label">Meios de envio da Mensagem</div>
+                    <div class="pjp-meios"
+                         data-app="{{ 1 if c.app_sisdpu else 0 }}"
+                         data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
+                         data-email="{{ 1 if c.email else 0 }}"></div>
+                </div>
+                <div class="pjp-tramitar-card">
+                    <div class="card-label">Tramitação <span class="text-tertiary" style="font-weight:400;font-size:11px;">(opcional - tramita o PAJ depois da movimentação)</span></div>
+                    <select class="grava-tramitar-sel pjp-tramitar-sel" data-atual="{{ paj.envio_tramitar_grupo|default('') }}">
+                        <option value="">— Não tramitar —</option>
+                    </select>
+                    <div class="pjp-tramitar-favs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
                 </div>
                 <div class="pjp-acoes">
-                    {{ acoes_paj(paj, c) }}
+                    {{ acoes_paj(paj, c, inline_meios=true) }}
                 </div>
             </div>
         </section>
@@ -411,8 +428,6 @@
                 <th>Ofício</th>
                 <th>Assistido</th>
                 <th style="width: 100%; min-width: 12rem;">Descrição do trâmite</th>
-                <th style="width: 5rem;">Envio</th>
-                <th>Remetente</th>
                 <th style="width: 5rem;">Prazo</th>
                 <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
             </tr>
@@ -431,30 +446,14 @@
                     <a href="{{ paj.url_detalhe }}" target="_blank" rel="noopener" onclick="event.stopPropagation()"
                        class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a>
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ paj.oficio or "—" }}</td>
-                <td style="white-space:nowrap;">{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio">{{ paj.oficio or "—" }}</div></td>
+                <td><div class="col-assistido" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</div></td>
                 <td class="text-secondary" style="font-size:12.5px;">
-                    {# Descrição do trâmite: texto que o ofício de origem escreveu ao encaminhar —
-                       muitas vezes é a fonte mais direta do motivo do contato. #}
-                    {% if paj.tipo == 'conjunto' %}
-                        {% set _descs = paj.descricoes_tramites | select | list %}
-                        {% for dt in _descs %}<div class="desc-tram clamp3" title="{{ dt }}">{{ dt }}</div>{% endfor %}
-                        {% if not _descs %}<span class="text-tertiary">—</span>{% endif %}
-                    {% elif paj.descricao_tramite %}
-                        <div class="desc-tram clamp3" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>
-                    {% else %}
-                        <span class="text-tertiary">—</span>
-                    {% endif %}
+                    {# Descrição do trâmite: cabeçalho "[data/hora] - [remetente]" + o texto que o
+                       ofício de origem escreveu ao encaminhar (fonte direta do motivo do contato).
+                       Card vermelho off-white igual ao do layout completo (.pjp-tram-card). #}
+                    <div class="pjp-tram-card">{{ tram_desc(paj) }}</div>
                 </td>
-                <td class="text-secondary" style="font-size:12px;white-space:nowrap;">
-                    {% if paj.tipo == 'conjunto' %}
-                    {% for dt in paj.datas_tramites %}<div>{{ dt | data_br }}</div>{% endfor %}
-                    {% else %}
-                    <div>{{ paj.envio_data | data_br }}</div>
-                    {% if paj.envio_hora %}<div class="text-tertiary" style="font-size:11px;">{{ paj.envio_hora }}</div>{% endif %}
-                    {% endif %}
-                </td>
-                <td class="text-secondary" style="font-size:12px;white-space:nowrap;" title="Usuário que enviou a tramitação">{{ paj.remetente or "—" }}</td>
                 <td>
                     {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
@@ -465,7 +464,7 @@
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
             </tr>
             <tr class="pj-cards pj-collapse {{ _par }}">
-                <td colspan="13">
+                <td colspan="11">
                     <div class="cards-row">
                         {{ card_resumo(paj) }}
                         {{ card_sugestao(paj, c) }}
@@ -561,6 +560,10 @@
    para que o espaçamento/altura das células seja idêntico nos dois layouts. */
 .pj-cards > td { border-bottom:1px solid var(--stroke); padding-top:2px; padding-bottom:16px; }
 .desc-tram { line-height:1.35; }
+/* Cabeçalho "[data/hora] - [remetente]" acima da descrição do trâmite (absorve as antigas colunas Envio/Remetente) */
+.tram-meta { font-size:11.5px; font-weight:600; color:var(--text-tertiary); white-space:nowrap; margin-bottom:2px; }
+.tram-item + .tram-item { margin-top:8px; padding-top:8px; border-top:1px dashed var(--stroke, rgba(128,128,128,.25)); }
+/* .col-oficio / .col-assistido (larguras por nº de caracteres) agora ficam em base.html (compartilhado com prontos) */
 .cards-row { display:flex; gap:12px; align-items:stretch; }
 /* Proporção: Resumo 38,5% · Sugestão 38,5% · Anexos 10% · Ações 13% (basis 0). */
 .cards-row .ia-card { flex:38.5 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
@@ -628,6 +631,9 @@
 /* Linha 2: card vermelho só com a Descrição do trâmite (rótulo + conteúdo) */
 .pjp-desc-3 { font-size:13px; line-height:1.5; color:var(--text-secondary); white-space:pre-wrap; }
 /* Card "Tramitação" (linha 2): tom vermelho off-white, adapta ao tema */
+/* Sugestão de CONFERÊNCIA MANUAL (a IA não identificou os dados padrão): texto em vermelho */
+.ia-corpo .sug-alerta { color:var(--c-red); font-weight:600; }
+.sug-alerta-label { color:var(--c-red); font-weight:700; text-transform:uppercase; letter-spacing:.02em; }
 .pjp-tram-card { border:1px solid color-mix(in srgb, var(--c-red) 22%, var(--stroke));
                  border-radius:10px; padding:12px 14px;
                  background: color-mix(in srgb, var(--c-red) 8%, var(--card)); }
@@ -636,10 +642,27 @@
 .cards-ia2 > .ia-card { height:252px; overflow:hidden; }
 .cards-ia2 > .ia-card:nth-child(1) { flex:33 1 0; }
 .cards-ia2 > .ia-card:nth-child(2) { flex:67 1 0; }
-/* Linha 4: Anexos (esquerda, ocupa o resto) + Ações (direita, largura = coluna Contatos) */
+/* Linha 3 (nova): Resumo + Sugestão IA + Anexos lado a lado, mesma altura fixa */
+.cards-ia3 > .ia-card { height:290px; overflow:hidden; }
+.cards-ia3 > .ia-card:nth-child(1) { flex:30 1 0; }   /* Resumo */
+.cards-ia3 > .ia-card:nth-child(2) { flex:45 1 0; }   /* Sugestão */
+.cards-ia3 > .ia-card:nth-child(3) { flex:25 1 0; min-width:210px; }  /* Anexos */
+/* Linha 4: Meios de envio (largura suficiente, SEM quebra) + Tramitação + Ações */
 .pjp-l4 { display:flex; gap:12px; align-items:flex-start; }
-.pjp-l4 .pjp-anx { flex:1 1 auto; min-width:0; }
 .pjp-l4 .pjp-acoes { flex:0 0 var(--pjp-side); width:var(--pjp-side); }
+.pjp-l4 .pjp-meios-card { flex:1 1 auto; min-width:0; overflow-x:auto;
+    border:1px solid var(--stroke); border-radius:10px; padding:10px 12px;
+    background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+.pjp-l4 .pjp-tramitar-card { flex:0 0 auto; min-width:20rem; max-width:25rem;
+    border:1px solid var(--stroke); border-radius:10px; padding:10px 12px;
+    background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
+/* cada meio numa linha própria; SEM quebra (o card rola na horizontal se faltar espaço) */
+.pjp-meios .mi-row { display:flex; align-items:center; gap:4px; flex-wrap:nowrap; white-space:nowrap; min-height:34px; }
+/* rows compactas para caber os dados numa só linha */
+.pjp-meios .wa-opt { padding:5px 6px; gap:6px; }
+.pjp-meios .prazo-badge { padding:2px 7px; }
+.pjp-meios .mi-row + .mi-row { border-top:1px dashed color-mix(in srgb, var(--stroke) 70%, transparent); }
+.pjp-tramitar-card .grava-tramitar-sel { width:100%; }
 .pjp-anx { display:flex; flex-direction:column; overflow:hidden; padding:10px 12px;
            border:1px solid var(--stroke); border-radius:10px;
            background:color-mix(in srgb, var(--accent) 4%, var(--card)); }
@@ -648,8 +671,11 @@
 .pjp-anx-clip { width:15px; height:15px; flex:0 0 auto; }
 .pjp-anx.tem-anexo .pjp-anx-clip { color: var(--c-red); }
 /* Altura para ~3 linhas de arquivos; passando disso, rola dentro do card */
-.pjp-anx .pjp-anx-lista { overflow-y:auto; max-height:92px; }
+.pjp-anx .pjp-anx-lista { overflow-y:auto; max-height:222px; }
 .pjp-anx .pjp-anx-lista table th { position:sticky; top:0; background:var(--card); }
+/* linhas compactas: mostra ~6 anexos sem rolagem dentro do card */
+.pjp-anx .anx-tabela td, .pjp-anx .anx-tabela th { padding:1px 8px; line-height:1.2; }
+.pjp-anx .anx-tabela .btn-subtle { padding:0 6px; line-height:1.5; }
 .pjp-acoes { display:flex; flex-direction:column; gap:8px; align-items:stretch; }
 .pjp-acoes .btn-subtle, .pjp-acoes .btn-grava { width:100%; justify-content:center; padding:7px 10px; font-size:13px; }
 .pjp-acoes .pill-conj { align-self:center; margin-bottom:2px; }
@@ -743,7 +769,7 @@
             <option value="">— escolher um modelo —</option>
         </select>
     </div>
-    <textarea id="sug-texto" class="sug-textarea" placeholder="Texto da mensagem…"></textarea>
+    <textarea id="sug-texto" class="sug-textarea" placeholder="Texto da mensagem…" oninput="sanitizarTexto(this)"></textarea>
     <div id="sug-par-box" style="margin-top:12px;display:none;">
         <button type="button" onclick="sugTogglePar()"
                 style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;color:var(--text-secondary);font-size:12px;font-weight:600;">
@@ -806,28 +832,43 @@
 <div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
   <div class="fluent-card grava-dialog">
     <h3 class="font-display" style="font-size:18px;margin:0;">Gravar para envio — PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></h3>
-    <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
+    <p class="text-secondary" style="font-size:13px;margin:4px 0 10px;">
         Ao gravar, o PAJ sairá de "Pendentes" e entrará na fila em "Prontos para Envio".
     </p>
+    <hr class="grava-sep">
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" style="min-height:238px;" placeholder="Mensagem ao assistido…"></textarea>
-    <div style="margin-top:14px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;">
-            <div style="font-weight:600;font-size:13px;">Anexos</div>
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:210px;" placeholder="Mensagem ao assistido…" oninput="sanitizarTexto(this)"></textarea>
+    <p class="text-tertiary" style="font-size:11px;margin:4px 0 0;">Somente texto — emojis não são permitidos nas mensagens.</p>
+    <hr class="grava-sep">
+    <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:13px;">Anexos</span>
+            <span class="text-tertiary" style="font-size:11px;">Permitido apenas arquivos DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</span>
+            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:auto;"></span>
             <input type="file" id="grava-anx-input" multiple style="display:none;"
                    accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="gravaAnxUpload(this)">
             <button type="button" class="btn-accent" style="padding:5px 12px;font-size:12px;white-space:nowrap;"
                     onclick="document.getElementById('grava-anx-input').click()">+ Adicionar arquivo(s)</button>
         </div>
         <div id="grava-anx-lista"></div>
-        <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;display:block;margin-top:4px;"></span>
-        <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
     </div>
-    <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
-        <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de envio da Mensagem</div>
+        <div id="grava-meios" style="display:flex;flex-direction:column;gap:0;"></div>
     </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Tramitação <span class="text-tertiary" style="font-weight:400;">(opcional - tramita o PAJ depois da movimentação)</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select id="grava-tramitar" class="grava-tramitar-sel">
+                <option value="">— Não tramitar —</option>
+            </select>
+            <div id="grava-tramitar-favs" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+    </div>
+    <hr class="grava-sep">
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="btn-subtle" onclick="gravarFechar()">Cancelar</button>
         <button class="btn-grava" onclick="gravarSalvar()">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor">
@@ -858,6 +899,9 @@ const PARAGRAFOS = {{ paragrafos|tojson }};
 const COMUNICADOS = {{ comunicados|tojson }};
 const MEIOS_ENVIO = {{ meios_envio|tojson }};
 const PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};  // prazos (dias) pré-definidos; 0 = sem prazo
+// Cache dos grupos/favoritos de tramitação — declarado ANTES do IIFE de init do layout
+// completo (que chama popularTramitarInline), senão cai na TDZ do `let`.
+let _GRUPOS_CACHE = null, _GRUPOS_FAV = [];
 
 // ========== Layout "Pendentes": simples (retrátil) e completo (carrossel) ==========
 // LAYOUT SIMPLES: clique na linha do PAJ abre/fecha a linha de análise/ações.
@@ -944,6 +988,9 @@ function uniformizarColunasCompleto(){
     uniformizarColunasCompleto();
     // reexecuta quando as fontes terminarem de carregar (a largura do texto pode mudar)
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(uniformizarColunasCompleto);
+    // cards inline do layout completo: meios de envio + tramitação (por painel)
+    document.querySelectorAll('.pjp-meios').forEach(construirMeiosInline);
+    popularTramitarInline();
 })();
 
 // ===== Anexos EMBUTIDOS no card (layout completo) — gerencia sem abrir o modal =====
@@ -964,14 +1011,13 @@ function anxCardRender(card, anexos){
     }
     const raiz = anxCardRaiz(card);
     let h = '<table class="fluent-table anx-tabela" style="width:100%;font-size:12px;"><thead><tr>' +
-            '<th>Arquivo</th><th style="width:4.5rem;">Tamanho</th><th style="width:7rem;">Incluído em</th><th style="width:2rem;"></th>' +
+            '<th>Arquivo</th><th style="width:4.5rem;">Tamanho</th><th style="width:2rem;"></th>' +
             '</tr></thead><tbody>';
     anexos.forEach(a => {
         const dl = a.arquivo ? (raiz + '/anexo/' + encodeURIComponent(a.arquivo)) : '';
         const nome = dl ? '<a class="accent-link" href="'+dl+'" target="_blank" rel="noopener">'+_anxEsc(a.nome)+'</a>' : _anxEsc(a.nome);
         h += '<tr><td style="word-break:break-word;">'+nome+'</td>' +
              '<td>'+_anxTam(a.tamanho)+'</td>' +
-             '<td class="text-tertiary">'+_anxEsc((a.incluido_em||'').replace('T',' ').slice(0,16))+'</td>' +
              '<td><button class="btn-subtle" style="padding:2px 7px;color:#dc2626;" title="Remover anexo" ' +
              'data-id="'+_anxEsc(a.id)+'" onclick="anxCardRemover(this)">✕</button></td></tr>';
     });
@@ -1009,7 +1055,7 @@ async function anxCardUpload(input){
     input.value = '';
 }
 async function anxCardRemover(btn){
-    if (!confirm('Remover este anexo?')) return;
+    // remoção direta, sem confirmação (pedido do usuário)
     const card = btn.closest('.pjp-anx');
     const msg = card.querySelector('.pjp-anx-msg');
     try{
@@ -1053,6 +1099,33 @@ function copiarDe(el) { copiarTexto(el.dataset.copy || '', el.dataset.rotulo || 
 let gravaPajAtual = null;
 let gravaTramite = null;
 let gravaTipo = 'tramite';
+function gravaFavsRender() {
+    const sel = document.getElementById('grava-tramitar');
+    const box = document.getElementById('grava-tramitar-favs');
+    if (!sel || !box) return;
+    box.innerHTML = '';
+    _GRUPOS_FAV.forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge' + (sel.value === g ? ' ativo' : '');
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; gravaFavsRender(); };
+        box.appendChild(b);
+    });
+    sel.onchange = () => gravaFavsRender();
+}
+async function gravaCarregarGrupos(atual) {
+    const sel = document.getElementById('grava-tramitar');
+    if (!sel) return;
+    if (!_GRUPOS_CACHE) {
+        try { const r = await fetch('/api/grupos-unidade'); const d = await r.json();
+              _GRUPOS_CACHE = (d && d.grupos) ? d.grupos : []; _GRUPOS_FAV = (d && d.favoritos) ? d.favoritos : []; }
+        catch (e) { _GRUPOS_CACHE = []; }
+    }
+    sel.innerHTML = '<option value="">— Não tramitar —</option>';
+    _GRUPOS_CACHE.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; if (g === atual) o.selected = true; sel.appendChild(o); });
+    if (atual && !_GRUPOS_CACHE.includes(atual)) { const o = document.createElement('option'); o.value = atual; o.textContent = atual; o.selected = true; sel.appendChild(o); }
+    gravaFavsRender();
+}
 function gravarAbrir(btn) {
     gravaPajAtual = btn.dataset.paj;
     gravaTramite = btn.dataset.tramite || '';
@@ -1102,7 +1175,7 @@ function gravarAbrir(btn) {
         // o App SISDPU ganha também "Somente leitura". Extras ocultos enquanto o meio não é marcado.
         const row = document.createElement('div');
         // min-height reserva o espaço do input de prazo → sem "pulo" ao marcar/desmarcar.
-        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:42px;';
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:34px;';
         row.appendChild(lab);
         const meioCb = lab.querySelector('input');
         const extras = [];
@@ -1152,6 +1225,7 @@ function gravarAbrir(btn) {
         if (slCb) slCb.checked = meioCb.checked && slRestore;
         sync();
     });
+    gravaCarregarGrupos(btn.dataset.tramitar || '');
     document.getElementById('grava-modal').style.display = 'flex';
 }
 function gravarFechar() {
@@ -1165,6 +1239,8 @@ async function gravarSalvar() {
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo
     const prazos = { app_sisdpu: prazoDe('app_sisdpu'), whatsapp: prazoDe('whatsapp'), email: prazoDe('email') };
+    const trSel = document.getElementById('grava-tramitar');
+    const tramitar_grupo = trSel ? (trSel.value || '') : '';
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
@@ -1172,7 +1248,117 @@ async function gravarSalvar() {
             ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/conjunto/gravar'
             : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(gravaPajAtual) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
         const r = await fetch(url,
-            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos}) });
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos, tramitar_grupo}) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro ao gravar: ' + e); }
+}
+
+// ---------- Meios/Tramitação INLINE (layout completo) — mesmos controles do modal ----------
+// Monta, POR PAINEL, as linhas de "Meios de envio da Mensagem" no container .pjp-meios.
+function construirMeiosInline(box) {
+    const disp = { app_sisdpu: box.dataset.app === '1', whatsapp: box.dataset.whats === '1', email: box.dataset.email === '1' };
+    const AVISO = { app_sisdpu: 'assistido sem adesão ao aplicativo',
+                    whatsapp: 'cadastre um número de WhatsApp antes',
+                    email: 'sem e-mail cadastrado' };
+    box.innerHTML = '';
+    MEIOS_ENVIO.forEach(m => {
+        const habil = disp[m.key];
+        const row = document.createElement('div');
+        row.className = 'mi-row';
+        const lab = document.createElement('label');
+        lab.className = 'wa-opt' + (habil ? '' : ' opt-off');
+        lab.innerHTML = '<input type="checkbox" class="mi-meio" value="' + m.key + '"' + (habil ? '' : ' disabled') + '>' +
+            '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
+        lab.querySelectorAll('span')[0].textContent = m.label;
+        if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
+        row.appendChild(lab);
+        const meioCb = lab.querySelector('input');
+        const extras = [];
+        let slCb = null;
+        if (m.key === 'app_sisdpu') {
+            const slWrap = document.createElement('label');
+            slWrap.className = 'wa-opt';
+            slWrap.innerHTML = '<input type="checkbox" class="mi-sl"><span style="font-size:13px;">Somente leitura</span>';
+            row.appendChild(slWrap); slCb = slWrap.querySelector('input'); extras.push(slWrap);
+        }
+        const przWrap = document.createElement('label');
+        przWrap.className = 'wa-opt';
+        przWrap.innerHTML = '<span style="font-size:13px;">Prazo (dias)</span>' +
+            '<input type="number" class="mi-prazo" data-key="' + m.key + '" min="0" value="5" ' +
+            'style="width:54px;padding:3px 6px;border-radius:6px;border:1px solid var(--stroke-strong);' +
+            'background:var(--layer-alt);color:var(--text);font-size:13px;">';
+        row.appendChild(przWrap); extras.push(przWrap);
+        const przInput = przWrap.querySelector('input');
+        PRAZOS_PREDEF.forEach(v => {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = 'prazo-badge'; b.textContent = v + ' dias';
+            b.onclick = () => { przInput.value = v; };
+            row.appendChild(b); extras.push(b);
+        });
+        const urg = document.createElement('button');
+        urg.type = 'button'; urg.className = 'prazo-badge urgente'; urg.textContent = '⚡ Urgente';
+        urg.title = 'Prioridade máxima na fila (prazo 0)';
+        urg.onclick = () => { przInput.value = 0; };
+        row.appendChild(urg); extras.push(urg);
+        box.appendChild(row);
+        const sync = () => { const on = meioCb.checked; extras.forEach(el => el.style.display = on ? '' : 'none'); if (!on && slCb) slCb.checked = false; };
+        meioCb.addEventListener('change', sync); sync();
+    });
+}
+// Popula o dropdown de tramitação de CADA painel + os selos de caixas favoritas.
+function _renderFavsInline(sel, box) {
+    if (!box) return;
+    box.innerHTML = '';
+    _GRUPOS_FAV.forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge' + (sel.value === g ? ' ativo' : '');
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; _renderFavsInline(sel, box); };
+        box.appendChild(b);
+    });
+}
+async function popularTramitarInline() {
+    const sels = Array.from(document.querySelectorAll('.pjp-tramitar-sel'));
+    if (!sels.length) return;
+    if (!_GRUPOS_CACHE) {
+        try { const r = await fetch('/api/grupos-unidade'); const d = await r.json();
+              _GRUPOS_CACHE = (d && d.grupos) ? d.grupos : []; _GRUPOS_FAV = (d && d.favoritos) ? d.favoritos : []; }
+        catch (e) { _GRUPOS_CACHE = []; }
+    }
+    sels.forEach(sel => {
+        const atual = sel.dataset.atual || '';
+        sel.innerHTML = '<option value="">— Não tramitar —</option>';
+        _GRUPOS_CACHE.forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; if (g === atual) o.selected = true; sel.appendChild(o); });
+        if (atual && !_GRUPOS_CACHE.includes(atual)) { const o = document.createElement('option'); o.value = atual; o.textContent = atual; o.selected = true; sel.appendChild(o); }
+        const favBox = sel.parentElement.querySelector('.pjp-tramitar-favs');
+        _renderFavsInline(sel, favBox);
+        sel.onchange = () => _renderFavsInline(sel, favBox);
+    });
+}
+// "Gravar para envio" no layout completo: lê os cards inline do painel (sem abrir o modal).
+async function gravarInlineSalvar(btn) {
+    const panel = btn.closest('.pj-panel');
+    if (!panel) return;
+    const tipo = btn.dataset.tipo || 'tramite';
+    const pajNorm = btn.dataset.paj;
+    const tramite = btn.dataset.tramite || '';
+    const mensagem = (btn.dataset.mensagem || '').trim();
+    const meios = Array.from(panel.querySelectorAll('.mi-meio:checked')).map(c => c.value);
+    const slCb = panel.querySelector('.mi-sl');
+    const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
+    const prazoDe = (k) => { const el = panel.querySelector('.mi-prazo[data-key="' + k + '"]'); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };
+    const prazos = { app_sisdpu: prazoDe('app_sisdpu'), whatsapp: prazoDe('whatsapp'), email: prazoDe('email') };
+    const trSel = panel.querySelector('.pjp-tramitar-sel');
+    const tramitar_grupo = trSel ? (trSel.value || '') : '';
+    if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
+    if (!mensagem) { mostrarToast('Sugestão vazia — use "Ver / editar" para escrever a mensagem'); return; }
+    try {
+        const url = (tipo === 'conjunto')
+            ? '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(pajNorm) + '/conjunto/gravar'
+            : '/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(pajNorm) + '/tramite/' + encodeURIComponent(tramite) + '/gravar';
+        const r = await fetch(url,
+            { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos, tramitar_grupo}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }
@@ -1669,6 +1855,17 @@ function waAbrir(btn) {
         lista.insertAdjacentHTML('beforeend',
             '<label class="wa-opt"><input type="radio" name="wa-num" class="wa-radio" value="' + waEsc(t.numero) + '" ' + checked + ' onchange="waSyncOutro()">' +
             '<span style="font-family:monospace;">' + waEsc(t.numero) + '</span>' + obs + '</label>');
+    });
+    // Número(s) já cadastrado(s) para WhatsApp que NÃO estão no cadastro de telefones
+    // (foram digitados manualmente via "Cadastrar outro número") viram opção marcada,
+    // com a descrição — assim o número persiste como escolha ao reabrir o modal.
+    const telNums = new Set(tels.map(t => t.numero));
+    sel.forEach(n => {
+        if (telNums.has(n)) return;
+        lista.insertAdjacentHTML('beforeend',
+            '<label class="wa-opt"><input type="radio" name="wa-num" class="wa-radio" value="' + waEsc(n) + '" checked onchange="waSyncOutro()">' +
+            '<span style="font-family:monospace;">' + waEsc(n) + '</span>' +
+            ' <span class="text-tertiary" style="font-size:12px;">— Cadastrado manualmente no Painel</span></label>');
     });
     document.getElementById('wa-outro-chk').checked = false;
     const on = document.getElementById('wa-outro-num'); on.value = ''; on.style.display = 'none';

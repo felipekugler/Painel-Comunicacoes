@@ -22,7 +22,23 @@ async def historico(request: Request):
                 _url_cache[chave] = divcom_service.url_detalhe_do_paj(chave[0], chave[1])
             r["url_detalhe"] = _url_cache.get(chave, "")
     template = request.app.state.jinja.get_template("historico.html")
-    return HTMLResponse(template.render(request=request, registros=registros))
+    # Histórico tem tabela larga → abre com o menu recolhido (libera a largura da tela).
+    return HTMLResponse(template.render(request=request, registros=registros,
+                                        menu_recolhido=True))
+
+
+@router.post("/api/historico/{historico_id}/refazer-movimentacao", response_class=JSONResponse)
+async def refazer_movimentacao(historico_id: str):
+    """Refaz a movimentação que falhou (ex.: após resolver um conflito de sessão)."""
+    res = await divcom_service.refazer_movimentacao(historico_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/historico/{historico_id}/refazer-tramitacao", response_class=JSONResponse)
+async def refazer_tramitacao(historico_id: str):
+    """Refaz a tramitação que falhou/não foi realizada (exige movimentação OK antes)."""
+    res = await divcom_service.refazer_tramitacao(historico_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.post("/api/historico/limpar", response_class=JSONResponse)

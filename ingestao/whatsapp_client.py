@@ -135,12 +135,16 @@ async def _confirmar_enviado(page, texto: str = "", timeout_seg: int = 20) -> bo
       - se há texto: ele aparece em #main (área de mensagens) e NÃO no compose (rodapé);
       - sem texto (anexo sem legenda): presença de bolha de saída (`data-icon=tail-out`).
     """
-    snip = re.sub(r"\s+", " ", texto or "").strip()[:30]
+    # Normaliza removendo EMOJIS/pontuação (o WhatsApp renderiza emoji como <img>, que
+    # some do innerText → comparar com o texto cru dava falso-negativo, ex.: mensagem
+    # iniciada por "⚠️"). Mantém letras (c/ acento), números e espaço, nos DOIS lados.
+    snip = re.sub(r"\s+", " ", re.sub(r"[^0-9A-Za-zÀ-ÿ ]+", " ", texto or "")).strip()[:24]
     js_texto = r"""(snip) => {
         const main = document.querySelector('#main'); if (!main) return false;
+        const clean = s => (s||'').replace(/[^0-9A-Za-zÀ-ÿ ]+/g, ' ').replace(/\s+/g, ' ').trim();
         const foot = main.querySelector('footer');
-        const footTxt = foot ? (foot.innerText || '') : '';
-        const mainTxt = main.innerText || '';
+        const footTxt = clean(foot ? (foot.innerText || '') : '');
+        const mainTxt = clean(main.innerText || '');
         return snip.length > 0 && mainTxt.includes(snip) && !footTxt.includes(snip);
     }"""
     js_tail = r"""() => !!document.querySelector('#main [data-icon="tail-out"]')"""
@@ -155,6 +159,33 @@ async def _confirmar_enviado(page, texto: str = "", timeout_seg: int = 20) -> bo
         except Exception:
             pass
     return False
+
+
+async def _digitar_enviar(page, texto: str, timeout_seg: int = 20) -> bool:
+    """Digita `texto` no compose do chat já aberto e envia (botão Enviar; Enter como
+    fallback). SEGURO PARA MULTILINHA: as quebras de linha do texto são inseridas com
+    Shift+Enter (senão o Enter enviaria a mensagem fragmentada). Retorna True se
+    confirmou o envio. Usado para todas as mensagens digitadas (referência, texto, prazo)."""
+    compose = page.locator(_SEL_COMPOSE).first
+    await compose.click()
+    await page.wait_for_timeout(300)
+    linhas = (texto or "").split("\n")
+    for i, ln in enumerate(linhas):
+        if i > 0:  # nova linha DENTRO da mensagem, sem enviar
+            await page.keyboard.down("Shift")
+            await page.keyboard.press("Enter")
+            await page.keyboard.up("Shift")
+        if ln:
+            await page.keyboard.type(ln)
+    await page.wait_for_timeout(400)
+    botao = page.locator(_SEL_SEND_FOOTER)
+    if await botao.count():
+        await botao.first.click()
+    else:
+        await page.keyboard.press("Enter")
+    ok = await _confirmar_enviado(page, texto, timeout_seg=timeout_seg)
+    await page.wait_for_timeout(600)
+    return ok
 
 
 # ---------------- Comprovante (PDF de 2 páginas, sem libs externas) ----------------
@@ -224,12 +255,84 @@ _JS_DRAWER_CONTATO = r"""
 """
 
 
-async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "") -> str | None:
-    """Gera o comprovante PDF de 2 páginas: (1) Dados do contato (foto+nome+número
-    do destinatário — SÓ o painel, sem barra lateral) e (2) a conversa (#main).
-    Nome: Envio_Whats_Painel_[PAJ_]AAAA-MM-DD_HH-MM-SS.pdf. Retorna o caminho ou None."""
+# Localiza o container ROLÁVEL da conversa (dentro de #main) — o de maior scrollHeight.
+_JS_FIND_SCROLLER = r"""
+  const _main = document.querySelector('#main');
+  let sc = null;
+  if (_main) {
+    const cands = [..._main.querySelectorAll('div')].filter(d => {
+      const s = getComputedStyle(d);
+      return (s.overflowY === 'scroll' || s.overflowY === 'auto') && d.scrollHeight > d.clientHeight + 20;
+    });
+    cands.sort((a, b) => b.scrollHeight - a.scrollHeight);
+    sc = cands[0] || null;
+  }
+"""
+_JS_CONV_SCROLLHEIGHT = "() => {" + _JS_FIND_SCROLLER + " return sc ? sc.scrollHeight : 0; }"
+_JS_CONV_INFO = "() => {" + _JS_FIND_SCROLLER + r"""
+  if (!sc) return null;
+  const r = sc.getBoundingClientRect();
+  return { scrollHeight: sc.scrollHeight, clientHeight: sc.clientHeight,
+           rect: { x: r.x, y: r.y, width: r.width, height: r.height } };
+}"""
+_JS_CONV_SET_SCROLL = "(pos) => {" + _JS_FIND_SCROLLER + " if (sc) sc.scrollTop = pos; return sc ? sc.scrollTop : -1; }"
+
+WA_COMPROVANTE_MAX_PAGINAS = 6   # teto de fatias (páginas) da conversa no comprovante
+WA_COMPROVANTE_ZOOM = 0.6         # CSS zoom na captura — cabe mais conteúdo por página, texto legível
+
+
+async def _capturar_conversa_fatias(page, baseline_h) -> list[bytes]:
+    """Captura a conversa em FATIAS (uma por página do PDF), rolando do INÍCIO do bloco
+    ENVIADO (baseline_h = altura da conversa ANTES do envio) até o fim. Assim o
+    comprovante contempla TUDO o que foi enviado (mensagem longa + anexos) — e não só a
+    parte final, que era o que o print de #main pegava (altura fixa = viewport)."""
+    info0 = await page.evaluate(_JS_CONV_INFO)              # ANTES do zoom (converter baseline)
+    sh0 = (info0 or {}).get("scrollHeight") or 0
+    fatias: list[bytes] = []
     try:
-        conv = await page.locator("#main").first.screenshot(type="jpeg", quality=85)
+        # CSS zoom: reduz o tamanho do conteúdo → cabe MUITO mais mensagem por print,
+        # texto ainda legível (validado a 60%). Cada fatia = screenshot do #main.
+        await page.evaluate("(z)=>{document.body.style.zoom=z;}", WA_COMPROVANTE_ZOOM)
+        await page.wait_for_timeout(900)
+        info = await page.evaluate(_JS_CONV_INFO)
+        if not info or not info.get("clientHeight"):
+            return [bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85))]
+        total = info["scrollHeight"]; viewH = info["clientHeight"]
+        ratio = (total / sh0) if sh0 else WA_COMPROVANTE_ZOOM   # baseline (não-zoom) → coords do zoom
+        bottom = max(0, total - viewH)
+        if baseline_h and float(baseline_h) > 0:
+            region_top = max(0.0, min(float(baseline_h) * ratio - 40, bottom))  # topo do bloco enviado
+        else:
+            region_top = max(0.0, bottom - viewH)  # sem baseline: as 2 últimas telas
+        posicoes, pos = [], region_top
+        for _ in range(WA_COMPROVANTE_MAX_PAGINAS):
+            posicoes.append(pos)
+            if pos >= bottom:
+                break
+            prox = min(pos + viewH, bottom)
+            if prox <= pos:
+                break
+            pos = prox
+        for pos in posicoes:
+            await page.evaluate(_JS_CONV_SET_SCROLL, pos)
+            await page.wait_for_timeout(500)  # deixa o WhatsApp renderizar (lista virtualizada)
+            with contextlib.suppress(Exception):
+                fatias.append(bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85)))
+    finally:
+        with contextlib.suppress(Exception):
+            await page.evaluate("()=>{document.body.style.zoom='';}")  # restaura o zoom
+    return fatias or [bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85))]
+
+
+async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
+                                baseline_h=None) -> str | None:
+    """Gera o comprovante PDF: página 1 = Dados do contato (foto+nome+número do
+    destinatário — SÓ o painel, sem barra lateral); páginas seguintes = a CONVERSA em
+    fatias (todo o bloco enviado, com CSS zoom p/ caber mais por página — ver
+    WA_COMPROVANTE_ZOOM). Nome: Envio_Whats_Painel_[PAJ_]AAAA-MM-DD_HH-MM-SS.pdf."""
+    destino = None
+    try:
+        conv = await _capturar_conversa_fatias(page, baseline_h)
         contato = None
         with contextlib.suppress(Exception):
             await page.locator("#main header").first.click()
@@ -242,17 +345,18 @@ async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "") -
             if el:
                 contato = await el.screenshot(type="jpeg", quality=85)
             await page.keyboard.press("Escape")  # fecha o painel
-        jpegs = ([bytes(contato)] if contato else []) + [bytes(conv)]
-        ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
-        ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        nome = f"Envio_Whats_Painel_{ref + '_' if ref else ''}{ts}.pdf"
-        Path(comprovante_dir).mkdir(parents=True, exist_ok=True)
-        destino = str(Path(comprovante_dir) / nome)
-        _jpegs_to_pdf(jpegs, destino)
-        return destino
+        jpegs = ([bytes(contato)] if contato else []) + list(conv)
+        if jpegs:
+            ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
+            ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            nome = f"Envio_Whats_Painel_{ref + '_' if ref else ''}{ts}.pdf"
+            Path(comprovante_dir).mkdir(parents=True, exist_ok=True)
+            destino = str(Path(comprovante_dir) / nome)
+            _jpegs_to_pdf(jpegs, destino)
     except Exception as e:  # noqa: BLE001
         _log.warning("falha ao gerar comprovante: %r", e)
-        return None
+        destino = None
+    return destino
 
 
 async def enviar_mensagem(
@@ -263,27 +367,34 @@ async def enviar_mensagem(
     comprovante_dir: str | None = None,
     paj_ref: str = "",
     mensagem_prazo: str | None = None,
+    mensagem_referencia: str | None = None,
 ) -> dict:
-    """Envia uma mensagem de WhatsApp pelo perfil dedicado, em SEQUÊNCIA: primeiro o
-    TEXTO (mensagem própria), depois os ANEXOS (lote único via "Documento", SEM
-    legenda) e, por fim, se `mensagem_prazo` for dado, uma 3ª mensagem informando o
-    prazo/urgência. Modelo escolhido: 1 clique no painel → o Playwright envia tudo.
-    Se `comprovante_dir` for dado, gera o comprovante PDF de 2 páginas (dados do
-    contato + conversa) nomeado com o PAJ (`paj_ref`) e o retorna em `comprovante`.
+    """Envia uma mensagem de WhatsApp pelo perfil dedicado, em SEQUÊNCIA:
+      1) REFERÊNCIA do PAJ (`mensagem_referencia`, ex.: "Contato referente ao PAJ ...");
+      2) TEXTO (mensagem própria, pode ser multilinha); 3) PRAZO (`mensagem_prazo`);
+      4) ANEXOS (lote único via "Documento", sem legenda). Todas as mensagens são
+      DIGITADAS no chat (multilinha via Shift+Enter). Modelo: 1 clique no painel → envia tudo.
+    Se `comprovante_dir` for dado, gera o comprovante PDF (dados do contato + conversa)
+    nomeado com o PAJ (`paj_ref`) e o retorna em `comprovante`.
     Retorna {ok, status, detalhe, comprovante}. status: enviado|parcial|falha.
     """
     import mimetypes
     from urllib.parse import quote
 
+    from services.texto_util import remover_emojis
+
     anexos = anexos or []
     intl = normalizar_numero(numero)
     if not intl:
         return {"ok": False, "status": "falha", "detalhe": "Número vazio/inválido."}
-    texto = (mensagem or "").strip()
-    msg_prazo = (mensagem_prazo or "").strip()
+    # Só TEXTO nas mensagens — remove emojis (garantia; WhatsApp renderiza emoji como
+    # imagem e isso também quebrava a confirmação de envio).
+    texto = remover_emojis((mensagem or "").strip())
+    msg_prazo = remover_emojis((mensagem_prazo or "").strip())
+    msg_ref = remover_emojis((mensagem_referencia or "").strip())
     validos = [a for a in anexos if a.get("caminho") and Path(a["caminho"]).exists()]
     ausentes = [a for a in anexos if not (a.get("caminho") and Path(a["caminho"]).exists())]
-    if not texto and not validos and not msg_prazo:
+    if not texto and not validos and not msg_prazo and not msg_ref:
         return {"ok": False, "status": "falha",
                 "detalhe": "Nada a enviar (sem texto e sem anexo válido)."}
 
@@ -291,7 +402,9 @@ async def enviar_mensagem(
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            url = f"{WA_URL}/send?phone={intl}" + (f"&text={quote(texto)}" if texto else "")
+            # Abre o chat SEM pré-preencher texto — todas as mensagens são digitadas na
+            # ordem desejada (referência → texto → prazo), o que permite a referência 1ª.
+            url = f"{WA_URL}/send?phone={intl}"
             await page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
             # aguarda: chat abrir (compose) OU diálogo de número inválido
@@ -307,16 +420,29 @@ async def enviar_mensagem(
             if not aberto:
                 return {"ok": False, "status": "falha", "detalhe": "Conversa não abriu (timeout)."}
 
+            # Baseline: altura da conversa ANTES de enviar — o comprovante usa isso para
+            # capturar EXATAMENTE o bloco enviado (mensagem + prazo + anexos), do começo
+            # ao fim, e não só a parte final da tela.
+            base_conv_h = 0
+            with contextlib.suppress(Exception):
+                base_conv_h = await page.evaluate(_JS_CONV_SCROLLHEIGHT)
+
             etapas: list[tuple[str, bool]] = []
 
-            # 1) TEXTO primeiro (mensagem própria)
-            if texto:
-                await page.locator(_SEL_SEND_FOOTER).first.click()
-                ok_txt = await _confirmar_enviado(page, texto, timeout_seg=25)
-                etapas.append(("texto", ok_txt))
-                await page.wait_for_timeout(600)
+            # ORDEM: 1) referência do PAJ → 2) mensagem → 3) prazo → 4) anexos.
+            # 1) REFERÊNCIA do PAJ (mensagem padrão) — enviada primeiro
+            if msg_ref:
+                etapas.append(("referência", await _digitar_enviar(page, msg_ref, timeout_seg=20)))
 
-            # 2) ANEXOS depois (um único lote via "Documento", sem legenda)
+            # 2) MENSAGEM (texto próprio, pode ser multilinha)
+            if texto:
+                etapas.append(("texto", await _digitar_enviar(page, texto, timeout_seg=25)))
+
+            # 3) MENSAGEM DE PRAZO (condicional)
+            if msg_prazo:
+                etapas.append(("prazo", await _digitar_enviar(page, msg_prazo, timeout_seg=20)))
+
+            # 4) ANEXOS (por último; lote único via "Documento", sem legenda)
             if validos:
                 payloads = []
                 for a in validos:
@@ -336,30 +462,13 @@ async def enviar_mensagem(
                 ok_anx = await _confirmar_enviado(page, payloads[0]["name"], timeout_seg=30)
                 etapas.append((f"{len(payloads)} anexo(s)", ok_anx))
 
-            # 3) MENSAGEM DE PRAZO (condicional) — digitada no chat já aberto e enviada por último
-            if msg_prazo:
-                compose = page.locator(_SEL_COMPOSE).first
-                await compose.click()
-                await page.wait_for_timeout(300)
-                await page.keyboard.type(msg_prazo)
-                await page.wait_for_timeout(400)
-                # envia clicando no botão "Enviar" (mesmo padrão comprovado do passo 1,
-                # que aparece no rodapé assim que há texto no compose); Enter é fallback
-                botao_prz = page.locator(_SEL_SEND_FOOTER)
-                if await botao_prz.count():
-                    await botao_prz.first.click()
-                else:
-                    await page.keyboard.press("Enter")
-                ok_prz = await _confirmar_enviado(page, msg_prazo, timeout_seg=20)
-                etapas.append(("prazo", ok_prz))
-                await page.wait_for_timeout(600)
-
             todos_ok = bool(etapas) and all(ok for _, ok in etapas)
             algum_ok = any(ok for _, ok in etapas)
             comprovante = None
             if comprovante_dir and algum_ok:
                 await page.wait_for_timeout(800)
-                comprovante = await _capturar_comprovante(page, comprovante_dir, paj_ref)
+                comprovante = await _capturar_comprovante(page, comprovante_dir, paj_ref,
+                                                          baseline_h=base_conv_h)
             desc = ", ".join(f"{n}{'' if ok else ' (não confirmado)'}" for n, ok in etapas)
             nota_aus = f" · {len(ausentes)} anexo(s) ausente(s)" if ausentes else ""
             return {"ok": todos_ok,

@@ -21,6 +21,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from services.texto_util import colapsar_paragrafos, remover_emojis
+
 log = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -60,24 +62,40 @@ _INSTRUCOES = (
     "comunicados padrão. Se sim, retorne o texto EXATO do \"tipo\" correspondente. Se tiver "
     "QUALQUER dúvida, retorne null — não force o enquadramento.\n"
     "3. \"sugestao\": a mensagem PRONTA para enviar ao assistido, em linguagem simples e "
-    "cordial. FORMATE em parágrafos curtos separados por uma linha em branco (use quebras de "
-    "linha reais \\n\\n entre os parágrafos) — NÃO escreva tudo em um único bloco de texto corrido.\n"
+    "cordial. FORMATE em parágrafos curtos, um por linha, separados por UMA ÚNICA quebra de "
+    "linha (\\n) — NUNCA use linha em branco/parágrafo vazio entre eles (NADA de \\n\\n). "
+    "Também NÃO escreva tudo em um único bloco de texto corrido.\n"
     "   - IMPORTANTE sobre VARIÁVEIS: os comunicados podem conter campos entre [colchetes] "
     "(ex.: [processo], [chave], [juízo]). Para usar um comunicado, você DEVE preencher TODOS "
     "os seus [campos] com dados REAIS extraídos das movimentações. Se algum campo obrigatório "
     "NÃO puder ser determinado com certeza a partir das movimentações, NÃO use esse comunicado: "
     "retorne \"tipo\" = null e, em \"sugestao\", escreva EXATAMENTE "
-    "\"⚠️ Verifique o PAJ — dados padrão não identificados: \" seguido da lista dos campos que "
-    "faltaram (ex.: [chave], [juízo]).\n"
+    "\"Verifique o PAJ — dados padrão não identificados: \" seguido da lista dos campos que "
+    "faltaram (ex.: [chave], [juízo]). NÃO coloque emoji nem símbolo antes desse aviso.\n"
     "   - Se \"tipo\" foi definido e todos os campos preenchidos, entregue o texto do comunicado "
     "já completo com os dados do caso. Se \"tipo\" for null e não for o caso do aviso acima, "
     "redija um texto específico e adequado a este caso concreto.\n\n"
+    "SOMENTE TEXTO: NÃO use emojis, ícones nem símbolos gráficos de qualquer tipo em "
+    "NENHUM campo (nem ⚠️, ✅, ❌, setas etc.) — apenas letras, números e pontuação comum. "
+    "As mensagens são enviadas ao assistido como texto puro.\n"
     "ATENÇÃO AO FORMATO: dentro dos VALORES de texto do JSON, NUNCA use aspas duplas "
     "(\"). Se precisar citar algo (ex.: a descrição de um trâmite), use aspas simples "
     "('') ou não use aspas. Aspas duplas não escapadas quebram o JSON.\n"
     "Responda APENAS com um objeto JSON válido, sem cercas de código, no formato: "
     '{"resumo": "...", "tipo": "..." ou null, "sugestao": "..."}\n\n'
 )
+
+
+# Núcleo estável do aviso que a IA emite quando NÃO consegue preencher os dados
+# obrigatórios de um comunicado padrão (ver _INSTRUCOES). Usado para DETECTAR o
+# caso e destacar a sugestão em vermelho (conferência manual). Sem emoji — só texto.
+_NUCLEO_CONFERENCIA = "dados padrão não identificados"
+
+
+def precisa_conferencia_manual(sugestao: str | None) -> bool:
+    """True quando a sugestão é o aviso de dados padrão não identificados — sinal de
+    que o usuário precisa conferir o PAJ manualmente (destacar em vermelho no painel)."""
+    return bool(sugestao) and _NUCLEO_CONFERENCIA in sugestao.lower()
 
 
 def _desescapar_json(s: str) -> str:
@@ -225,9 +243,10 @@ def analisar_paj(movimentacoes: list[dict], comunicados: list[dict] | None = Non
 
     tipo = obj.get("tipo")
     return {
-        "resumo": (obj.get("resumo") or "").strip(),
+        "resumo": colapsar_paragrafos((obj.get("resumo") or "").strip()),
         "tipo": (tipo or "").strip() if isinstance(tipo, str) else "",
-        "sugestao": (obj.get("sugestao") or "").strip(),
+        # só texto (sem emojis) e sem linha em branco entre parágrafos
+        "sugestao": colapsar_paragrafos(remover_emojis(obj.get("sugestao") or "")),
     }
 
 
@@ -297,10 +316,14 @@ _INSTRUCOES_CONJUNTO = (
     "de cada trâmite costuma indicar diretamente o motivo daquela tramitação — use-a. "
     "NÃO omita nenhuma. Se algo não puder ser identificado, diga \"verificar manualmente\".\n"
     "2. \"sugestao\": UMA única mensagem, cordial e em linguagem simples, que atenda a "
-    "TODAS as tramitações acima de uma só vez. Formate em parágrafos curtos separados "
-    "por linha em branco (\\n\\n). Se um comunicado padrão servir de base, use-o preenchendo "
+    "TODAS as tramitações acima de uma só vez. Formate em parágrafos curtos, um por linha, "
+    "separados por UMA ÚNICA quebra de linha (\\n) — NUNCA use linha em branco/parágrafo vazio "
+    "entre eles (NADA de \\n\\n). Se um comunicado padrão servir de base, use-o preenchendo "
     "seus [campos] com dados reais das movimentações; se faltar dado obrigatório, escreva no "
     "ponto \"[verificar: campo]\".\n\n"
+    "SOMENTE TEXTO: NÃO use emojis, ícones nem símbolos gráficos de qualquer tipo em "
+    "NENHUM campo (nem ⚠️, ✅, ❌, setas etc.) — apenas letras, números e pontuação comum. "
+    "As mensagens são enviadas ao assistido como texto puro.\n"
     "ATENÇÃO AO FORMATO: dentro dos VALORES de texto do JSON, NUNCA use aspas duplas "
     "(\"). Se precisar citar a descrição de um trâmite, use aspas simples ('') ou não use "
     "aspas — aspas duplas não escapadas quebram o JSON.\n"
@@ -345,7 +368,8 @@ def analisar_conjunto(movimentacoes: list[dict], comunicados: list[dict] | None,
     if not obj:
         return {"resumo": result[:400], "tipo": "", "sugestao": result}
     return {
-        "resumo": (obj.get("resumo") or "").strip(),
+        "resumo": colapsar_paragrafos((obj.get("resumo") or "").strip()),
         "tipo": "",  # síntese conjunta não se enquadra num único tipo
-        "sugestao": (obj.get("sugestao") or "").strip(),
+        # só texto (sem emojis) e sem linha em branco entre parágrafos
+        "sugestao": colapsar_paragrafos(remover_emojis(obj.get("sugestao") or "")),
     }

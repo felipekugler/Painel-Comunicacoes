@@ -60,6 +60,43 @@ def registrar(record: dict) -> dict:
     return rec
 
 
+def obter(rec_id: str) -> dict | None:
+    """Retorna o registro com o `id` dado (ou None)."""
+    for r in listar():
+        if r.get("id") == rec_id:
+            return r
+    return None
+
+
+def atualizar(rec_id: str, campos: dict) -> dict | None:
+    """Atualiza `campos` do registro de `id` = rec_id (reescreve o jsonl preservando a
+    ordem). Retorna o registro atualizado ou None se não encontrar. Usado pelo 'refazer'
+    da movimentação/tramitação."""
+    if not HIST_FILE.exists():
+        return None
+    _backup()
+    atualizado = None
+    saida: list[str] = []
+    for linha in HIST_FILE.read_text(encoding="utf-8").splitlines():
+        if not linha.strip():
+            continue
+        try:
+            r = json.loads(linha)
+        except Exception:  # noqa: BLE001
+            saida.append(linha)
+            continue
+        if r.get("id") == rec_id:
+            r.update(campos or {})
+            atualizado = r
+            saida.append(json.dumps(r, ensure_ascii=False))
+        else:
+            saida.append(linha)
+    if atualizado is None:
+        return None
+    HIST_FILE.write_text("\n".join(saida) + "\n", encoding="utf-8")
+    return atualizado
+
+
 def listar() -> list[dict]:
     """Todos os registros, do mais recente para o mais antigo."""
     if not HIST_FILE.exists():

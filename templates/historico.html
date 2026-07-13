@@ -48,15 +48,18 @@
                 <th class="sortable" data-col="0" data-type="num" onclick="ordenarTabela(this)" style="width:5.5rem;">Data/hora<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:12rem; min-width:12rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="min-width:12rem; width:100%;">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Origem<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:11.7rem; min-width:11.7rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width:7rem; width:100%;">Mensagem</th>
+                <th class="text-center" style="width:6rem;">Mensagem</th>
                 <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:3rem;">Anexo<span class="sort-arrow"></span></th>
                 <th class="text-center" style="width:5rem;">Prazo</th>
                 <th class="sortable text-center" data-col="9" data-type="text" onclick="ordenarTabela(this)" style="width:3.5rem;">Meios<span class="sort-arrow"></span></th>
                 <th class="sortable text-center" data-col="10" data-type="text" onclick="ordenarTabela(this)" style="width:4.5rem;">Status<span class="sort-arrow"></span></th>
-                <th class="text-center" style="width:7rem;">Comprovante</th>
+                <th class="text-center" style="width:6rem;">Movimentado</th>
+                <th class="text-center" style="width:8rem;">Tramitado</th>
+                <th class="text-center" style="width:8rem;">Concluído</th>
+                <th class="text-center" style="width:3.5rem;">Log</th>
             </tr>
         </thead>
         <tbody>
@@ -84,11 +87,10 @@
                     {% if r.tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ r.tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">
-                    <div class="clamp2">{{ r.mensagem or "—" }}</div>
+                <td class="text-center">
                     {% if r.mensagem %}
-                    <button class="mov-badge" onclick="histMsg(this)" data-pajnum="{{ r.paj }}" data-msg="{{ r.mensagem }}">Ver mensagem</button>
-                    {% endif %}
+                    <button class="mov-badge" onclick="histMsgToggle(this)" title="Abrir/fechar a mensagem enviada">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ r.anexos|length }}">
                     {% if r.anexos %}
@@ -105,7 +107,7 @@
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" style="font-size:12.5px;white-space:nowrap;">
-                    {% if r.meio %}{% if r.prazo == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ r.prazo }} dia(s){% endif %}{% else %}<span class="text-tertiary">—</span>{% endif %}
+                    {% if r.meio %}{% if r.prazo == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ r.prazo }}{% endif %}{% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ r.meios_labels|join(',')|lower }}">
                     <div style="display:inline-flex;flex-wrap:wrap;gap:6px;align-items:flex-start;justify-content:center;">
@@ -119,24 +121,77 @@
                 </td>
                 <td class="text-center" data-sort="{{ r.status }}">
                     {%- set cor = {'enviado':'var(--c-zap)','simulado':'#a06d00','parcial':'var(--c-red)','falha':'var(--c-red)'}.get(r.status, 'var(--text-secondary)') -%}
-                    <span style="font-size:11.5px;font-weight:700;color:{{ cor }};">{{ r.status|upper }}</span>
+                    <div style="display:flex;flex-direction:column;align-items:center;gap:5px;">
+                        <span style="font-size:11.5px;font-weight:700;color:{{ cor }};">{{ r.status|upper }}</span>
+                        {% if r.comprovante %}
+                        <a class="pdf-link" target="_blank" rel="noopener" title="Abrir comprovante de envio (PDF)"
+                           href="/comprovante/whatsapp/{{ r.comprovante | urlencode }}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>PDF
+                        </a>
+                        {% endif %}
+                    </div>
                 </td>
                 <td class="text-center">
-                    {% if r.comprovante %}
-                    <a class="pdf-link" target="_blank" rel="noopener" title="Abrir comprovante de envio (PDF)"
-                       href="/comprovante/whatsapp/{{ r.comprovante | urlencode }}">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>PDF
-                    </a>
-                    {% elif r.mov_seq %}
-                        {% if r.url_detalhe %}
-                        <a class="mov-link" target="_blank" rel="noopener" href="{{ r.url_detalhe }}"
-                           title="Movimentação nº {{ r.mov_seq }} gerada no PAJ pelo App — abrir detalhamento">Mov {{ r.mov_seq }}</a>
+                    {% if r.mov_seq %}
+                        {%- set _murl = r.mov_url or r.url_detalhe -%}
+                        {% if _murl %}
+                        <a class="mov-link" target="_blank" rel="noopener" href="{{ _murl }}"
+                           title="Movimentação nº {{ r.mov_seq }} registrada no PAJ — abrir detalhamento">MOV {{ r.mov_seq }}</a>
                         {% else %}
-                        <span class="mov-link" title="Movimentação nº {{ r.mov_seq }} gerada no PAJ pelo App">Mov {{ r.mov_seq }}</span>
+                        <span class="mov-link" title="Movimentação nº {{ r.mov_seq }} registrada no PAJ">MOV {{ r.mov_seq }}</span>
                         {% endif %}
+                    {% elif r.mov_status == 'falha' %}
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+                            <span class="tag-falha" title="{{ r.mov_detalhe }}">falhou</span>
+                            <button class="refazer-link" data-id="{{ r.id }}"
+                                    onclick="refazerEtapa(this,'movimentacao')">↻ refazer</button>
+                        </div>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td class="text-center">
+                    {% if r.tram_status == 'tramitado' and r.tram_caixa %}
+                        {%- set _turl = r.tram_url -%}
+                        {%- set _tdesc = r.tram_descricao or ('Tramitado para ' ~ r.tram_caixa) -%}
+                        {% if _turl %}
+                        <a class="tram-link" target="_blank" rel="noopener" href="{{ _turl }}"
+                           title="{{ _tdesc }} — clique para abrir o histórico de tramitação">{{ r.tram_caixa }}</a>
+                        {% else %}
+                        <span class="tram-link" title="{{ _tdesc }}">{{ r.tram_caixa }}</span>
+                        {% endif %}
+                    {% elif r.tram_status in ('falha', 'nao_realizada') %}
+                        <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
+                            <span class="tag-falha" title="{{ r.tram_detalhe }}">{{ 'falhou' if r.tram_status == 'falha' else 'não realizada' }}</span>
+                            <button class="refazer-link" data-id="{{ r.id }}"
+                                    onclick="refazerEtapa(this,'tramitacao')">↻ refazer</button>
+                        </div>
+                    {% else %}<span class="text-tertiary" title="Sem tramitação solicitada">—</span>{% endif %}
+                </td>
+                <td class="text-center">
+                    {% if r.concluido_status == 'concluido' %}
+                        <span class="tram-link" title="{{ r.concluido_detalhe or 'Tramitação concluída' }}">Concluído</span>
+                    {% elif r.concluido_status == 'falha' %}
+                        <span class="tag-falha" title="{{ r.concluido_detalhe }}">falhou</span>
+                    {% else %}<span class="text-tertiary" title="Admissão/Conclusão da tramitação (em breve)">—</span>{% endif %}
+                </td>
+                <td class="text-center">
+                    {% if r.log %}
+                    <button class="log-btn" onclick="histLog(this)" data-pajnum="{{ r.paj }}"
+                            data-log='{{ r.log|tojson }}' title="Ver log do envio (passo a passo)">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" fill="none" viewBox="0 0 24 24" stroke-width="1.6" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M8 13h6M8 16h6M8 10h3"/></svg>
+                    </button>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
             </tr>
+            {% if r.mensagem %}
+            <tr class="hist-msg-row" style="display:none;">
+                <td colspan="15" class="msg-accordion">
+                    <div class="msg-accordion-in">
+                        <span class="msg-accordion-lbl">Mensagem enviada — PAJ {{ r.paj }}</span>
+                        <div class="msg-full">{{ r.mensagem }}</div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
             {% endfor %}
         </tbody>
     </table>
@@ -168,19 +223,46 @@
             color:var(--c-app,#7c3aed); text-decoration:none;
             border:1px solid color-mix(in srgb, var(--c-app,#7c3aed) 40%, transparent); border-radius:6px; padding:4px 9px; }
 a.mov-link:hover { background:color-mix(in srgb, var(--c-app,#7c3aed) 10%, transparent); }
+.tram-link { display:inline-flex; align-items:center; font-size:11.5px; font-weight:600; white-space:nowrap;
+            color:var(--c-zap,#16a34a); text-decoration:none;
+            border:1px solid color-mix(in srgb, var(--c-zap,#16a34a) 40%, transparent); border-radius:999px; padding:3px 9px; }
+a.tram-link:hover { background:color-mix(in srgb, var(--c-zap,#16a34a) 12%, transparent); }
+.tag-falha { display:inline-flex; align-items:center; font-size:11px; font-weight:700; white-space:nowrap;
+            color:var(--c-red,#dc2626); border:1px solid color-mix(in srgb, var(--c-red,#dc2626) 40%, transparent);
+            border-radius:6px; padding:3px 8px; cursor:help; }
+.refazer-link { font-size:11px; font-weight:600; white-space:nowrap; cursor:pointer;
+            color:var(--c-red,#dc2626); background:none; border:none; padding:1px 2px; text-decoration:none; }
+.refazer-link:hover { opacity:.75; }
+.refazer-link:disabled { opacity:.5; cursor:default; }
+.log-btn { display:inline-flex; align-items:center; justify-content:center; padding:4px; border-radius:6px;
+           border:1px solid var(--stroke-strong); background:var(--layer-alt); color:var(--text-secondary); cursor:pointer; }
+.log-btn:hover { color:var(--accent); border-color:var(--accent); }
+.log-lista { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+.log-item { display:flex; gap:10px; align-items:flex-start; font-size:13px; padding:8px 10px; border-radius:8px;
+            background:var(--layer-alt); border:1px solid var(--stroke); }
+.log-ok { color:var(--c-zap,#16a34a); font-weight:700; } .log-err { color:var(--c-red,#dc2626); font-weight:700; }
+.log-info { color:var(--text-tertiary); font-weight:700; }
+.log-etapa { font-weight:600; } .log-ts { color:var(--text-tertiary); font-size:11.5px; font-family:'Cascadia Code','Consolas',monospace; }
 .wa-overlay { position:fixed; inset:0; background:rgba(0,0,0,.45); display:flex; align-items:center;
               justify-content:center; z-index:1000; padding:16px; }
 .mov-dialog { width:100%; max-width:680px; padding:24px; max-height:85vh; overflow:auto; }
 .msg-full { white-space:pre-wrap; font-size:14px; line-height:1.6; color:var(--text-secondary); margin-top:10px; }
+/* Seção retrátil (acordeão) com o teor da mensagem, abaixo da linha */
+.msg-accordion { background: var(--layer-alt); padding: 0 !important; }
+.msg-accordion-in { padding: 12px 16px; border-left: 3px solid var(--accent); }
+.msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); }
+.msg-accordion .msg-full { margin-top:6px; max-width:900px; }
+.mov-badge.ativo { background: color-mix(in srgb, var(--accent) 26%, transparent); }
 </style>
 
-<div id="msg-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)histMsgFechar()">
+<div id="log-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)histLogFechar()">
   <div class="fluent-card mov-dialog">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <h3 class="font-display" style="font-size:18px;margin:0;">Mensagem — PAJ <span id="msg-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></h3>
-        <button class="btn-subtle" style="padding:4px 10px;" onclick="histMsgFechar()">Fechar</button>
+        <h3 class="font-display" style="font-size:18px;margin:0;">Log do envio — PAJ <span id="log-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="histLogFechar()">Fechar</button>
     </div>
-    <div id="msg-corpo" class="msg-full"></div>
+    <p class="text-tertiary" style="font-size:12px;margin:6px 0 0;">Passo a passo do que ocorreu desde o disparo (envio → movimentação → tramitação).</p>
+    <div id="log-lista" class="log-lista"></div>
   </div>
 </div>
 
@@ -215,20 +297,66 @@ function histFiltrar() {
     const linhas = document.querySelectorAll('#hist-tabela .hist-row');
     let visiveis = 0;
     linhas.forEach(tr => {
-        const txt = tr.textContent.toLowerCase();
+        const msgRow = (tr.nextElementSibling && tr.nextElementSibling.classList.contains('hist-msg-row'))
+                       ? tr.nextElementSibling : null;
+        // inclui o teor da mensagem (que está na linha-acordeão) na busca
+        const txt = (tr.textContent + ' ' + (msgRow ? msgRow.textContent : '')).toLowerCase();
         const ok = !q || txt.includes(q);
         tr.style.display = ok ? '' : 'none';
+        if (msgRow && !ok) msgRow.style.display = 'none';  // recolhe o acordeão junto
         if (ok) visiveis++;
     });
     const vazio = document.getElementById('hist-vazio');
     if (vazio) vazio.style.display = (visiveis === 0) ? 'block' : 'none';
 }
-function histMsg(btn) {
-    document.getElementById('msg-paj').textContent = btn.dataset.pajnum || '';
-    document.getElementById('msg-corpo').textContent = btn.dataset.msg || '(sem mensagem)';
-    document.getElementById('msg-modal').style.display = 'flex';
+// "Ver mensagem" → abre/fecha a seção retrátil (acordeão) abaixo da linha.
+function histMsgToggle(btn) {
+    const tr = btn.closest('tr');
+    const msgRow = tr && tr.nextElementSibling;
+    if (!msgRow || !msgRow.classList.contains('hist-msg-row')) return;
+    const aberto = msgRow.style.display !== 'none';
+    msgRow.style.display = aberto ? 'none' : '';
+    btn.textContent = aberto ? 'Abrir' : 'Ocultar';
+    btn.classList.toggle('ativo', !aberto);
 }
-function histMsgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
+
+// ---------- Log do envio (passo a passo) ----------
+function histLog(btn) {
+    document.getElementById('log-paj').textContent = btn.dataset.pajnum || '';
+    let passos = [];
+    try { passos = JSON.parse(btn.dataset.log || '[]'); } catch (e) {}
+    const box = document.getElementById('log-lista');
+    box.innerHTML = '';
+    if (!passos.length) { box.innerHTML = '<span class="text-tertiary" style="font-size:13px;">Sem passos registrados.</span>'; }
+    passos.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'log-item';
+        const cls = p.ok === true ? 'log-ok' : (p.ok === false ? 'log-err' : 'log-info');
+        const ic = p.ok === true ? '✓' : (p.ok === false ? '✕' : '•');
+        const ts = (p.ts || '').replace('T', ' ');
+        div.innerHTML = '<span class="' + cls + '">' + ic + '</span>' +
+            '<div style="flex:1;"><div class="log-etapa"></div><div class="log-det text-secondary" style="font-size:12.5px;"></div>' +
+            '<div class="log-ts">' + ts + '</div></div>';
+        div.querySelector('.log-etapa').textContent = p.etapa || '';
+        div.querySelector('.log-det').textContent = p.detalhe || '';
+        box.appendChild(div);
+    });
+    document.getElementById('log-modal').style.display = 'flex';
+}
+function histLogFechar() { document.getElementById('log-modal').style.display = 'none'; }
+
+// ---------- Refazer movimentação/tramitação que falharam ----------
+async function refazerEtapa(btn, tipo) {
+    const nome = tipo === 'movimentacao' ? 'movimentação' : 'tramitação';
+    if (!confirm('Refazer a ' + nome + ' deste PAJ?\n\nO painel checa o conflito de sessão do SISDPU antes de tentar.')) return;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'refazendo…';
+    try {
+        const r = await fetch('/api/historico/' + encodeURIComponent(btn.dataset.id) + '/refazer-' + tipo, { method: 'POST' });
+        const d = await r.json();
+        if (d.ok) { location.reload(); }
+        else { alert('Não foi possível refazer a ' + nome + ':\n' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = orig; }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = orig; }
+}
 
 // ---------- Limpar histórico (tudo / por corte de data) ----------
 function histLimparAbrir(){ document.getElementById('limpar-modal').style.display='flex'; }
@@ -268,14 +396,19 @@ function ordenarTabela(th) {
         const cell = tr.cells[col];
         return (cell.getAttribute('data-sort') ?? cell.textContent).trim();
     };
-    const rows = Array.from(tbody.rows);
-    rows.sort((a, b) => {
-        let av = val(a), bv = val(b), cmp;
+    // Ordena mantendo cada linha-acordeão (.hist-msg-row) colada à sua linha de dados.
+    const dataRows = Array.from(tbody.querySelectorAll('.hist-row'));
+    const pares = dataRows.map(r => {
+        const n = r.nextElementSibling;
+        return [r, (n && n.classList.contains('hist-msg-row')) ? n : null];
+    });
+    pares.sort((A, B) => {
+        let av = val(A[0]), bv = val(B[0]), cmp;
         if (tipo === 'num') { cmp = (av > bv ? 1 : (av < bv ? -1 : 0)); }
         else { cmp = av.localeCompare(bv, 'pt-BR', { numeric: true, sensitivity: 'base' }); }
         return dir === 'asc' ? cmp : -cmp;
     });
-    rows.forEach(r => tbody.appendChild(r));
+    pares.forEach(([r, msg]) => { tbody.appendChild(r); if (msg) tbody.appendChild(msg); });
 }
 </script>
 {% endblock %}

@@ -46,6 +46,10 @@ async def configuracoes(request: Request):
         analise_concorrencia_max=config_service.ANALISE_CONCORRENCIA_MAX,
         layout_pendentes=config_service.get_layout_pendentes(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
+        prazo_tramitacao_padrao=config_service.get_prazo_tramitacao_padrao(),
+        grupos_favoritos=config_service.get_grupos_favoritos(),
+        grupos_unidade=config_service.get_grupos_unidade(),
+        grupos_favoritos_max=config_service.GRUPOS_FAVORITOS_MAX,
         envio_modos=config_service.get_envio_modos(),
         whatsapp_intervalo=config_service.get_whatsapp_intervalo_seg(),
         abrir_tela_cheia=config_service.get_abrir_tela_cheia(),
@@ -119,6 +123,35 @@ async def add_prazo_predef(payload: dict = Body(...)):
 @router.post("/api/config/prazos-predefinidos/del", response_class=JSONResponse)
 async def del_prazo_predef(payload: dict = Body(...)):
     return {"ok": True, "prazos": config_service.del_prazo_predef((payload or {}).get("valor"))}
+
+
+@router.post("/api/config/prazo-tramitacao-padrao", response_class=JSONResponse)
+async def set_prazo_tramitacao_padrao(payload: dict = Body(...)):
+    """Prazo (dias) padrão de 'Nova conclusão em' da tramitação, usado quando o
+    envio não informou prazo. Inteiro entre 1 e 365."""
+    try:
+        n = int((payload or {}).get("dias"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
+    return {"ok": True, "dias": config_service.set_prazo_tramitacao_padrao(n)}
+
+
+@router.post("/api/config/grupos-favoritos", response_class=JSONResponse)
+async def add_grupo_favorito(payload: dict = Body(...)):
+    """Adiciona uma caixa de grupo favorita (selo de atalho no modal Gravar).
+    Limite GRUPOS_FAVORITOS_MAX; se cheio, retorna a lista atual inalterada."""
+    grupo = ((payload or {}).get("grupo") or "").strip()
+    if not grupo:
+        return JSONResponse({"ok": False, "erro": "grupo ausente"}, status_code=400)
+    favoritos = config_service.add_grupo_favorito(grupo)
+    cheio = len(favoritos) >= config_service.GRUPOS_FAVORITOS_MAX and grupo not in favoritos
+    return {"ok": True, "favoritos": favoritos, "cheio": cheio,
+            "max": config_service.GRUPOS_FAVORITOS_MAX}
+
+
+@router.post("/api/config/grupos-favoritos/del", response_class=JSONResponse)
+async def del_grupo_favorito(payload: dict = Body(...)):
+    return {"ok": True, "favoritos": config_service.del_grupo_favorito((payload or {}).get("grupo"))}
 
 
 @router.post("/api/config/caixa", response_class=JSONResponse)

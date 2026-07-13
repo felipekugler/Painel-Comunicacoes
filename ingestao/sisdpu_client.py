@@ -841,6 +841,32 @@ async def _resolver_conflito_login(page: Page) -> bool:
     return not est2.get("conflitoLogin")
 
 
+async def checar_conflito_sessao(id_processo: str | None = None) -> dict:
+    """Checagem PRÉVIA de conflito de sessão do SISDPU (usuário logado em outra
+    estação/navegador — o SISDPU só admite 1 sessão por usuário). Navega a uma página
+    do SISDPU e detecta o diálogo 'confirmDialogLogin'. NÃO resolve (não assume a
+    sessão) — apenas reporta, para o painel ABORTAR o envio e avisar o usuário.
+    Retorna {conflito: bool, detalhe}."""
+    try:
+        await _ensure_logged_in()
+        page = await _get_page()
+        url = (f"{SISDPU_URL}/pages/movimentacao/movimentaProcesso.xhtml?id={id_processo}&caixaEntrada=false"
+               if id_processo else f"{SISDPU_URL}/pages/caixaentrada/caixaEntrada.xhtml")
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        await _wait_pf_ajax(page, timeout=8000)
+        await page.wait_for_timeout(500)
+        est = await _eval_seguro(page, _JS_ESTADO_NOTIFICACAO)
+        if est.get("conflitoLogin"):
+            _log.info("checar_conflito_sessao: CONFLITO detectado (id=%s).", id_processo)
+            return {"conflito": True, "detalhe": _MSG_CONFLITO_SESSAO}
+        return {"conflito": False, "detalhe": ""}
+    except Exception as e:  # noqa: BLE001
+        # Falha na checagem NÃO deve bloquear o envio — retorna sem conflito (o fluxo
+        # normal ainda tem _resolver_conflito_login como rede de segurança).
+        _log.warning("checar_conflito_sessao falhou (%r) — seguindo sem bloquear.", e)
+        return {"conflito": False, "detalhe": ""}
+
+
 async def _anexar_documentos(page: Page, anexos: list[dict]) -> list[str]:
     """Anexa cada documento na tela Notificar Assistido (popup 'Novo documento').
 
@@ -1141,6 +1167,446 @@ async def notificar_assistido(
             return {"ok": True, "status": "enviado", "detalhe": detalhe, "mov_seq": mov_seq}
     return {"ok": False, "status": "falha",
             "detalhe": "Não confirmei o envio (timeout aguardando 'enviada com sucesso')."}
+
+
+# ===========================================================================
+# MOVIMENTAR / TRAMITAR PAJ (individual e em bloco)
+# ---------------------------------------------------------------------------
+# Funções reutilizáveis — a mesma tela do SISDPU serve individual e bloco; a
+# diferença é quantos PAJs entram na lista. `pajs` = lista de dicts
+#   {"id": <id_processo interno>, "numero": "AAAA/UUU-NNNNN"}.
+# O 1º PAJ é aberto pela URL (?id=<id>); os demais são adicionados por número.
+# ⚠️ RESTRIÇÃO DO SISDPU: adicionar por número é travado na UNIDADE do operador
+#    logado — PAJs de outra unidade NÃO entram no bloco (individual via ?id=
+#    funciona p/ qualquer unidade). As funções validam a lista montada e
+#    retornam erro se algum PAJ esperado não entrou.
+# ===========================================================================
+
+_MOV_FORM = "formHonorario"
+_TRAM_FORM = "form_tramite"
+_TIPO_ARQUIVO_MOV_PADRAO = "Correspondência"
+_FASE_MENSAGEM_ASSISTIDO = "Mensagem ao assistido"
+
+# Seleciona uma <option> por TEXTO num <select> nativo (.epaj_select_formata) e
+# dispara o evento change (necessário p/ o AJAX do PrimeFaces reagir). args =
+# [selectId, textoAlvo, exato]. Retorna {ok, val, txt} ou {ok:false, opts}.
+_JS_SELECT_OPT = r"""
+(args) => {
+  const [selId, alvo, exato] = args;
+  const s = document.getElementById(selId);
+  if (!s) return {ok:false, err:'select-inexistente'};
+  const n = t => (t||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+  let val=null, txt=null;
+  for (const o of s.options){ if (n(o.text)===n(alvo)){ val=o.value; txt=o.text.trim(); break; } }
+  if (val===null && !exato) for (const o of s.options){ if (n(o.text).includes(n(alvo))){ val=o.value; txt=o.text.trim(); break; } }
+  if (val===null) return {ok:false, opts:[...s.options].map(o=>o.text.trim())};
+  s.value = val; s.dispatchEvent(new Event('change', {bubbles:true}));
+  return {ok:true, val, txt};
+}
+"""
+
+# Escreve o texto na descrição da MOVIMENTAÇÃO (editor CKEditor) + no input/textarea
+# subjacentes (garantia p/ o submit JSF). args = [txt, inputHiddenId, textareaId].
+_JS_SET_CKEDITOR = r"""
+(args) => {
+  const [txt, hidId, taId, raw] = args;
+  // Editor é HTML. Se `raw` → usa o texto como HTML cru (ex.: listas/parágrafos já
+  // montados). Senão escapa e converte \n em <br> (preserva as quebras).
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const html = raw ? (txt||'') : esc(txt).replace(/\r\n|\r|\n/g, '<br>');
+  let done=false, keys=[];
+  if (window.CKEDITOR && CKEDITOR.instances) {
+    keys = Object.keys(CKEDITOR.instances);
+    for (const nm of keys) {
+      if (nm.includes('editorValue')) {
+        CKEDITOR.instances[nm].setData(html);
+        try { CKEDITOR.instances[nm].updateElement(); } catch(e) {}
+        done = true;
+      }
+    }
+  }
+  const hid = document.getElementById(hidId); if (hid) hid.value = html;
+  const ta  = document.getElementById(taId);  if (ta)  ta.value  = html;
+  return {done, keys};
+}
+"""
+
+# Marca o checkbox "Todas as fases" (revela a fase 'Mensagem ao assistido' no
+# select de fases). Localiza pelo TEXTO do label (o id é volátil).
+_JS_MARCAR_TODAS_FASES = r"""
+() => {
+  const l = [...document.querySelectorAll('label')].find(x => /todas as fases/i.test(x.innerText||''));
+  if (!l) return false;
+  const td = l.closest('td') || l.parentElement;
+  const box = td && td.querySelector('.ui-chkbox-box');
+  if (!box) return false;
+  const icon = box.querySelector('.ui-chkbox-icon');
+  const jaMarcado = icon && /ui-icon-check/.test(icon.className);
+  if (!jaMarcado) box.click();
+  return true;
+}
+"""
+
+# Lista os textos (números de PAJ) do listbox de PAJs selecionados.
+async def _ler_pajs_lista(page: Page, input_id: str) -> list[str]:
+    return await page.evaluate(
+        """(id)=>{const s=document.getElementById(id);return s?[...s.options].map(o=>o.text.trim()).filter(Boolean):[];}""",
+        input_id,
+    )
+
+
+# Diálogos de confirmação VISÍVEIS (os confirm dialogs do SISDPU são position:fixed
+# → offsetParent é null mesmo visíveis; testamos por getBoundingClientRect).
+async def _dialogos_visiveis(page: Page) -> list[dict]:
+    return await _eval_seguro(page, r"""
+    () => {
+      const vis = d => { const s=getComputedStyle(d); const r=d.getBoundingClientRect();
+        return s.display!=='none' && s.visibility!=='hidden' && r.width>0 && r.height>0; };
+      return [...document.querySelectorAll('.ui-confirm-dialog,.ui-dialog')].filter(vis).map(d=>({
+        id: d.id,
+        msg: ((d.querySelector('.ui-confirm-dialog-message,.ui-dialog-content')||{}).innerText||'').trim().slice(0,180),
+        btns: [...d.querySelectorAll('button, a.ui-button')].filter(vis).map(b=>(b.innerText||'').trim()).filter(Boolean)
+      }));
+    }
+    """)
+
+
+async def _adicionar_paj_por_numero(page: Page, form: str, add_btn_id: str, numero: str) -> None:
+    """Adiciona um PAJ (AAAA/UUU-NNNNN) na lista via ano + número + botão Adicionar.
+    ⚠️ A unidade é fixa (a do operador) — PAJ de outra unidade não entra corretamente."""
+    ano, resto = numero.split("/")
+    _unidade, num = resto.split("-")
+    await page.evaluate(_JS_SELECT_OPT, [f"{form}:data", ano, True])
+    await page.fill(_sel(f"{form}:numProcesso"), num)
+    with contextlib.suppress(Exception):
+        await page.locator(_sel(add_btn_id)).first.click(timeout=6000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(600)
+
+
+async def _anexar_documentos_movimentacao(
+    page: Page, anexos: list[dict], tipo_arquivo: str = _TIPO_ARQUIVO_MOV_PADRAO
+) -> list[str]:
+    """Anexa documentos à MOVIMENTAÇÃO (popup 'dlgModalArquivos' da fase). Para cada
+    anexo: abre o popup (link 'Adicionar Anexo' da linha da fase), sobe o arquivo
+    (preservando o nome original por buffer), preenche Descrição = nome, escolhe o
+    Tipo de Arquivo (padrão 'Correspondência') e clica 'Anexar'. Fecha o popup ao fim.
+    Best-effort por arquivo (tipos aceitos = _TIPOS_ANEXO_OK). Retorna os anexados."""
+    import mimetypes
+
+    anexos = [a for a in (anexos or []) if a]
+    if not anexos:
+        return []
+    anexados: list[str] = []
+    # abre o popup de anexos na 1ª (única) linha da tabela de fases
+    with contextlib.suppress(Exception):
+        await page.get_by_text("Adicionar Anexo", exact=True).first.click()
+    with contextlib.suppress(Exception):
+        await page.wait_for_selector(_sel(f"{_MOV_FORM}:arquivosFase_input"), timeout=10000)
+    await page.wait_for_timeout(400)
+    for a in anexos:
+        caminho = a.get("caminho") or ""
+        nome = a.get("nome") or (Path(caminho).name if caminho else "documento")
+        if not caminho or not Path(caminho).exists():
+            _log.warning("mov anexo ausente no disco, pulado: %s (%s)", nome, caminho)
+            continue
+        ext = (a.get("tipo") or Path(nome).suffix).lstrip(".").lower()
+        if ext not in _TIPOS_ANEXO_OK:
+            _log.warning("mov anexo de tipo não permitido, pulado: %s (.%s)", nome, ext)
+            continue
+        try:
+            data = Path(caminho).read_bytes()
+            mime = mimetypes.guess_type(nome)[0] or "application/octet-stream"
+            await page.locator(_sel(f"{_MOV_FORM}:arquivosFase_input")).set_input_files(
+                [{"name": nome, "mimeType": mime, "buffer": data}])
+            # aguarda a linha em 'arquivosSalvar' (Descrição :desc + Tipo :tipoArquivo)
+            desc_sel = _sel(f"{_MOV_FORM}:arquivosSalvar:0:desc")
+            await page.wait_for_selector(desc_sel, timeout=10000)
+            with contextlib.suppress(Exception):
+                await page.fill(desc_sel, nome)
+            tp = await page.evaluate(
+                _JS_SELECT_OPT, [f"{_MOV_FORM}:arquivosSalvar:0:tipoArquivo", tipo_arquivo, False])
+            if not tp.get("ok"):
+                _log.warning("mov anexo: tipo %r não achado (opts=%s)", tipo_arquivo, tp.get("opts"))
+            # botão "Anexar" da linha
+            with contextlib.suppress(Exception):
+                await page.locator(
+                    'button[name^="%s:arquivosSalvar"]' % _MOV_FORM, has_text="Anexar").first.click()
+            await _wait_pf_ajax(page)
+            await page.wait_for_timeout(500)
+            anexados.append(nome)
+            _log.info("mov anexo incluído: %s (tipo=%s)", nome, tipo_arquivo)
+        except Exception as e:  # noqa: BLE001
+            _log.warning("mov falha ao anexar %s: %r", nome, e)
+    # fecha o popup (Fechar; se persistir, força PF.hide/Escape — um anexo problemático
+    # NÃO pode deixar o modal aberto e bloquear o clique em "Movimentar")
+    with contextlib.suppress(Exception):
+        fechar = page.locator('button[name^="%s:"]' % _MOV_FORM, has_text="Fechar").first
+        if await fechar.is_visible():
+            await fechar.click()
+            await page.wait_for_timeout(400)
+    with contextlib.suppress(Exception):
+        aberto = await page.evaluate(
+            """()=>{const d=document.getElementById('%s:dlgModalArquivos');
+                if(!d)return false;const s=getComputedStyle(d);const r=d.getBoundingClientRect();
+                return s.display!=='none'&&r.width>0;}""" % _MOV_FORM)
+        if aberto:
+            await page.evaluate(
+                "()=>{try{PF('dlgModalArquivosWidget').hide();}catch(e){} "
+                "for(const w in (PrimeFaces.widgets||{})){try{if(/dlgModalArquivos/i.test(w))PrimeFaces.widgets[w].hide();}catch(e){}}}")
+            await page.wait_for_timeout(300)
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(200)
+    return anexados
+
+
+async def movimentar_paj(
+    pajs: list[dict],
+    descricao: str,
+    fase: str = _FASE_MENSAGEM_ASSISTIDO,
+    anexos: list[dict] | None = None,
+    tipo_arquivo: str = _TIPO_ARQUIVO_MOV_PADRAO,
+    dry_run: bool = False,
+    descricao_html: bool = False,
+) -> dict:
+    """Registra uma MOVIMENTAÇÃO (novo sequencial) em um ou vários PAJs.
+
+    pajs: [{"id": <id_processo>, "numero": "AAAA/UUU-NNNNN"}, ...] (bloco = mesma unidade).
+    fase: fase da movimentação (default 'Mensagem ao assistido'). descricao: texto livre.
+    anexos: [{"nome","caminho","tipo"}] opcionais (tipo de arquivo no SISDPU = `tipo_arquivo`).
+    Retorna {ok, status, detalhe, pajs}. status: 'movimentado' | 'dry_run' | 'falha'.
+    A movimentação é gravada no clique em 'Movimentar' (o popup 'Deseja tramitar?' é
+    posterior/opcional → respondemos 'Não')."""
+    pajs = [p for p in (pajs or []) if p and p.get("id")]
+    if not pajs:
+        return {"ok": False, "status": "falha", "detalhe": "Nenhum PAJ informado."}
+    numeros = [p.get("numero", "") for p in pajs]
+    _log.info("movimentar_paj(%s) fase=%r dry=%s", numeros, fase, dry_run)
+
+    await _ensure_logged_in()
+    page = await _get_page()
+    url = (f"{SISDPU_URL}/pages/movimentacao/movimentaProcesso.xhtml"
+           f"?id={pajs[0]['id']}&caixaEntrada=false")
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(400)
+    if not await _resolver_conflito_login(page):
+        return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
+
+    # bloco: adiciona os demais PAJs por número
+    for extra in pajs[1:]:
+        if extra.get("numero"):
+            await _adicionar_paj_por_numero(page, _MOV_FORM, f"{_MOV_FORM}:add", extra["numero"])
+    lista = await _ler_pajs_lista(page, f"{_MOV_FORM}:processosSelecionados_input")
+    faltando = [n for n in numeros if n and n not in lista]
+    if faltando:
+        return {"ok": False, "status": "falha",
+                "detalhe": (f"PAJ(s) não entraram na lista de movimentação: {faltando} "
+                            f"(lista={lista}). Possível restrição de unidade no bloco.")}
+
+    # fase: garante 'Todas as fases' e seleciona a fase alvo
+    await page.evaluate(_JS_MARCAR_TODAS_FASES)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(700)
+    fr = await page.evaluate(_JS_SELECT_OPT, [f"{_MOV_FORM}:faseId", fase, False])
+    if not fr.get("ok"):
+        return {"ok": False, "status": "falha",
+                "detalhe": f"Fase {fase!r} não encontrada no SISDPU."}
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(900)
+    nfases = await page.eval_on_selector_all(
+        _sel(f"{_MOV_FORM}:dataTableFasesSelecionadas") + " tbody tr",
+        "els=>els.filter(e=>!/Nenhum registro/i.test(e.innerText)).length")
+    if not nfases:
+        return {"ok": False, "status": "falha", "detalhe": "Fase não foi adicionada à movimentação."}
+
+    # descrição (CKEditor); descricao_html=True usa HTML cru (listas/parágrafos)
+    await page.evaluate(_JS_SET_CKEDITOR,
+                        [descricao, f"{_MOV_FORM}:editorValue", f"{_MOV_FORM}_editorValue",
+                         bool(descricao_html)])
+
+    # anexos (opcional) — antes de Movimentar
+    anexados: list[str] = []
+    if anexos and not dry_run:
+        anexados = await _anexar_documentos_movimentacao(page, anexos, tipo_arquivo)
+
+    if dry_run:
+        return {"ok": True, "status": "dry_run",
+                "detalhe": f"[dry_run] Movimentaria {numeros} (fase {fase!r}).", "pajs": numeros}
+
+    # clica "Movimentar" (grava o registro)
+    with contextlib.suppress(Exception):
+        await page.get_by_role("button", name="Movimentar", exact=True).first.click()
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(900)
+    # Confirma sucesso PELO GROWL AGORA — ANTES de dispensar o popup 'Deseja tramitar?',
+    # pois clicar 'Não' pode NAVEGAR para o detalhamento (onde o growl não existe mais).
+    body = await page.evaluate("()=>document.body.innerText||''")
+    ok = bool(re.search(r"gravad[oa] com sucesso", body, re.I))
+    # popup pós-commit 'Deseja tramitar?' → Não (best-effort)
+    for d in await _dialogos_visiveis(page):
+        if "tramitar" in _norm_nome(d.get("msg", "")).lower():
+            with contextlib.suppress(Exception):
+                await page.locator(_sel(f"{_MOV_FORM}:confirmDialogTramitacao") + ' button', has_text="Não").first.click()
+                await page.wait_for_timeout(600)
+            break
+    # Fallback: se não peguei o growl mas a página navegou ao detalhamento (o que só
+    # ocorre APÓS gravar), considera sucesso.
+    if not ok and "detalhamentoProcesso" in page.url:
+        ok = True
+    detalhe = "Movimentação registrada com sucesso." if ok else "Não confirmei a movimentação (sem growl de sucesso)."
+    if anexados:
+        detalhe += f" Anexos: {', '.join(anexados)}."
+    if not ok:
+        with contextlib.suppress(Exception):
+            diag = await _dialogos_visiveis(page)
+            _log.warning("movimentar_paj: sem growl; dialogs=%s url=%s", diag, page.url)
+    # lê o nº de sequência da movimentação recém-criada (maior seq do detalhamento)
+    mov_seq = await _ler_seq_notificacao(page, pajs[0]["id"]) if ok else None
+    if ok and mov_seq is not None:
+        detalhe += f" · Mov {mov_seq}"
+    return {"ok": ok, "status": "movimentado" if ok else "falha",
+            "detalhe": detalhe, "pajs": numeros, "anexos": anexados, "mov_seq": mov_seq}
+
+
+async def tramitar_paj(
+    pajs: list[dict],
+    grupo: str | None = None,
+    usuarios: list[str] | None = None,
+    descricao: str | None = None,
+    prazo_data: str | None = None,
+    prazo_desc: str | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Registra uma TRAMITAÇÃO (Trâmite Interno) de um ou vários PAJs para um GRUPO
+    da unidade e/ou USUÁRIO(s) da unidade.
+
+    pajs: [{"id","numero"}, ...] (bloco = mesma unidade).
+    grupo: nome (ou trecho) da caixa de grupo destino (ex.: '01 - PREV_TESTES').
+    usuarios: lista de nomes (trecho) de usuários destino (picklist).
+    descricao: descrição do trâmite (opcional, máx 1000). prazo_data: 'DD/MM/AAAA'
+    (opcional). prazo_desc: descrição do prazo (opcional, máx 300).
+    Retorna {ok, status, detalhe, pajs}. status: 'tramitado' | 'dry_run' | 'falha'.
+    Confirmamos SEM movimentar (clique em 'Não' no popup 'Também deseja movimentar?')."""
+    pajs = [p for p in (pajs or []) if p and p.get("id")]
+    if not pajs:
+        return {"ok": False, "status": "falha", "detalhe": "Nenhum PAJ informado."}
+    if not grupo and not usuarios:
+        return {"ok": False, "status": "falha", "detalhe": "Informe um grupo ou usuário(s) destino."}
+    numeros = [p.get("numero", "") for p in pajs]
+    _log.info("tramitar_paj(%s) grupo=%r usuarios=%s dry=%s", numeros, grupo, usuarios, dry_run)
+
+    await _ensure_logged_in()
+    page = await _get_page()
+    url = (f"{SISDPU_URL}/pages/tramite/tramitaProcesso.xhtml"
+           f"?id={pajs[0]['id']}&idTramite=0")
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(400)
+    if not await _resolver_conflito_login(page):
+        return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO}
+
+    for extra in pajs[1:]:
+        if extra.get("numero"):
+            await _adicionar_paj_por_numero(page, _TRAM_FORM, f"{_TRAM_FORM}:Adicionar", extra["numero"])
+    lista = await _ler_pajs_lista(page, f"{_TRAM_FORM}:pajs_input")
+    faltando = [n for n in numeros if n and n not in lista]
+    if faltando:
+        return {"ok": False, "status": "falha",
+                "detalhe": (f"PAJ(s) não entraram na lista de tramitação: {faltando} "
+                            f"(lista={lista}). Possível restrição de unidade no bloco.")}
+
+    # Trâmite Interno (radio value=1) — normalmente já é o default
+    with contextlib.suppress(Exception):
+        await page.evaluate(r"""()=>{const r=document.querySelector('input[name="form_tramite:j_idt125"][value="1"]');
+            if(r&&!r.checked){const box=r.closest('.ui-radiobutton').querySelector('.ui-radiobutton-box'); box&&box.click();}}""")
+        await _wait_pf_ajax(page)
+
+    destino = []
+    # grupo
+    if grupo:
+        g = await page.evaluate(_JS_SELECT_OPT, [f"{_TRAM_FORM}:grupoDestinatarioLocal", grupo, False])
+        if not g.get("ok"):
+            return {"ok": False, "status": "falha",
+                    "detalhe": f"Grupo {grupo!r} não encontrado (opções={g.get('opts')})."}
+        destino.append(f"grupo {g['txt']!r}")
+        await _wait_pf_ajax(page)
+        await page.wait_for_timeout(500)
+    # usuários (picklist: double-click no item da lista de origem)
+    for nome in (usuarios or []):
+        with contextlib.suppress(Exception):
+            item = page.locator(
+                _sel(f"{_TRAM_FORM}:pickList") + ' .ui-picklist-source li').filter(has_text=nome).first
+            await item.dblclick(timeout=5000)
+            await _wait_pf_ajax(page)
+        destino.append(f"usuário {nome!r}")
+
+    # descrição do trâmite
+    if descricao:
+        with contextlib.suppress(Exception):
+            await page.fill(_sel(f"{_TRAM_FORM}:descTramite"), descricao)
+    # prazo
+    if prazo_data:
+        with contextlib.suppress(Exception):
+            await page.fill(_sel(f"{_TRAM_FORM}:dataPrazo_input"), prazo_data)
+    if prazo_desc:
+        with contextlib.suppress(Exception):
+            # a descrição do prazo é a textarea de maxlength=300 (id volátil j_idtNNN)
+            await page.evaluate(r"""(txt)=>{const ta=[...document.querySelectorAll('textarea')].find(t=>t.getAttribute('maxlength')==='300');
+                if(ta){ta.value=txt; ta.dispatchEvent(new Event('input',{bubbles:true}));}}""", prazo_desc)
+
+    if dry_run:
+        return {"ok": True, "status": "dry_run",
+                "detalhe": f"[dry_run] Tramitaria {numeros} → {', '.join(destino)}.", "pajs": numeros}
+
+    # Confirma a tramitação: exibe o diálogo 'Também deseja movimentar?' e clica 'Não'.
+    # O gatilho confiável é PF(...).show() (o onclick do botão 'Tramitar' faz exatamente
+    # isso: window.onbeforeunload=null; PF(widget).show(); return false). Evita depender
+    # do id volátil do botão.
+    with contextlib.suppress(Exception):
+        await page.evaluate(
+            "()=>{window.onbeforeunload=null; try{PF('confirmationDialogTramitarProcessoJudicialWidget').show();}catch(e){}}")
+    await page.wait_for_timeout(700)
+    dlgs = await _dialogos_visiveis(page)
+    if not any("movimentar" in _norm_nome(d.get("msg", "")).lower() for d in dlgs):
+        # fallback: clica o botão 'Tramitar' por texto
+        with contextlib.suppress(Exception):
+            await page.get_by_role("button", name="Tramitar", exact=True).first.click(timeout=5000)
+        await page.wait_for_timeout(700)
+        dlgs = await _dialogos_visiveis(page)
+    if not any("movimentar" in _norm_nome(d.get("msg", "")).lower() for d in dlgs):
+        _log.warning("tramitar_paj: diálogo não apareceu; dialogs vistos=%s url=%s", dlgs, page.url)
+        return {"ok": False, "status": "falha",
+                "detalhe": "Diálogo de confirmação da tramitação não apareceu."}
+    with contextlib.suppress(Exception):
+        await page.locator(_sel(f"{_TRAM_FORM}:NaoTramitarProcessoJudicial")).click(timeout=5000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(1000)
+    body = await page.evaluate("()=>document.body.innerText||''")
+    ok = bool(re.search(r"tramitad[oa]s?.*sucesso", body, re.I)) or "historicoTramitacao" in page.url
+    detalhe = (f"Tramitação registrada para {', '.join(destino)}." if ok
+               else "Não confirmei a tramitação (sem growl de sucesso).")
+    return {"ok": ok, "status": "tramitado" if ok else "falha", "detalhe": detalhe, "pajs": numeros}
+
+
+async def listar_grupos_unidade(id_processo: str | None = None) -> list[str]:
+    """Lê a lista de caixas de GRUPO da unidade (opções do dropdown 'Tramitar para Grupo
+    da Unidade' da tela Tramitar PAJ). Retorna os nomes (sem 'Selecione...'). Usa a tela
+    de tramitação; se `id_processo` for informado abre com ele (mais estável), senão a
+    tela em modo bloco."""
+    await _ensure_logged_in()
+    page = await _get_page()
+    url = f"{SISDPU_URL}/pages/tramite/tramitaProcesso.xhtml"
+    if id_processo:
+        url += f"?id={id_processo}&idTramite=0"
+    await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(300)
+    grupos = await page.evaluate(
+        """()=>{const s=document.getElementById('form_tramite:grupoDestinatarioLocal');
+            return s?[...s.options].map(o=>o.text.trim()).filter(t=>t && !/^selecione/i.test(t)):[];}""")
+    _log.info("listar_grupos_unidade: %d grupos", len(grupos or []))
+    return grupos or []
 
 
 async def movimentacoes_paj(numero: str, ano: str, unidade: str = "44") -> dict:

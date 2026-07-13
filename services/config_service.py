@@ -163,6 +163,28 @@ def set_n_movimentacoes(n: int) -> int:
     return d["n_movimentacoes"]
 
 
+# ---------------- prazo padrão de conclusão da tramitação ----------------
+PRAZO_TRAMITACAO_PADRAO_DIAS = 15  # usado quando o envio não informou prazo
+
+
+def get_prazo_tramitacao_padrao() -> int:
+    """Prazo (dias) para 'Nova conclusão em' da tramitação quando o envio NÃO
+    informou prazo. Configurável; padrão 15. Entre 1 e 365 dias."""
+    n = ler_config().get("prazo_tramitacao_padrao", PRAZO_TRAMITACAO_PADRAO_DIAS)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = PRAZO_TRAMITACAO_PADRAO_DIAS
+    return max(1, min(n, 365))
+
+
+def set_prazo_tramitacao_padrao(n: int) -> int:
+    d = ler_config()
+    d["prazo_tramitacao_padrao"] = max(1, min(int(n), 365))
+    _gravar(d)
+    return d["prazo_tramitacao_padrao"]
+
+
 # ---------------- concorrência da análise IA ----------------
 def get_analise_concorrencia() -> int:
     n = ler_config().get("analise_concorrencia", ANALISE_CONCORRENCIA_PADRAO)
@@ -321,6 +343,53 @@ def set_whatsapp_intervalo_seg(seg: int) -> int:
     d["whatsapp_intervalo_seg"] = n
     _gravar(d)
     return n
+
+
+def get_grupos_unidade() -> list:
+    """Cache das caixas de GRUPO da unidade (opções do dropdown de tramitação).
+    Preenchido sob demanda a partir do SISDPU (ver rota /api/grupos-unidade)."""
+    g = ler_config().get("grupos_unidade")
+    return list(g) if isinstance(g, list) else []
+
+
+def set_grupos_unidade(grupos: list) -> list:
+    d = ler_config()
+    d["grupos_unidade"] = [str(x) for x in (grupos or []) if str(x).strip()]
+    _gravar(d)
+    return d["grupos_unidade"]
+
+
+# Máximo de caixas favoritas exibidas como selos no modal Gravar (pedido do usuário: 3).
+GRUPOS_FAVORITOS_MAX = 3
+
+
+def get_grupos_favoritos() -> list:
+    """Caixas de grupo FAVORITAS (até GRUPOS_FAVORITOS_MAX) exibidas como selos de
+    atalho no modal 'Gravar para envio', além do dropdown com todas."""
+    g = ler_config().get("grupos_favoritos")
+    return [str(x) for x in g if str(x).strip()][:GRUPOS_FAVORITOS_MAX] if isinstance(g, list) else []
+
+
+def add_grupo_favorito(nome: str) -> list:
+    nome = (nome or "").strip()
+    d = ler_config()
+    atuais = [str(x) for x in (d.get("grupos_favoritos") or []) if str(x).strip()]
+    if nome and nome not in atuais:
+        if len(atuais) >= GRUPOS_FAVORITOS_MAX:
+            return atuais  # já atingiu o limite — não adiciona (front avisa)
+        atuais.append(nome)
+    d["grupos_favoritos"] = atuais
+    _gravar(d)
+    return atuais
+
+
+def del_grupo_favorito(nome: str) -> list:
+    nome = (nome or "").strip()
+    d = ler_config()
+    atuais = [str(x) for x in (d.get("grupos_favoritos") or []) if str(x).strip() and str(x) != nome]
+    d["grupos_favoritos"] = atuais
+    _gravar(d)
+    return atuais
 
 
 def resumo_modos() -> str:

@@ -141,7 +141,9 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Quantidade de movimentações a analisar</h2>
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências para análise da IA</h2>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Quantidade de movimentações a analisar</h3>
         <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
             Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas à IA
             na <strong>sincronização inicial</strong> do PAJ. Todas as movimentações continuam
@@ -158,10 +160,10 @@
             <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
         </div>
         <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
-    </div>
 
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Análises de IA em paralelo</h2>
+        <div class="grava-sep" style="margin:18px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Análises de IA em paralelo</h3>
         <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
             Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
             Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
@@ -174,6 +176,87 @@
             <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
         </div>
         <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configurações de mensagens por WhatsApp</h2>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Intervalo entre mensagens</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Intervalo <strong>mínimo</strong> (em segundos) entre mensagens no envio <strong>em lote</strong> pelo WhatsApp —
+            imita o ritmo humano e <strong>reduz o risco de banimento</strong> da conta. Mínimo 5s (recomendado ≥ 20s).
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="number" id="wa-intervalo" class="wa-input" style="width:90px;" min="5" max="600" value="{{ whatsapp_intervalo }}">
+            <span class="text-secondary" style="font-size:13px;">segundos</span>
+            <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
+            <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Prazos pré-definidos para mensagens</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Botões de atalho oferecidos ao gravar o envio (ao lado do campo <strong>Prazo (dias)</strong>), para cada meio.
+            O prazo padrão do campo (5 dias) e o badge <strong>⚡ Urgente</strong> (prioridade máxima na fila) já são fixos.
+        </p>
+        <div id="prazos-lista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+            {% for p in prazos_predefinidos %}
+            <span class="prazo-chip">{{ p }} dias
+                <button title="Remover" onclick="delPrazoPredef({{ p }})">✕</button></span>
+            {% endfor %}
+            {% if not prazos_predefinidos %}<span class="text-tertiary" style="font-size:13px;">Nenhum prazo pré-definido.</span>{% endif %}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label for="novo-prazo" style="font-size:14px;">Novo prazo (dias):</label>
+            <input type="number" id="novo-prazo" class="wa-input" style="width:90px;" min="1" placeholder="ex.: 20">
+            <button class="btn-accent" onclick="addPrazoPredef()">Adicionar</button>
+            <span id="prazo-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências de tramitação</h2>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Prazo padrão para a tramitação</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 12px;">
+            Preenche o campo <em>"Nova conclusão em"</em> quando <strong>não for informado um prazo na mensagem</strong>.
+            Quando há prazo, a data de conclusão é <strong>hoje + o prazo do envio</strong> (urgente = hoje + 1 dia).
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:20px;">
+            <label for="prazo-tram-padrao" style="font-size:14px;">Prazo padrão (dias):</label>
+            <input type="number" id="prazo-tram-padrao" class="wa-input" style="width:90px;"
+                   min="1" max="365" value="{{ prazo_tramitacao_padrao }}">
+            <button class="btn-accent" onclick="savePrazoTramPadrao()">Salvar</button>
+            <span id="prazo-tram-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+
+        <div class="grava-sep" style="margin:4px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Caixas de grupo favoritas</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Até <strong>{{ grupos_favoritos_max }}</strong> caixas de atalho: ao marcar <strong>Tramitação</strong> no
+            <em>Gravar para envio</em>, elas aparecem como selos clicáveis ao lado do dropdown (que continua com todas).
+        </p>
+        <div id="grupos-fav-lista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+            {% for g in grupos_favoritos %}
+            <span class="prazo-chip" data-grupo="{{ g }}">{{ g }}
+                <button title="Remover" onclick="delGrupoFav(this.parentNode.dataset.grupo)">✕</button></span>
+            {% endfor %}
+            <span id="grupos-fav-vazio" class="text-tertiary" style="font-size:13px;{% if grupos_favoritos %}display:none;{% endif %}">Nenhuma caixa favorita.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label for="novo-grupo-fav" style="font-size:14px;">Caixa:</label>
+            <select id="novo-grupo-fav" class="grava-tramitar-sel">
+                <option value="">— selecione uma caixa —</option>
+                {% for g in grupos_unidade %}<option value="{{ g }}">{{ g }}</option>{% endfor %}
+            </select>
+            <button class="btn-accent" onclick="addGrupoFav()">Adicionar favorita</button>
+            <span id="grupo-fav-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        {% if not grupos_unidade %}
+        <p class="text-tertiary" style="font-size:12px;margin:10px 0 0;">A lista de caixas ainda não foi carregada. Abra o modal "Gravar para envio" uma vez (ou sincronize) para o painel buscar as caixas do SISDPU.</p>
+        {% endif %}
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
@@ -195,41 +278,6 @@
         </div>
         {% endfor %}
         <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Vale imediatamente no próximo envio (sem reiniciar).</p>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">WhatsApp — intervalo entre mensagens</h2>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
-            Intervalo <strong>mínimo</strong> (em segundos) entre mensagens no envio <strong>em lote</strong> pelo WhatsApp —
-            imita o ritmo humano e <strong>reduz o risco de banimento</strong> da conta. Mínimo 5s (recomendado ≥ 20s).
-        </p>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <input type="number" id="wa-intervalo" class="wa-input" style="width:90px;" min="5" max="600" value="{{ whatsapp_intervalo }}">
-            <span class="text-secondary" style="font-size:13px;">segundos</span>
-            <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
-            <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Prazos de resposta pré-definidos</h2>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
-            Botões de atalho oferecidos ao gravar o envio (ao lado do campo <strong>Prazo (dias)</strong>), para cada meio.
-            O prazo padrão do campo (5 dias) e o badge <strong>⚡ Urgente</strong> (prioridade máxima na fila) já são fixos.
-        </p>
-        <div id="prazos-lista" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
-            {% for p in prazos_predefinidos %}
-            <span class="prazo-chip">{{ p }} dias
-                <button title="Remover" onclick="delPrazoPredef({{ p }})">✕</button></span>
-            {% endfor %}
-            {% if not prazos_predefinidos %}<span class="text-tertiary" style="font-size:13px;">Nenhum prazo pré-definido.</span>{% endif %}
-        </div>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <label for="novo-prazo" style="font-size:14px;">Novo prazo (dias):</label>
-            <input type="number" id="novo-prazo" class="wa-input" style="width:90px;" min="1" placeholder="ex.: 20">
-            <button class="btn-accent" onclick="addPrazoPredef()">Adicionar</button>
-            <span id="prazo-status" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
@@ -606,6 +654,30 @@ async function delPrazoPredef(v){
     const r=await fetch('/api/config/prazos-predefinidos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valor:v})});
     const d=await r.json();
     if(d.ok){ toast('Prazo removido'); location.reload(); }
+}
+async function savePrazoTramPadrao(){
+    const el=document.getElementById('prazo-tram-padrao');
+    const st=document.getElementById('prazo-tram-status');
+    const dias=parseInt(el.value,10);
+    if(!Number.isInteger(dias) || dias<1 || dias>365){ st.textContent='Informe de 1 a 365 dias.'; return; }
+    const r=await fetch('/api/config/prazo-tramitacao-padrao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dias})});
+    const d=await r.json();
+    if(d.ok){ el.value=d.dias; st.textContent=''; toast('Prazo padrão salvo ('+d.dias+' dias)'); }
+    else { st.textContent='Falha ao salvar.'; }
+}
+async function addGrupoFav(){
+    const el=document.getElementById('novo-grupo-fav'); const g=el.value;
+    const st=document.getElementById('grupo-fav-status');
+    if(!g){ st.textContent='Selecione uma caixa.'; return; }
+    const r=await fetch('/api/config/grupos-favoritos',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo:g})});
+    const d=await r.json();
+    if(d.ok && d.cheio){ st.textContent='Limite de '+d.max+' favoritas atingido. Remova uma antes.'; return; }
+    if(d.ok){ toast('Caixa favorita adicionada'); location.reload(); } else { st.textContent='Falha ao adicionar.'; }
+}
+async function delGrupoFav(g){
+    const r=await fetch('/api/config/grupos-favoritos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo:g})});
+    const d=await r.json();
+    if(d.ok){ toast('Caixa favorita removida'); location.reload(); }
 }
 async function toggleCaixa(grupo, on){
     const r=await fetch('/api/config/caixa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo,on})});

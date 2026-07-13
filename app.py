@@ -108,6 +108,7 @@ def _data_hora_br(valor) -> str:
 
 app.state.jinja.filters["data_br"] = _data_br
 app.state.jinja.filters["data_hora_br"] = _data_hora_br
+app.state.jinja.filters["data_hora_br"] = _data_hora_br
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(dashboard_router)
 app.include_router(configuracoes_router)

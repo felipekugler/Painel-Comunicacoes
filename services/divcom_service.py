@@ -29,6 +29,7 @@ from pathlib import Path
 
 from ingestao import sisdpu_client
 from services import analise_service, config_service
+from services.texto_util import colapsar_paragrafos, remover_emojis
 
 BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL DIVCOM/Projeto
 # Dados sincronizados FORA da pasta Projeto (ao lado dela).
@@ -315,7 +316,7 @@ def definir_sugestao(slug: str, paj_norm: str, id_tramite: str, texto: str,
     s = _achar_solic(box, id_tramite)
     if not s:
         return {}
-    s["sugestao_editada"] = (texto or "").strip()
+    s["sugestao_editada"] = colapsar_paragrafos(remover_emojis(texto))  # só texto — sem emojis
     if tipo is not None:
         s["sugestao_tipo_editada"] = (tipo or "").strip()
     _gravar_box(slug, box)
@@ -345,12 +346,14 @@ def _prazos_envio(prazos: dict | None) -> dict:
 
 def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
                       meios: list[str], somente_leitura: bool = False,
-                      prazos: dict | None = None) -> dict:
+                      prazos: dict | None = None, tramitar_grupo: str | None = None) -> dict:
     """Grava UMA tramitação na fila de envio (sai de "pendentes" e entra em
     "gravados para envio"). Guarda a mensagem a disparar e os meios escolhidos.
     `somente_leitura` (App SISDPU): o assistido só lê a notificação, não responde.
     `prazos` (dict por meio {app_sisdpu, whatsapp, email}): prazo de resposta em
-    dias de cada meio (>=1, padrão 5); armazenados como prazo_app/whatsapp/email."""
+    dias de cada meio (>=1, padrão 5); armazenados como prazo_app/whatsapp/email.
+    `tramitar_grupo`: se informado, o PAJ é tramitado p/ essa caixa de grupo APÓS
+    envio + movimentação bem-sucedidos ('' ou None = não tramitar)."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
     if not box:
@@ -361,9 +364,10 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
     meios = [m for m in (meios or []) if m in envio_service.MEIOS]
     s["envio"] = {
         "status": "gravado",
-        "mensagem": (mensagem or "").strip(),
+        "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
         "meios": meios,
         "somente_leitura": bool(somente_leitura),
+        "tramitar_grupo": (tramitar_grupo or "").strip(),
         **_prazos_envio(prazos),
         "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
@@ -767,17 +771,22 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["atribuicao"] = sol.get("atribuicao", "")
     d["url_detalhe"] = sol.get("url_detalhe", "")
     # análise por tramitação
-    d["resumo_ia"] = sol.get("resumo_ia", "")
+    # colapsa parágrafos vazios (sem linha em branco entre as linhas) — vale também
+    # p/ análises antigas em cache que ainda tinham \n\n gravado.
+    d["resumo_ia"] = colapsar_paragrafos(sol.get("resumo_ia", ""))
     # A classificação MANUAL (via dropdown de texto padrão) prevalece sobre a da IA.
     d["sugestao_tipo"] = sol.get("sugestao_tipo_editada") or sol.get("sugestao_tipo", "")
     d["sugestao_editada"] = sol.get("sugestao_editada", "")
-    d["sugestao_atual"] = sol.get("sugestao_editada") or sol.get("sugestao_ia") or ""
+    d["sugestao_atual"] = colapsar_paragrafos(sol.get("sugestao_editada") or sol.get("sugestao_ia") or "")
+    # aviso de dados padrão não identificados → destacar em vermelho (conferência manual)
+    d["sugestao_alerta"] = analise_service.precisa_conferencia_manual(d["sugestao_atual"])
     # fila de envio por tramitação
     envio = sol.get("envio") or {}
     d["envio_status"] = envio.get("status", "")
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
     d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
+    d["envio_tramitar_grupo"] = envio.get("tramitar_grupo", "") or ""
     d["envio_prazo_app"] = envio.get("prazo_app", envio.get("prazo_dias", 5))  # fallback legado
     d["envio_prazo_whatsapp"] = envio.get("prazo_whatsapp", 5)
     d["envio_prazo_email"] = envio.get("prazo_email", 5)
@@ -938,16 +947,20 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["data_envio_key"] = _data_key(prim.get("data_envio", ""))
     d["prazo"] = next((s.get("prazo") for s in sols if s.get("prazo")), "")
     d["datas_tramites"] = [s.get("data_envio", "") for s in sols]
+    d["remetentes_tramites"] = [s.get("remetente", "") for s in sols]
     d["descricoes_tramites"] = [s.get("descricao_tramite", "") for s in sols]
-    d["resumo_ia"] = conj.get("resumo_ia", "")
+    d["resumo_ia"] = colapsar_paragrafos(conj.get("resumo_ia", ""))
     d["sugestao_tipo"] = conj.get("sugestao_tipo_editada", "")  # conjunto só tem classificação MANUAL
     d["sugestao_editada"] = conj.get("sugestao_editada", "")
-    d["sugestao_atual"] = conj.get("sugestao_editada") or conj.get("sugestao_ia") or ""
+    d["sugestao_atual"] = colapsar_paragrafos(conj.get("sugestao_editada") or conj.get("sugestao_ia") or "")
+    # aviso de dados padrão não identificados → destacar em vermelho (conferência manual)
+    d["sugestao_alerta"] = analise_service.precisa_conferencia_manual(d["sugestao_atual"])
     envio = conj.get("envio") or {}
     d["envio_status"] = envio.get("status", "")
     d["envio_mensagem"] = envio.get("mensagem", "")
     d["envio_meios"] = envio.get("meios", []) or []
     d["envio_somente_leitura"] = bool(envio.get("somente_leitura"))
+    d["envio_tramitar_grupo"] = envio.get("tramitar_grupo", "") or ""
     d["envio_prazo_app"] = envio.get("prazo_app", envio.get("prazo_dias", 5))  # fallback legado
     d["envio_prazo_whatsapp"] = envio.get("prazo_whatsapp", 5)
     d["envio_prazo_email"] = envio.get("prazo_email", 5)
@@ -1133,7 +1146,8 @@ def desfazer_triagem(slug: str, paj_norm: str) -> dict:
 
 
 def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
-                    somente_leitura: bool = False, prazos: dict | None = None) -> dict:
+                    somente_leitura: bool = False, prazos: dict | None = None,
+                    tramitar_grupo: str | None = None) -> dict:
     """Grava o CONJUNTO de um PAJ na fila de envio."""
     from services import envio_service
     box = _ler_box(slug, paj_norm)
@@ -1141,8 +1155,9 @@ def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
         return {}
     meios = [m for m in (meios or []) if m in envio_service.MEIOS]
     box["conjunto"]["envio"] = {
-        "status": "gravado", "mensagem": (mensagem or "").strip(),
+        "status": "gravado", "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
         "meios": meios, "somente_leitura": bool(somente_leitura),
+        "tramitar_grupo": (tramitar_grupo or "").strip(),
         **_prazos_envio(prazos),
         "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
     }
@@ -1189,7 +1204,7 @@ def definir_sugestao_conjunto(slug: str, paj_norm: str, texto: str,
     box = _ler_box(slug, paj_norm)
     if not box or not box.get("conjunto"):
         return {}
-    box["conjunto"]["sugestao_editada"] = (texto or "").strip()
+    box["conjunto"]["sugestao_editada"] = colapsar_paragrafos(remover_emojis(texto))  # só texto — sem emojis
     if tipo is not None:
         box["conjunto"]["sugestao_tipo_editada"] = (tipo or "").strip()
     _gravar_box(slug, box)
@@ -1233,6 +1248,23 @@ async def _triagem_ctx():
             yield
     finally:
         _triagem_ativas -= 1
+
+
+@contextlib.asynccontextmanager
+async def _entrar_exclusivo_fila(timeout: float = 600.0):
+    """Como o grupo exclusivo (_sync_lock), mas ENFILEIRA (aguarda a vez) em vez de
+    recusar. `asyncio.Lock` acorda os que esperam em ordem FIFO → vira uma fila justa.
+    Usado no envio INDIVIDUAL de WhatsApp: se já há um envio/sync em andamento, o novo
+    espera e roda em seguida, em vez de falhar com 'operação em andamento'. Após pegar
+    o lock, drena triagens em voo (novas não iniciam enquanto o lock está preso)."""
+    await _sync_lock.acquire()
+    try:
+        inicio = time.monotonic()
+        while _triagem_ativas > 0 and (time.monotonic() - inicio) < timeout:
+            await asyncio.sleep(0.2)
+        yield
+    finally:
+        _sync_lock.release()
 
 
 # ---------- triagem como TAREFA DE FUNDO (sobrevive à navegação do usuário) ----------
@@ -1921,6 +1953,156 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     yield {"_status": status}
 
 
+def _log_passo(log: list, etapa: str, ok: bool | None, detalhe: str) -> None:
+    """Anexa um passo ao log individual do envio (usado na coluna LOG do histórico)."""
+    log.append({
+        "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+        "etapa": etapa,
+        "ok": (None if ok is None else bool(ok)),
+        "detalhe": str(detalhe or "")[:600],
+    })
+
+
+def _montar_descricao_mov(meio_label: str, mensagem: str, numero: str,
+                          prazo: int | None, nomes: list[str], tramitar_grupo: str) -> str:
+    """Monta a descrição HTML PADRÃO da movimentação (título/negrito, conteúdo em
+    itálico, urgente em vermelho, anexos em bullets, comprovante + linha de tramitação).
+    Usada no envio E no 'refazer' — garante que a movimentação refeita seja IDÊNTICA."""
+    import html as _html
+    e = _html.escape
+    n_anx = len(nomes or [])
+    urgente = (prazo is None) or (int(prazo) <= 0)
+    prazo_txt = f"{int(prazo)} dias" if (prazo is not None and int(prazo) > 0) else "—"
+    urg_html = '<span style="color:#c00000;"><strong>Sim</strong></span>' if urgente else "Não"
+    cabecalho = "<br>".join([
+        "<strong>[Painel de Comunicações]</strong>",
+        f"Mensagem {e(meio_label)} enviada para: <strong>{e(numero or '—')}</strong>",
+        f"Conteúdo: <em>{e(mensagem)}</em>",
+        f"Prazo indicado: {e(prazo_txt)}",
+        f"Urgente: {urg_html}",
+        f"Anexos: {n_anx} {'item' if n_anx == 1 else 'itens'}",
+    ])
+    bullets = ("<ul>" + "".join(f"<li>{e(n)}</li>" for n in (nomes or [])) + "</ul>") if nomes else ""
+    tram_linha = (f"PAJ tramitado para <strong>{e(tramitar_grupo)}</strong>"
+                  if tramitar_grupo else "PAJ não tramitado")
+    return (f"<p>{cabecalho}</p>{bullets}"
+            f"<p>Comprovante de envio em anexo<br><br>{tram_linha}</p>")
+
+
+def _descricao_tramitacao(mov_seq) -> str:
+    """Descrição PADRÃO da tramitação feita pelo painel após a movimentação — referencia
+    a movimentação gerada (mov. "X"). Usada no envio e no 'refazer' (mesmo texto)."""
+    seq = str(mov_seq).strip() if mov_seq not in (None, "") else ""
+    ref = f' (mov. "{seq}")' if seq else ""
+    return f"Mensagem ao assistido enviada pelo Painel de Comunicações{ref}"
+
+
+def _prazo_tramitacao(prazo_envio) -> tuple[str, str]:
+    """Calcula a data de 'Nova conclusão em' da tramitação a partir do prazo (em
+    dias) informado no envio. Decisão do usuário:
+      - prazo > 0  -> hoje + prazo dias
+      - urgente(0) -> hoje + 1 dia
+      - sem prazo  -> hoje + padrão configurável (config_service, 15 dias)
+    Retorna (data 'DD/MM/AAAA', descrição do prazo). A data é sempre relativa ao
+    momento da tramitação (recalculada também no 'refazer')."""
+    try:
+        p = int(prazo_envio)
+    except (TypeError, ValueError):
+        p = None
+    if p is None:
+        dias = config_service.get_prazo_tramitacao_padrao()
+        desc = f"Aguardar retorno do assistido — prazo padrão de {dias} dias."
+    elif p <= 0:
+        dias = 1
+        desc = "Aguardar retorno do assistido — contato urgente."
+    else:
+        dias = p
+        desc = f"Aguardar retorno do assistido — prazo de {p} dia{'s' if p != 1 else ''}."
+    data = (_dt.date.today() + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
+    return data, desc
+
+
+async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
+                                  anexos_meta: list[dict], comprovante_caminho: str | None,
+                                  comp_nome: str, tramitar_grupo: str, log: list,
+                                  numero: str = "", prazo: int | None = None,
+                                  anexos_arquivos: list[dict] | None = None) -> dict:
+    """Após um envio bem-sucedido: (1) MOVIMENTA o PAJ documentando o envio (fase
+    'Mensagem ao assistido', descrição por template) anexando à movimentação OS MESMOS
+    ANEXOS da mensagem (`anexos_arquivos`, com caminho) MAIS o comprovante, todos como
+    'Correspondência'; e (2) se `tramitar_grupo` foi escolhido E a movimentação teve
+    êxito, TRAMITA o PAJ para essa caixa. Nunca levanta — captura tudo no `log`.
+    Retorna {mov_seq, mov_status, mov_detalhe, tram_caixa, tram_status, tram_detalhe}."""
+    from ingestao import sisdpu_client
+    from ingestao.sisdpu_client import SISDPU_URL
+    res = {"mov_seq": None, "mov_status": "falha", "mov_detalhe": "", "mov_url": "",
+           "tram_caixa": "", "tram_status": ("nao_solicitada" if not tramitar_grupo else "pendente"),
+           "tram_detalhe": "", "tram_url": "", "tram_descricao": ""}
+    id_proc = t.get("id") or ""
+    paj = t.get("paj", "")
+    if not id_proc:
+        res["mov_detalhe"] = "PAJ sem id de processo — movimentação não realizada."
+        _log_passo(log, "Movimentação", False, res["mov_detalhe"])
+        return res
+    # Descrição PADRÃO da movimentação (mesma no envio e no "refazer").
+    nomes = [a.get("nome", "") for a in (anexos_meta or []) if a.get("nome")]
+    descricao = _montar_descricao_mov(meio_label, mensagem, numero, prazo, nomes, tramitar_grupo)
+    res["mov_descricao"] = descricao  # guardado no histórico p/ permitir "refazer" idêntico
+    # Anexos da MOVIMENTAÇÃO = os MESMOS anexos da mensagem (documentos enviados ao
+    # assistido) + o comprovante do envio, todos como "Correspondência".
+    mov_anexos = []
+    for a in (anexos_arquivos or []):
+        cam = a.get("caminho") or ""
+        if cam and Path(cam).exists():
+            mov_anexos.append({"nome": a.get("nome") or Path(cam).name,
+                               "caminho": str(cam), "tipo": a.get("tipo") or ""})
+    if comprovante_caminho and Path(comprovante_caminho).exists():
+        mov_anexos.append({"nome": comp_nome or Path(comprovante_caminho).name,
+                           "caminho": str(comprovante_caminho), "tipo": "pdf"})
+    try:
+        mov = await sisdpu_client.movimentar_paj(
+            [{"id": id_proc, "numero": paj}], descricao, anexos=mov_anexos, descricao_html=True)
+    except Exception as e:  # noqa: BLE001
+        mov = {"ok": False, "status": "falha", "detalhe": f"exceção: {e}", "mov_seq": None}
+    res["mov_seq"] = mov.get("mov_seq")
+    res["mov_status"] = "movimentado" if mov.get("ok") else "falha"
+    res["mov_detalhe"] = mov.get("detalhe", "")
+    if mov.get("ok"):
+        res["mov_url"] = f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
+    _log_passo(log, "Movimentação do PAJ", mov.get("ok"), mov.get("detalhe", ""))
+    if mov_anexos:
+        nomes_anx = ", ".join(a["nome"] for a in mov_anexos)
+        _log_passo(log, "Juntada de anexos à movimentação", mov.get("ok"),
+                   (f"{len(mov_anexos)} anexo(s) como 'Correspondência': {nomes_anx}") if mov.get("ok")
+                   else "não anexado (movimentação falhou)")
+    if not mov.get("ok"):
+        if tramitar_grupo:
+            res["tram_status"] = "nao_realizada"
+            res["tram_detalhe"] = "Tramitação cancelada: movimentação não teve êxito."
+            _log_passo(log, "Tramitação do PAJ", False, res["tram_detalhe"])
+        return res
+    if tramitar_grupo:
+        tram_desc = _descricao_tramitacao(res["mov_seq"])
+        res["tram_descricao"] = tram_desc  # guardado no histórico (tooltip da coluna "Tramitado")
+        prazo_data, prazo_desc = _prazo_tramitacao(prazo)
+        try:
+            tram = await sisdpu_client.tramitar_paj(
+                [{"id": id_proc, "numero": paj}], grupo=tramitar_grupo,
+                descricao=tram_desc, prazo_data=prazo_data, prazo_desc=prazo_desc)
+        except Exception as e:  # noqa: BLE001
+            tram = {"ok": False, "status": "falha", "detalhe": f"exceção: {e}"}
+        res["tram_status"] = "tramitado" if tram.get("ok") else "falha"
+        res["tram_caixa"] = tramitar_grupo if tram.get("ok") else ""
+        res["tram_detalhe"] = tram.get("detalhe", "")
+        if tram.get("ok"):
+            res["tram_url"] = f"{SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
+        _log_passo(log, "Tramitação do PAJ", tram.get("ok"),
+                   f"→ {tramitar_grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+    else:
+        _log_passo(log, "Tramitação do PAJ", None, "não solicitada (nenhuma caixa escolhida no envio)")
+    return res
+
+
 async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                                   tipo: str = "tramite", headless: bool | None = None) -> dict:
     """Envio ASSISTIDO por WhatsApp de UMA tramitação OU conjunto (fora do lote).
@@ -1966,6 +2148,7 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                    a.get("arquivo", "")))} for a in anexos_meta]
 
     modo = config_service.get_envio_modo_meio("whatsapp")
+    tramitar_grupo = t.get("envio_tramitar_grupo", "") or ""
 
     # 3ª mensagem (prazo): sempre há prazo (0 = urgente). Enviada por último.
     prazo_wa = _prazo_ok(t.get("envio_prazo_whatsapp", 5))
@@ -1974,16 +2157,34 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
     else:
         msg_prazo = f"Prazo de {prazo_wa} dia{'s' if prazo_wa != 1 else ''}."
 
-    if not _pode_exclusivo():
-        return {"ok": False, "status": "falha",
-                "detalhe": "Há uma operação em andamento (sincronização/envio). Aguarde."}
-
     def _achar_alvo(box):
         if not box:
             return None
         return box.get("conjunto") if conjunto else _achar_solic(box, id_tramite)
 
-    async with _sync_lock:
+    # ENFILEIRA (aguarda a vez) em vez de recusar: se já há um envio/sync em andamento,
+    # este espera na fila (FIFO) e roda em seguida.
+    log: list = []
+    async with _entrar_exclusivo_fila():
+        # CHECAGEM PRÉVIA de conflito de sessão do SISDPU (modo real): evita ENVIAR a
+        # mensagem e só depois falhar na movimentação/tramitação. Se houver conflito,
+        # ABORTA sem enviar e avisa o usuário para resolver.
+        if modo != "simulado":
+            conf = await sisdpu_client.checar_conflito_sessao(t.get("id") or None)
+            if conf.get("conflito"):
+                _log_passo(log, "Checagem de sessão do SISDPU", False,
+                           "conflito detectado — envio abortado antes de enviar a mensagem")
+                box2 = _ler_box(slug, paj_norm)
+                alvo = _achar_alvo(box2)
+                if alvo is not None:
+                    e2 = alvo.get("envio") or {}
+                    e2["falhas"] = {"whatsapp": "Conflito de sessão do SISDPU — resolva antes de enviar."}
+                    e2["falha_em"] = _dt.datetime.now().isoformat(timespec="seconds")
+                    alvo["envio"] = e2
+                    _gravar_box(slug, box2)
+                return {"ok": False, "status": "falha",
+                        "detalhe": ("Conflito de sessão do SISDPU detectado — feche a OUTRA sessão do seu "
+                                    "usuário no SISDPU e tente novamente. A mensagem NÃO foi enviada.")}
         if modo == "simulado":
             await asyncio.sleep(0.4)
             res = {"ok": True, "status": "simulado", "comprovante": None,
@@ -1994,7 +2195,9 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             res = await whatsapp_client.enviar_mensagem(
                 numero=numero, mensagem=mensagem, anexos=anexos_ctx,
                 headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm,
-                mensagem_prazo=msg_prazo)
+                mensagem_prazo=msg_prazo,
+                mensagem_referencia=(f"Contato referente ao PAJ {paj}" if paj else ""))
+        _log_passo(log, "Envio da mensagem (WhatsApp)", res.get("ok"), res.get("detalhe", ""))
 
         if not res.get("ok"):
             box2 = _ler_box(slug, paj_norm)
@@ -2009,6 +2212,21 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
 
         comprovante = res.get("comprovante")
         comp_nome = Path(comprovante).name if comprovante else ""
+        if modo != "simulado":
+            _log_passo(log, "Comprovante de envio (PDF)", bool(comprovante),
+                       comp_nome if comprovante else "não foi possível gerar o comprovante")
+
+        # PIPELINE: movimenta (documenta o envio) e, se escolhido, tramita — só em modo
+        # REAL (o SISDPU é sempre real; em simulado não mexemos no PAJ).
+        if modo != "simulado":
+            mov_tram = await _movimentar_e_tramitar(
+                t, "WhatsApp", mensagem, anexos_meta, comprovante, comp_nome, tramitar_grupo, log,
+                numero=numero, prazo=prazo_wa, anexos_arquivos=anexos_ctx)
+        else:
+            mov_tram = {"mov_seq": None, "mov_status": "nao_aplicavel", "mov_detalhe": "",
+                        "tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": ""}
+            _log_passo(log, "Movimentação/Tramitação", None, "modo simulado — não executadas")
+
         envio_id = uuid.uuid4().hex[:12]
         reg = historico_service.registrar({
             "envio_id": envio_id,
@@ -2023,8 +2241,18 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "mensagem": mensagem, "anexos": anexos_meta,
             "anexo_tipo": tipo, "anexo_ref": ref_anexo,
             "url_detalhe": t.get("url_detalhe", ""),
+            "id_processo": t.get("id", ""),          # p/ "refazer" mov/tram
+            "tram_grupo": tramitar_grupo,            # caixa PRETENDIDA (mesmo se falhar)
+            "mov_descricao": mov_tram.get("mov_descricao", ""),  # p/ "refazer" a movimentação
             "status": res.get("status", "enviado"), "detalhe": res.get("detalhe", ""),
             "comprovante": comp_nome,  # nome do PDF em dados/_comprovantes_whatsapp/
+            # documentação no PAJ (movimentação + tramitação opcional) + log individual
+            "mov_seq": mov_tram["mov_seq"], "mov_status": mov_tram["mov_status"],
+            "mov_detalhe": mov_tram["mov_detalhe"], "mov_url": mov_tram.get("mov_url", ""),
+            "tram_caixa": mov_tram["tram_caixa"], "tram_status": mov_tram["tram_status"],
+            "tram_detalhe": mov_tram["tram_detalhe"], "tram_url": mov_tram.get("tram_url", ""),
+            "tram_descricao": mov_tram.get("tram_descricao", ""),  # tooltip da coluna "Tramitado"
+            "log": log,
             "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
         })
         box2 = _ler_box(slug, paj_norm)
@@ -2032,7 +2260,8 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         if alvo is not None:
             entry = {"em": reg["ts"], "meios": ["whatsapp"], "mensagem": mensagem,
                      "status": res.get("status", "enviado"), "envio_id": envio_id,
-                     "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome}
+                     "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome,
+                     "mov_seq": mov_tram["mov_seq"], "tram_caixa": mov_tram["tram_caixa"]}
             if conjunto:
                 entry["tramite_ids"] = ids
                 # carimba também cada tramitação-membro (sobrevive ao desfazer do
@@ -2049,6 +2278,151 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 alvo["envio"] = {}
             _gravar_box(slug, box2)
         return {**res, "comprovante_nome": comp_nome, "historico_id": reg["id"]}
+
+
+# ==================== REFAZER movimentação/tramitação (recuperação de falha) ====================
+def _id_processo_do_registro(rec: dict) -> str:
+    """id de processo do registro do histórico (campo direto ou extraído da url_detalhe)."""
+    idp = rec.get("id_processo") or ""
+    if idp:
+        return str(idp)
+    m = re.search(r"[?&]id=(\d+)", rec.get("url_detalhe", "") or "")
+    return m.group(1) if m else ""
+
+
+def _mov_anexos_do_registro(rec: dict) -> list[dict]:
+    """Reconstrói os anexos da movimentação (documentos da mensagem + comprovante) a
+    partir do registro do histórico, para o 'refazer'."""
+    itens: list[dict] = []
+    for a in (rec.get("anexos") or []):
+        cam = caminho_anexo(rec.get("paj_norm", ""), rec.get("anexo_tipo", "tramite"),
+                            rec.get("anexo_ref", ""), a.get("arquivo", ""))
+        if cam and Path(cam).exists():
+            itens.append({"nome": a.get("nome") or a.get("arquivo") or Path(cam).name,
+                          "caminho": str(cam), "tipo": a.get("tipo") or ""})
+    comp = rec.get("comprovante")
+    if comp:
+        p = COMPROVANTES_WA_DIR / comp
+        if p.exists():
+            itens.append({"nome": comp, "caminho": str(p), "tipo": "pdf"})
+    return itens
+
+
+async def refazer_movimentacao(historico_id: str) -> dict:
+    """Refaz a MOVIMENTAÇÃO de um registro do histórico cuja movimentação falhou.
+    Checa conflito de sessão antes; em sucesso, atualiza o registro (mov_status/seq/url)."""
+    from services import historico_service
+    from ingestao.sisdpu_client import SISDPU_URL
+    rec = historico_service.obter(historico_id)
+    if not rec:
+        return {"ok": False, "erro": "Registro não encontrado."}
+    log_novo = list(rec.get("log") or [])
+    _log_passo(log_novo, "Refazer movimentação — solicitado", None, "reprocessamento manual da movimentação")
+    id_proc = _id_processo_do_registro(rec)
+    paj = rec.get("paj", "")
+    if not id_proc:
+        _log_passo(log_novo, "Refazer movimentação", False, "PAJ sem id de processo no registro")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "PAJ sem id de processo no registro."}
+    conf = await sisdpu_client.checar_conflito_sessao(id_proc)
+    if conf.get("conflito"):
+        _log_passo(log_novo, "Refazer — checagem de sessão", False, "conflito detectado — refazimento abortado")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Conflito de sessão do SISDPU — feche a outra sessão e tente de novo."}
+    _log_passo(log_novo, "Refazer — checagem de sessão", True, "sem conflito de sessão")
+    # Usa a descrição EXATA da movimentação original (guardada no registro). Registros
+    # antigos sem `mov_descricao`: reconstrói idêntica com o mesmo template + dados do
+    # registro (nº de WhatsApp vem do cadastro do PAJ).
+    descricao = rec.get("mov_descricao") or ""
+    if not descricao:
+        _meios = {"whatsapp": "WhatsApp", "app_sisdpu": "App SISDPU", "email": "E-mail"}
+        numero = (ler_contato(rec.get("paj_norm", "")).get("whatsapp_numeros") or [""])[0]
+        nomes = [a.get("nome", "") for a in (rec.get("anexos") or []) if a.get("nome")]
+        descricao = _montar_descricao_mov(
+            _meios.get(rec.get("meio", ""), "WhatsApp"), rec.get("mensagem", ""), numero,
+            rec.get("prazo"), nomes, rec.get("tram_grupo") or "")
+    mov_anexos = _mov_anexos_do_registro(rec)
+    if not _pode_exclusivo():
+        _log_passo(log_novo, "Refazer movimentação", None, "operação em andamento — tente de novo")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde e tente de novo."}
+    async with _entrar_exclusivo_fila():
+        try:
+            mov = await sisdpu_client.movimentar_paj(
+                [{"id": id_proc, "numero": paj}], descricao, anexos=mov_anexos, descricao_html=True)
+        except Exception as e:  # noqa: BLE001
+            mov = {"ok": False, "detalhe": f"exceção: {e}", "mov_seq": None}
+    _log_passo(log_novo, "Refazer movimentação do PAJ", mov.get("ok"), mov.get("detalhe", ""))
+    if mov.get("ok"):
+        historico_service.atualizar(historico_id, {
+            "mov_status": "movimentado", "mov_seq": mov.get("mov_seq"),
+            "mov_detalhe": mov.get("detalhe", ""),
+            "mov_url": f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}",
+            "log": log_novo,
+        })
+        return {"ok": True, "mov_seq": mov.get("mov_seq")}
+    historico_service.atualizar(historico_id, {"mov_status": "falha",
+                                               "mov_detalhe": mov.get("detalhe", ""), "log": log_novo})
+    return {"ok": False, "erro": mov.get("detalhe", "Falha na movimentação.")}
+
+
+async def refazer_tramitacao(historico_id: str) -> dict:
+    """Refaz a TRAMITAÇÃO de um registro cujo trâmite falhou/não foi realizado. Exige
+    movimentação bem-sucedida antes (regra). Checa conflito; em sucesso, atualiza o registro."""
+    from services import historico_service
+    from ingestao.sisdpu_client import SISDPU_URL
+    rec = historico_service.obter(historico_id)
+    if not rec:
+        return {"ok": False, "erro": "Registro não encontrado."}
+    log_novo = list(rec.get("log") or [])
+    _log_passo(log_novo, "Refazer tramitação — solicitado", None, "reprocessamento manual da tramitação")
+    id_proc = _id_processo_do_registro(rec)
+    paj = rec.get("paj", "")
+    grupo = rec.get("tram_grupo") or rec.get("tram_caixa") or ""
+    if not id_proc:
+        _log_passo(log_novo, "Refazer tramitação", False, "PAJ sem id de processo no registro")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "PAJ sem id de processo no registro."}
+    if not grupo:
+        _log_passo(log_novo, "Refazer tramitação", False, "nenhuma caixa de tramitação escolhida neste envio")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Nenhuma caixa de tramitação foi escolhida neste envio."}
+    if rec.get("mov_status") != "movimentado" and not rec.get("mov_seq"):
+        _log_passo(log_novo, "Refazer tramitação", False, "movimentação ainda não concluída — refaça-a antes")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Faça a movimentação (refazer) antes de tramitar."}
+    conf = await sisdpu_client.checar_conflito_sessao(id_proc)
+    if conf.get("conflito"):
+        _log_passo(log_novo, "Refazer — checagem de sessão", False, "conflito detectado — refazimento abortado")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Conflito de sessão do SISDPU — feche a outra sessão e tente de novo."}
+    _log_passo(log_novo, "Refazer — checagem de sessão", True, "sem conflito de sessão")
+    if not _pode_exclusivo():
+        _log_passo(log_novo, "Refazer tramitação", None, "operação em andamento — tente de novo")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde e tente de novo."}
+    tram_desc = _descricao_tramitacao(rec.get("mov_seq"))
+    prazo_data, prazo_desc = _prazo_tramitacao(rec.get("prazo"))
+    async with _entrar_exclusivo_fila():
+        try:
+            tram = await sisdpu_client.tramitar_paj(
+                [{"id": id_proc, "numero": paj}], grupo=grupo,
+                descricao=tram_desc, prazo_data=prazo_data, prazo_desc=prazo_desc)
+        except Exception as e:  # noqa: BLE001
+            tram = {"ok": False, "detalhe": f"exceção: {e}"}
+    _log_passo(log_novo, "Refazer tramitação do PAJ", tram.get("ok"),
+               f"→ {grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+    if tram.get("ok"):
+        historico_service.atualizar(historico_id, {
+            "tram_status": "tramitado", "tram_caixa": grupo, "tram_detalhe": tram.get("detalhe", ""),
+            "tram_url": f"{SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false",
+            "tram_descricao": tram_desc,
+            "log": log_novo,
+        })
+        return {"ok": True, "tram_caixa": grupo}
+    historico_service.atualizar(historico_id, {"tram_status": "falha",
+                                               "tram_detalhe": tram.get("detalhe", ""), "log": log_novo})
+    return {"ok": False, "erro": tram.get("detalhe", "Falha na tramitação.")}
 
 
 async def enviar_whatsapp_lote_stream(selecao: list[dict]):

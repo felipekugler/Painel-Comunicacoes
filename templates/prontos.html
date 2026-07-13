@@ -58,12 +58,12 @@
                 <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar todos"></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width: 7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width: 8rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width: 9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width: 10rem;">Origem<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width: 11.7rem; min-width: 11.7rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width: 16rem; width:100%;">Mensagem</th>
-                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width: 3rem;">Anexos<span class="sort-arrow"></span></th>
-                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width: 6rem;">Prazo<span class="sort-arrow"></span></th>
+                <th class="text-center" style="width:6rem;">Mensagem</th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Anexo<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Prazo<span class="sort-arrow"></span></th>
                 <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
@@ -106,8 +106,8 @@
                         {% endfor %}
                     </div>{% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
-                <td>{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
+                <td><div class="col-assistido-flex">{{ paj.assistido or "—" }}</div></td>
                 <td>
                     {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
@@ -117,28 +117,29 @@
                     {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">
-                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
-                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
-                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}"
-                            title="Ver a mensagem completa">Ver mensagem</button>
+                <td class="text-center">
+                    {% if paj.envio_mensagem %}
+                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar a mensagem">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ paj.n_anexos }}">
-                    <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+                    {% if paj.n_anexos %}
+                    <button class="anx-clip tem"
                             data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
                             data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                             data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
                             onclick="anxAbrir(this)"
-                            title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+                            title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
                         </svg>
-                        {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+                        <span class="anx-n">{{ paj.n_anexos }}</span>
                     </button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 {% set _p = paj.envio_prazo_app if meio_ativo == 'app' else paj.envio_prazo_email %}
                 <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ _p }}">
-                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}
+                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}{% endif %}
                     {% if meio_ativo == 'app' and paj.envio_somente_leitura %}<div class="mt-1"><span class="sl-badge" title="Somente Leitura">SL</span></div>{% endif %}
                 </td>
                 <td>
@@ -159,6 +160,7 @@
                                     data-meios='{{ paj.envio_meios|tojson }}'
                                     data-anexos='{{ paj.anexos|tojson }}'
                                     data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                    data-tramitar="{{ paj.envio_tramitar_grupo }}"
                                     data-prazo-app="{{ paj.envio_prazo_app }}"
                                     data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
                                     data-prazo-email="{{ paj.envio_prazo_email }}"
@@ -177,6 +179,16 @@
                     </div>
                 </td>
             </tr>
+            {% if paj.envio_mensagem %}
+            <tr class="pr-msg-row" style="display:none;">
+                <td colspan="10" class="msg-accordion">
+                    <div class="msg-accordion-in">
+                        <span class="msg-accordion-lbl">Mensagem — PAJ {{ paj.paj }}</span>
+                        <div class="msg-full">{{ paj.envio_mensagem }}</div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
             {% endfor %}
         </tbody>
     </table>
@@ -199,12 +211,12 @@
                 <th style="width:2.2rem;text-align:center;"><input type="checkbox" id="cb-all" onclick="marcarVisiveis(this.checked)" title="Marcar/desmarcar todos"></th>
                 <th class="sortable" data-col="1" data-type="text" onclick="ordenarTabela(this)" style="width:7rem;">PAJ<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="2" data-type="text" onclick="ordenarTabela(this)" style="width:8rem;">Ofício<span class="sort-arrow"></span></th>
-                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)" style="width:9rem;">Assistido<span class="sort-arrow"></span></th>
+                <th class="sortable" data-col="3" data-type="text" onclick="ordenarTabela(this)">Assistido<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="4" data-type="text" onclick="ordenarTabela(this)" style="width:10rem;">Origem<span class="sort-arrow"></span></th>
                 <th class="sortable" data-col="5" data-type="text" onclick="ordenarTabela(this)" style="width:11.7rem; min-width:11.7rem;">Tipo<span class="sort-arrow"></span></th>
-                <th style="min-width:15rem; width:100%;">Mensagem</th>
-                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:3rem;">Anexos<span class="sort-arrow"></span></th>
-                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:5rem;">Prazo<span class="sort-arrow"></span></th>
+                <th class="text-center" style="width:6rem;">Mensagem</th>
+                <th class="sortable text-center" data-col="7" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Anexo<span class="sort-arrow"></span></th>
+                <th class="sortable text-center" data-col="8" data-type="num" onclick="ordenarTabela(this)" style="width:1%;white-space:nowrap;">Prazo<span class="sort-arrow"></span></th>
                 <th style="width: 16rem; min-width: 16rem;">Ações</th>
             </tr>
         </thead>
@@ -230,8 +242,8 @@
                     <div class="mt-1"><span title="{{ paj.envio_falhas['whatsapp'] }}" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ {{ paj.envio_falhas['whatsapp'] }}</span></div>
                     {% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">{{ paj.oficio or "—" }}</td>
-                <td>{{ paj.assistido or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
+                <td><div class="col-assistido-flex">{{ paj.assistido or "—" }}</div></td>
                 <td>
                     {%- set _cor = cor_caixa(paj.caixa_slug) -%}
                     <span class="caixa-chip" title="Grupo: {{ paj.grupo }}"
@@ -241,27 +253,29 @@
                     {% if paj.sugestao_tipo %}<span class="pill-tipo" title="Texto padrão / classificação">{{ paj.sugestao_tipo }}</span>
                     {% else %}<span class="text-tertiary" style="font-size:12px;">texto específico</span>{% endif %}
                 </td>
-                <td class="text-secondary" style="font-size:12.5px;">
-                    <div class="clamp3">{{ paj.envio_mensagem or "—" }}</div>
-                    <button class="mov-badge" style="margin-top:6px;" onclick="msgAbrir(this)"
-                            data-pajnum="{{ paj.paj }}" data-msg="{{ paj.envio_mensagem }}">Ver mensagem</button>
+                <td class="text-center">
+                    {% if paj.envio_mensagem %}
+                    <button class="mov-badge" onclick="msgToggle(this)" title="Abrir/ocultar a mensagem">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" data-sort="{{ paj.n_anexos }}">
-                    <button class="anx-clip {{ 'tem' if paj.tem_anexo else '' }}"
+                    {% if paj.n_anexos %}
+                    <button class="anx-clip tem"
                             data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
                             data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                             data-anexos='{{ paj.anexos|tojson }}' data-readonly="0"
                             onclick="anxAbrir(this)"
-                            title="{% if paj.n_anexos %}{{ paj.n_anexos }} anexo(s) — clique para gerenciar{% else %}Sem anexos — clique para adicionar{% endif %}">
+                            title="{{ paj.n_anexos }} anexo(s) — clique para gerenciar">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
                         </svg>
-                        {% if paj.n_anexos %}<span class="anx-n">{{ paj.n_anexos }}</span>{% endif %}
+                        <span class="anx-n">{{ paj.n_anexos }}</span>
                     </button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td class="text-center" style="font-size:12px;white-space:nowrap;" data-sort="{{ paj.envio_prazo_whatsapp }}">
                     {% set _p = paj.envio_prazo_whatsapp %}
-                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}d{% endif %}
+                    {% if _p == 0 %}<strong style="color:#dc2626;">Urgente</strong>{% else %}{{ _p }}{% endif %}
                 </td>
                 <td>
                     <div class="wa-acao" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
@@ -281,6 +295,7 @@
                                     data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                     data-mensagem="{{ paj.envio_mensagem }}" data-meios='{{ paj.envio_meios|tojson }}'
                                     data-anexos='{{ paj.anexos|tojson }}' data-sl="{{ 1 if paj.envio_somente_leitura else 0 }}"
+                                    data-tramitar="{{ paj.envio_tramitar_grupo }}"
                                     data-prazo-app="{{ paj.envio_prazo_app }}" data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
                                     data-prazo-email="{{ paj.envio_prazo_email }}"
                                     data-app="{{ 1 if c.app_sisdpu else 0 }}" data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
@@ -295,6 +310,16 @@
                     </div>
                 </td>
             </tr>
+            {% if paj.envio_mensagem %}
+            <tr class="pr-msg-row" style="display:none;">
+                <td colspan="10" class="msg-accordion">
+                    <div class="msg-accordion-in">
+                        <span class="msg-accordion-lbl">Mensagem — PAJ {{ paj.paj }}</span>
+                        <div class="msg-full">{{ paj.envio_mensagem }}</div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
             {% endfor %}
         </tbody>
     </table>
@@ -336,6 +361,12 @@
              background: var(--accent-soft); color: var(--accent);
              font-size:11px; font-weight:600; cursor:pointer; transition:background .12s ease; }
 .mov-badge:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.mov-badge.ativo { background: color-mix(in srgb, var(--accent) 26%, transparent); }
+/* Seção retrátil (acordeão) com o teor da mensagem, abaixo da linha */
+.msg-accordion { background: var(--layer-alt); padding: 0 !important; }
+.msg-accordion-in { padding: 12px 16px; border-left: 3px solid var(--accent); }
+.msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); }
+.msg-accordion .msg-full { margin-top:6px; max-width:900px; }
 .btn-grava { display:inline-flex; align-items:center; gap:6px; padding:8px 16px; border:1px solid transparent;
              border-radius:6px; background:#16a34a; color:#fff; font-weight:600; font-size:14px;
              cursor:pointer; box-shadow:var(--shadow-sm); transition:filter .12s ease, transform .05s ease; }
@@ -413,45 +444,47 @@
 <!-- Modal "Editar envio" -->
 <div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
   <div class="fluent-card grava-dialog">
-    <h3 class="font-display" style="font-size:18px;margin:0;">Editar envio</h3>
-    <p class="text-secondary" style="font-size:13px;margin:4px 0 14px;">
-        PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
-    </p>
+    <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 12px;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">Editar envio</h3>
+        <span class="text-secondary" style="font-size:13px;white-space:nowrap;">PAJ <span id="grava-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></span>
+    </div>
+    <hr class="grava-sep">
     <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Mensagem a enviar</div>
-    <textarea id="grava-texto" class="sug-textarea" style="min-height:238px;" placeholder="Mensagem ao assistido…"></textarea>
-    <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Anexos</div>
-        <div id="grava-anx-lista"></div>
-        <div style="margin-top:8px;">
+    <textarea id="grava-texto" class="sug-textarea" style="min-height:210px;" placeholder="Mensagem ao assistido…" oninput="sanitizarTexto(this)"></textarea>
+    <p class="text-tertiary" style="font-size:11px;margin:4px 0 0;">Somente texto — emojis não são permitidos nas mensagens.</p>
+    <hr class="grava-sep">
+    <div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-weight:600;font-size:13px;">Anexos</span>
+            <span class="text-tertiary" style="font-size:11px;">Permitido apenas arquivos DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</span>
+            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:auto;"></span>
             <input type="file" id="grava-anx-input" multiple style="display:none;"
                    accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="gravaAnxUpload(this)">
-            <button type="button" class="btn-subtle" style="padding:5px 12px;font-size:12px;"
+            <button type="button" class="btn-subtle" style="padding:5px 12px;font-size:12px;white-space:nowrap;"
                     onclick="document.getElementById('grava-anx-input').click()">+ Adicionar anexo(s)</button>
-            <span id="grava-anx-msg" class="text-tertiary" style="font-size:12px;margin-left:8px;"></span>
-            <p class="text-tertiary" style="font-size:11px;margin:6px 0 0;">Aceitos: DOC, DOCX, ODT, PNG, JPEG, GIF, PDF.</p>
+        </div>
+        <div id="grava-anx-lista"></div>
+    </div>
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de envio da Mensagem</div>
+        <div id="grava-meios" style="display:flex;flex-direction:column;gap:0;"></div>
+    </div>
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Tramitação <span class="text-tertiary" style="font-weight:400;">(opcional - tramita o PAJ depois da movimentação)</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select id="grava-tramitar" class="grava-tramitar-sel">
+                <option value="">— Não tramitar —</option>
+            </select>
+            <div id="grava-tramitar-favs" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
         </div>
     </div>
-    <div style="margin-top:14px;">
-        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Enviar mensagem pelos meios abaixo:</div>
-        <div id="grava-meios" style="display:flex;flex-direction:column;gap:2px;"></div>
-    </div>
-    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+    <hr class="grava-sep">
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="btn-subtle" onclick="gravarFechar()">Cancelar</button>
         <button class="btn-grava" onclick="gravarSalvar()">Salvar</button>
     </div>
-  </div>
-</div>
-
-<!-- Modal "Ver mensagem" -->
-<div id="msg-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)msgFechar()">
-  <div class="fluent-card mov-dialog">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-        <h3 class="font-display" style="font-size:18px;margin:0;">
-            Mensagem — PAJ <span id="msg-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
-        </h3>
-        <button class="btn-subtle" style="padding:4px 10px;" onclick="msgFechar()">Fechar</button>
-    </div>
-    <div id="msg-corpo" class="msg-full"></div>
   </div>
 </div>
 
@@ -524,14 +557,19 @@ function ordenarTabela(th) {
         const cell = tr.cells[col];
         return (cell.getAttribute('data-sort') ?? cell.textContent).trim();
     };
-    const rows = Array.from(tbody.rows);
-    rows.sort((a, b) => {
-        let av = val(a), bv = val(b), cmp;
+    // Ordena mantendo cada linha-acordeão (.pr-msg-row) colada à sua linha de dados.
+    const dataRows = Array.from(tbody.querySelectorAll('.pr-row'));
+    const pares = dataRows.map(r => {
+        const n = r.nextElementSibling;
+        return [r, (n && n.classList.contains('pr-msg-row')) ? n : null];
+    });
+    pares.sort((A, B) => {
+        let av = val(A[0]), bv = val(B[0]), cmp;
         if (tipo === 'num') { cmp = (parseFloat(av) || 0) - (parseFloat(bv) || 0); }
         else { cmp = av.localeCompare(bv, 'pt-BR', { numeric: true, sensitivity: 'base' }); }
         return dir === 'asc' ? cmp : -cmp;
     });
-    rows.forEach(r => tbody.appendChild(r));
+    pares.forEach(([r, msg]) => { tbody.appendChild(r); if (msg) tbody.appendChild(msg); });
 }
 
 // ---------- Seleção (lote App/E-mail) ----------
@@ -553,6 +591,45 @@ function atualizarContador() {
 
 // ---------- Editar um gravado (modal) — usa o slug da PRÓPRIA linha ----------
 let gravaSlug = null, gravaPaj = null, gravaTramite = '', gravaTipo = 'tramite';
+let _GRUPOS_CACHE = null, _GRUPOS_FAV = [];
+function gravaFavsRender() {
+    const sel = document.getElementById('grava-tramitar');
+    const box = document.getElementById('grava-tramitar-favs');
+    if (!sel || !box) return;
+    box.innerHTML = '';
+    _GRUPOS_FAV.forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge' + (sel.value === g ? ' ativo' : '');
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; gravaFavsRender(); };
+        box.appendChild(b);
+    });
+    sel.onchange = () => gravaFavsRender();
+}
+async function gravaCarregarGrupos(atual) {
+    const sel = document.getElementById('grava-tramitar');
+    if (!sel) return;
+    if (!_GRUPOS_CACHE) {
+        try {
+            const r = await fetch('/api/grupos-unidade');
+            const d = await r.json();
+            _GRUPOS_CACHE = (d && d.grupos) ? d.grupos : [];
+            _GRUPOS_FAV = (d && d.favoritos) ? d.favoritos : [];
+        } catch (e) { _GRUPOS_CACHE = []; }
+    }
+    sel.innerHTML = '<option value="">— Não tramitar —</option>';
+    _GRUPOS_CACHE.forEach(g => {
+        const o = document.createElement('option'); o.value = g; o.textContent = g;
+        if (g === atual) o.selected = true;
+        sel.appendChild(o);
+    });
+    // se o valor atual não está na lista (caixa renomeada/nova), mantém como opção
+    if (atual && !_GRUPOS_CACHE.includes(atual)) {
+        const o = document.createElement('option'); o.value = atual; o.textContent = atual; o.selected = true;
+        sel.appendChild(o);
+    }
+    gravaFavsRender();
+}
 function gravarAbrir(btn) {
     gravaSlug = btn.dataset.slug; gravaPaj = btn.dataset.paj;
     gravaTramite = btn.dataset.tramite || ''; gravaTipo = btn.dataset.tipo || 'tramite';
@@ -591,7 +668,7 @@ function gravarAbrir(btn) {
         // o App SISDPU ganha também "Somente leitura". Extras ocultos enquanto o meio não é marcado.
         const row = document.createElement('div');
         // min-height reserva o espaço do input de prazo → sem "pulo" ao marcar/desmarcar.
-        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:42px;';
+        row.style.cssText = 'display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-height:34px;';
         row.appendChild(lab);
         const meioCb = lab.querySelector('input');
         const extras = [];
@@ -641,6 +718,7 @@ function gravarAbrir(btn) {
         if (slCb) slCb.checked = meioCb.checked && slRestore;
         sync();
     });
+    gravaCarregarGrupos(btn.dataset.tramitar || '');
     document.getElementById('grava-modal').style.display = 'flex';
 }
 function gravarFechar() {
@@ -654,13 +732,15 @@ async function gravarSalvar() {
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo
     const prazos = { app_sisdpu: prazoDe('app_sisdpu'), whatsapp: prazoDe('whatsapp'), email: prazoDe('email') };
+    const trSel = document.getElementById('grava-tramitar');
+    const tramitar_grupo = trSel ? (trSel.value || '') : '';
     if (!meios.length) { mostrarToast('Selecione ao menos um meio'); return; }
     if (!mensagem) { mostrarToast('Escreva a mensagem'); return; }
     try {
         const url = (gravaTipo === 'conjunto')
             ? '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/conjunto/gravar'
             : '/api/caixa/' + gravaSlug + '/paj/' + encodeURIComponent(gravaPaj) + '/tramite/' + encodeURIComponent(gravaTramite) + '/gravar';
-        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos}) });
+        const r = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mensagem, meios, somente_leitura, prazos, tramitar_grupo}) });
         const d = await r.json();
         if (d.ok) { location.reload(); } else { alert('Erro: ' + (d.erro || 'falha')); }
     } catch (e) { alert('Erro ao gravar: ' + e); }
@@ -684,13 +764,16 @@ async function removerDaFila(btn) {
     } catch (e) { alert('Erro: ' + e); }
 }
 
-// ---------- Ver mensagem ----------
-function msgAbrir(btn) {
-    document.getElementById('msg-paj').textContent = btn.dataset.pajnum || '';
-    document.getElementById('msg-corpo').textContent = btn.dataset.msg || '';
-    document.getElementById('msg-modal').style.display = 'flex';
+// ---------- Ver mensagem (acordeão: abre/fecha a seção abaixo da linha) ----------
+function msgToggle(btn) {
+    const tr = btn.closest('tr');
+    const msgRow = tr && tr.nextElementSibling;
+    if (!msgRow || !msgRow.classList.contains('pr-msg-row')) return;
+    const aberto = msgRow.style.display !== 'none';
+    msgRow.style.display = aberto ? 'none' : '';
+    btn.textContent = aberto ? 'Abrir' : 'Ocultar';
+    btn.classList.toggle('ativo', !aberto);
 }
-function msgFechar() { document.getElementById('msg-modal').style.display = 'none'; }
 
 // ---------- Enviar Agora (só os MARCADOS) — com checagem de conflito de App ----------
 function chaveItem(it) { return [it.slug, it.paj_norm, it.tipo, it.id_tramite].join('::'); }
@@ -980,7 +1063,9 @@ async function enviarWhatsapp(btn) {
     if (!confirm('Enviar esta mensagem pelo WhatsApp agora?\n\nO painel vai abrir a conversa, enviar o TEXTO e depois os ANEXOS, e gerar o comprovante (PDF).')) return;
     btn.disabled = true;
     const orig = btn.innerHTML;
-    btn.innerHTML = 'Enviando… (~30s)';
+    // Se já houver um envio em andamento, este entra na FILA e roda em seguida
+    // (o backend aguarda a vez em vez de recusar) — por isso pode levar mais que ~30s.
+    btn.innerHTML = 'Enviando… (aguarda a vez se houver fila)';
     try {
         const r = await fetch('/api/prontos/whatsapp/enviar', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
