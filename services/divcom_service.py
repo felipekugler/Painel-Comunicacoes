@@ -584,27 +584,16 @@ def remover_anexo_padrao(kind: str, owner_id: str, slug: str | None, anexo_id: s
     return {"ok": True, "anexos": restantes}
 
 
-def anexar_padrao_em_tramite(slug: str, paj_norm: str, tipo: str, id_tramite: str,
-                             kind: str, owner_id: str, owner_slug: str | None) -> dict:
-    """Copia os anexos PADRÃO de um comunicado/parágrafo para os anexos da tramitação
-    (ou conjunto). Aditivo, dedupe por nome; marca padrao_owner p/ remoção seletiva."""
-    padrao = config_service.anexos_padrao(kind, owner_id, owner_slug)
-    # O comunicado/parágrafo pode ser GERAL (slug=None) mesmo aplicado numa caixa:
-    # se não achou no slug informado, tenta os gerais.
-    if not padrao and config_service.owner_padrao(kind, owner_id, owner_slug) is None:
-        padrao = config_service.anexos_padrao(kind, owner_id, None)
-    if not padrao:
-        return {"ok": True, "incluidos": [], "anexos": []}
-    box = _ler_box(slug, paj_norm)
-    if not box:
-        return {"ok": False, "erro": "PAJ não encontrado"}
-    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
-    if alvo is None:
-        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+def _copiar_anexos_padrao_para(anexos: list, paj_norm: str, tipo: str, id_tramite: str,
+                               kind: str, owner_id: str, padrao: list) -> list[str]:
+    """Copia os anexos PADRÃO (`padrao` = metadados; arquivos em _anexos_padrao/<owner_id>)
+    para a lista `anexos` IN-PLACE (aditivo, dedupe por nome); copia os arquivos p/ a pasta
+    de anexos do alvo e marca padrao_owner/kind. Retorna os nomes incluídos. NÃO grava o
+    box — quem chama persiste."""
     dest = _anexos_dir(paj_norm, _chave_anexo(tipo, id_tramite))
     dest.mkdir(parents=True, exist_ok=True)
     existentes = {(a.get("nome") or "").strip().lower() for a in anexos}
-    incluidos = []
+    incluidos: list[str] = []
     for pa in padrao:
         nome = (pa.get("nome") or "").strip()
         if not nome or nome.lower() in existentes:
@@ -623,6 +612,51 @@ def anexar_padrao_em_tramite(slug: str, paj_norm: str, tipo: str, id_tramite: st
         })
         existentes.add(nome.lower())
         incluidos.append(pa.get("nome"))
+    return incluidos
+
+
+def _comunicado_por_tipo(comunicados: list, tipo: str) -> dict | None:
+    """Acha, na lista de comunicados da caixa, o que tem EXATAMENTE esse `tipo` E possui
+    anexos padrão vinculados. None se não houver."""
+    alvo = (tipo or "").strip()
+    if not alvo:
+        return None
+    return next((c for c in (comunicados or [])
+                 if (c.get("tipo") or "").strip() == alvo and c.get("anexos")), None)
+
+
+def _auto_incluir_anexos_padrao_por_tipo(paj_norm: str, sol: dict, comunicados: list) -> list[str]:
+    """Quando o TIPO (classificação da IA ou manual) corresponde a um comunicado COM
+    anexo padrão, inclui esse anexo automaticamente na tramitação — espelhando o que o
+    'aplicar modelo' faz no modal. Opera no `sol` em memória (o box é gravado por quem
+    chama). Idempotente (dedupe por nome)."""
+    tipo = (sol.get("sugestao_tipo_editada") or sol.get("sugestao_tipo") or "").strip()
+    com = _comunicado_por_tipo(comunicados, tipo)
+    if not com:
+        return []
+    anexos = sol.setdefault("anexos", [])
+    return _copiar_anexos_padrao_para(anexos, paj_norm, "tramite", sol.get("id_tramite", ""),
+                                      "comunicado", com.get("id", ""), com.get("anexos") or [])
+
+
+def anexar_padrao_em_tramite(slug: str, paj_norm: str, tipo: str, id_tramite: str,
+                             kind: str, owner_id: str, owner_slug: str | None) -> dict:
+    """Copia os anexos PADRÃO de um comunicado/parágrafo para os anexos da tramitação
+    (ou conjunto). Aditivo, dedupe por nome; marca padrao_owner p/ remoção seletiva."""
+    padrao = config_service.anexos_padrao(kind, owner_id, owner_slug)
+    # O comunicado/parágrafo pode ser GERAL (slug=None) mesmo aplicado numa caixa:
+    # se não achou no slug informado, tenta os gerais.
+    if not padrao and config_service.owner_padrao(kind, owner_id, owner_slug) is None:
+        padrao = config_service.anexos_padrao(kind, owner_id, None)
+    if not padrao:
+        return {"ok": True, "incluidos": [], "anexos": []}
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado"}
+    alvo, anexos = _anexos_do_alvo(box, tipo, id_tramite)
+    if alvo is None:
+        return {"ok": False, "erro": "tramitação/conjunto não encontrado"}
+    incluidos = _copiar_anexos_padrao_para(anexos, paj_norm, tipo, id_tramite, kind, owner_id, padrao)
     _gravar_box(slug, box)
     return {"ok": True, "incluidos": incluidos, "anexos": anexos}
 
@@ -1128,6 +1162,8 @@ async def tratar_separado(slug: str, paj_norm: str, mapeamento: dict | None = No
                     s["sugestao_ia"] = ana.get("sugestao", "")
                     s["sugestao_tipo"] = ana.get("tipo", "")
                     s["resumo_ia_chave"] = _chave_sol(chave_movs, com_rev, s)
+                    # anexo padrão do comunicado identificado → incluído automaticamente
+                    _auto_incluir_anexos_padrao_por_tipo(paj_norm, s, comunicados)
         box["triagem"] = {"decisao": "separado", "ids": pend_ids}
         box.pop("conjunto", None)
         _gravar_box(slug, box)
@@ -1532,6 +1568,8 @@ async def sincronizar_stream(slug: str):
                             sol["sugestao_ia"] = ana.get("sugestao", "")
                             sol["sugestao_tipo"] = ana.get("tipo", "")
                             sol["resumo_ia_chave"] = chave
+                            # anexo padrão do comunicado identificado → incluído automaticamente
+                            _auto_incluir_anexos_padrao_por_tipo(job["paj_norm"], sol, comunicados)
                             mudou = True
                             logs.append({"level": "ok",
                                          "msg": f"     ✓ PAJ {job['paj']} · tramitação de {dt}: análise recebida"})
@@ -1714,6 +1752,8 @@ def _reanalisar_box(box: dict, cont: dict, comunicados: list, com_rev: str,
             sol["sugestao_ia"] = ana.get("sugestao", "")
             sol["sugestao_tipo"] = ana.get("tipo", "")
             sol["resumo_ia_chave"] = chave
+            # anexo padrão do comunicado identificado → incluído automaticamente
+            _auto_incluir_anexos_padrao_por_tipo(box.get("paj_norm", ""), sol, comunicados)
             mudou = True
     return mudou
 
