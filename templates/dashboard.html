@@ -91,7 +91,7 @@
 
 {% macro card_sugestao(paj, c, full=false) %}
 <div class="ia-card">
-    <div class="card-label">Sugestão IA</div>
+    <div class="card-label">{% if ia_ativa() %}Mensagem a enviar (Sugestão IA){% else %}Mensagem a enviar{% endif %}</div>
     <div class="ia-corpo">
         {% if paj.sugestao_atual %}
         {% if paj.sugestao_alerta %}<div class="sug-alerta-label" style="font-size:11px;margin-bottom:4px;">Conferência manual necessária</div>
@@ -104,7 +104,6 @@
         <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
         {% endif %}
     </div>
-    {% if paj.sugestao_atual %}
     <div class="ia-acao-baixo" style="padding-top:8px;">
         <button class="btn-subtle" style="padding:4px 10px;font-size:12px;"
                 data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
@@ -115,9 +114,8 @@
                 data-app="{{ 1 if c.app_sisdpu else 0 }}"
                 data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                 data-email="{{ 1 if c.email else 0 }}"
-                onclick="sugAbrir(this)">Ver / editar</button>
+                onclick="sugAbrir(this)">{{ 'Ver / editar' if paj.sugestao_atual else 'Escrever mensagem' }}</button>
     </div>
-    {% endif %}
 </div>
 {% endmacro %}
 

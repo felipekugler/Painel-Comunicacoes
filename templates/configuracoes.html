@@ -141,44 +141,6 @@
         </div>
     </div>
 
-    <div class="fluent-card" style="padding:22px;max-width:720px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências para análise da IA</h2>
-
-        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Quantidade de movimentações a analisar</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas à IA
-            na <strong>sincronização inicial</strong> do PAJ. Todas as movimentações continuam
-            sendo extraídas e guardadas; este número define apenas quantas (as mais recentes)
-            a IA analisa por padrão. Depois, no <strong>histórico de movimentações</strong> de
-            cada PAJ (botão “últimas movimentações” no painel), é possível <strong>selecionar
-            movimentações específicas</strong> — ou colar um <strong>trecho</strong> do texto —
-            e reanalisar o PAJ com exatamente o que interessa.
-        </p>
-        <div style="display:flex;align-items:center;gap:12px;">
-            <label for="n-movs" style="font-size:14px;">Movimentações analisadas:</label>
-            <input type="number" id="n-movs" class="wa-input" style="width:90px;" min="1" max="30" value="{{ n_movimentacoes }}">
-            <button class="btn-accent" onclick="salvarMovs()">Salvar</button>
-            <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
-
-        <div class="grava-sep" style="margin:18px 0 16px;"></div>
-
-        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Análises de IA em paralelo</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
-            Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
-            Use <strong>1</strong> para análise sequencial (uma de cada vez). Recomendado: 4 a 6.
-        </p>
-        <div style="display:flex;align-items:center;gap:12px;">
-            <label for="n-conc" style="font-size:14px;">Análises simultâneas:</label>
-            <input type="number" id="n-conc" class="wa-input" style="width:90px;" min="1" max="{{ analise_concorrencia_max }}" value="{{ analise_concorrencia }}">
-            <button class="btn-accent" onclick="salvarConcorrencia()">Salvar</button>
-            <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
-    </div>
-
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configurações de mensagens por WhatsApp</h2>
 
@@ -389,6 +351,45 @@
             <li>Gravar para envio, envio por App SISDPU / WhatsApp e comprovante.</li>
             <li>Movimentação e tramitação no SISDPU; histórico, anexos, refazer e log.</li>
         </ul>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:760px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências para análise da IA</h2>
+        <p class="text-tertiary" style="font-size:12px;margin:0 0 4px;">Só têm efeito no <strong>Modo com IA</strong>.</p>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Quantidade de movimentações a analisar</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas à IA
+            na <strong>sincronização inicial</strong> do PAJ. Todas as movimentações continuam
+            sendo extraídas e guardadas; este número define apenas quantas (as mais recentes)
+            a IA analisa por padrão. Depois, no <strong>histórico de movimentações</strong> de
+            cada PAJ (botão “últimas movimentações” no painel), é possível <strong>selecionar
+            movimentações específicas</strong> — ou colar um <strong>trecho</strong> do texto —
+            e reanalisar o PAJ com exatamente o que interessa.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-movs" style="font-size:14px;">Movimentações analisadas:</label>
+            <input type="number" id="n-movs" class="wa-input" style="width:90px;" min="1" max="30" value="{{ n_movimentacoes }}">
+            <button class="btn-accent" onclick="salvarMovs()">Salvar</button>
+            <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
+
+        <div class="grava-sep" style="margin:18px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Análises de IA em paralelo</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
+            Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
+            Use <strong>1</strong> para análise sequencial (uma de cada vez). Recomendado: 4 a 6.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-conc" style="font-size:14px;">Análises simultâneas:</label>
+            <input type="number" id="n-conc" class="wa-input" style="width:90px;" min="1" max="{{ analise_concorrencia_max }}" value="{{ analise_concorrencia }}">
+            <button class="btn-accent" onclick="salvarConcorrencia()">Salvar</button>
+            <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
     </div>
 </div>
 
