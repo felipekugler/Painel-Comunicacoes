@@ -12,7 +12,7 @@ router = APIRouter()
 @router.get("/historico", response_class=HTMLResponse)
 async def historico(request: Request):
     registros = historico_service.listar_por_meio()  # uma linha por meio
-    labels = {m["key"]: m["label"] for m in envio_service.meios_disponiveis()}
+    labels = envio_service.meios_labels()  # inclui rótulos de meios antigos (ex.: e-mail)
     _url_cache: dict[tuple, str] = {}  # backfill da URL de detalhamento (registros antigos)
     for r in registros:
         r["meios_labels"] = [labels.get(m, m) for m in (r.get("meios") or [])]

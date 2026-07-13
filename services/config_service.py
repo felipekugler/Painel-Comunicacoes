@@ -262,7 +262,7 @@ def comunicados_rev() -> int:
 # registra "[simulado]" — para validar o fluxo antes de configurar cada meio.
 # "real": usa os handlers de envio_service (meios sem handler ficam pendentes).
 # Modo de envio POR MEIO (permite ligar 1 meio em real e manter os outros simulados).
-_MEIOS_ENVIO = ("app_sisdpu", "whatsapp", "email")
+_MEIOS_ENVIO = ("app_sisdpu", "whatsapp")  # E-mail não implementado por ora (fica de fora)
 _MEIO_LABELS = {"app_sisdpu": "Aplicativo SISDPU", "whatsapp": "WhatsApp", "email": "E-mail"}
 
 

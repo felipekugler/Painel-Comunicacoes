@@ -134,7 +134,7 @@ async def prontos_envio(request: Request, meio: str):
         meio_cor=meio_cor,
         meio_modo=config_service.get_envio_modo_meio(key),
         meios_envio=meios,
-        meio_labels={m["key"]: m["label"] for m in meios},
+        meio_labels=envio_service.meios_labels(),
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
@@ -142,11 +142,12 @@ async def prontos_envio(request: Request, meio: str):
         menu_recolhido=True))  # tabela larga: abre com o menu recolhido (igual ao Histórico)
 
 
-@router.post("/api/prontos/whatsapp/enviar", response_class=JSONResponse)
+@router.post("/api/prontos/whatsapp/enviar")
 async def prontos_whatsapp_enviar(payload: dict = Body(...)):
     """Envio ASSISTIDO por WhatsApp de UMA tramitação (fora do lote). 1 clique →
-    Playwright envia texto→anexos, gera o comprovante e registra. Bloqueia até
-    concluir (~30s em modo real). Retorna {ok, status, detalhe, comprovante_nome}."""
+    Playwright envia texto→anexos, gera o comprovante, movimenta e (se escolhido)
+    tramita. Resposta SSE: transmite cada PASSO ao popup em tempo real e, no fim,
+    um evento {done, resultado:{ok, status, detalhe, comprovante_nome}}."""
     slug = (payload or {}).get("slug", "")
     paj = (payload or {}).get("paj_norm", "")
     tr = (payload or {}).get("id_tramite", "")
@@ -154,19 +155,40 @@ async def prontos_whatsapp_enviar(payload: dict = Body(...)):
     # conjunto não tem id_tramite único (usa tramite_ids); só exige slug + paj_norm nesse caso
     if not (slug and paj) or (tipo != "conjunto" and not tr):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
-    return await divcom_service.enviar_whatsapp_tramite(slug, paj, tr, tipo)
+
+    async def gen():
+        try:
+            async for ev in divcom_service.enviar_whatsapp_tramite_stream(slug, paj, tr, tipo):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'resultado': {'ok': False, 'detalhe': str(e)}})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.post("/api/prontos/enviar-item", response_class=JSONResponse)
+@router.post("/api/prontos/enviar-item")
 async def prontos_enviar_item(payload: dict = Body(...)):
     """Envio INDIVIDUAL de um item por UM meio (App/E-mail) a partir de Prontos.
-    Corpo: {slug, paj_norm, tipo, id_tramite, meio}. Bloqueia até concluir."""
+    Corpo: {slug, paj_norm, tipo, id_tramite, meio}. Resposta SSE: transmite cada
+    passo (envio → movimentação → tramitação) e, no fim, {done, resultado}."""
     p = payload or {}
     slug, paj, tipo = p.get("slug", ""), p.get("paj_norm", ""), p.get("tipo", "tramite")
     tr, meio = p.get("id_tramite", ""), p.get("meio", "")
     if not (slug and paj and meio):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
-    return await divcom_service.enviar_item_meio(slug, paj, tipo, tr, meio)
+
+    async def gen():
+        try:
+            async for ev in divcom_service.enviar_item_meio_stream(slug, paj, tipo, tr, meio):
+                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+        except Exception as e:  # noqa: BLE001
+            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps({'done': True, 'resultado': {'ok': False, 'detalhe': str(e)}})}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/prontos/whatsapp/enviar-lote")

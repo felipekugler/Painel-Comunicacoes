@@ -31,9 +31,21 @@ MEIOS: dict[str, str] = {
     "email": "E-mail",
 }
 
+# Meios SELECIONÁVEIS ao gravar/configurar. E-mail ainda NÃO implementado (depende de
+# configuração externa) → fica de fora POR ORA. O rótulo continua em MEIOS para exibir
+# corretamente eventuais itens/registros antigos gravados por e-mail.
+MEIOS_ATIVOS: tuple[str, ...] = ("app_sisdpu", "whatsapp")
+
 
 def meios_disponiveis() -> list[dict]:
-    return [{"key": k, "label": v} for k, v in MEIOS.items()]
+    """Meios que o usuário pode ESCOLHER (só os implementados: App e WhatsApp)."""
+    return [{"key": k, "label": MEIOS[k]} for k in MEIOS_ATIVOS]
+
+
+def meios_labels() -> dict:
+    """Mapa key→rótulo de TODOS os meios (inclui os não-selecionáveis), para rotular
+    itens/registros antigos corretamente onde só se precisa do nome."""
+    return dict(MEIOS)
 
 
 def label_meio(meio: str) -> str:
