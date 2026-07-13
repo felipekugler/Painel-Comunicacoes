@@ -71,6 +71,10 @@ app.state.jinja.globals["total_prontos"] = _ds.contar_prontos_envio
 app.state.jinja.globals["prontos_por_meio"] = _ds.prontos_por_meio
 app.state.jinja.globals["prontos_meios"] = _ds.PRONTOS_MEIOS
 app.state.jinja.globals["cor_caixa"] = _ds.cor_caixa
+# Modo de IA (Simples × com IA) — global CALLABLE (sempre atual) p/ os cards de IA.
+from services import config_service as _cs  # noqa: E402
+
+app.state.jinja.globals["ia_ativa"] = _cs.get_ia_ativa
 
 
 # Formatadores de data — datas exibidas ao usuario saem no padrao BR DD/MM/AAAA.

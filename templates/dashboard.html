@@ -68,6 +68,8 @@
     <div class="ia-corpo">
         {% if paj.resumo_ia %}
         <div class="text-secondary {{ '' if full else 'clamp6' }}" style="white-space:pre-wrap;"{% if not full %} title="{{ paj.resumo_ia }}"{% endif %}>{{ paj.resumo_ia }}</div>
+        {% elif not ia_ativa() %}
+        <div class="ia-off">Recurso de IA desabilitado no Modo Simples. Habilite esta função nas <a href="/configuracoes" class="accent-link">configurações</a>.</div>
         {% else %}
         <div class="text-tertiary">— <span style="font-size:11px;">(sincronize para gerar)</span></div>
         {% endif %}
@@ -96,6 +98,8 @@
         {% elif paj.sugestao_tipo %}<div style="margin-bottom:4px;"><span class="pill-tipo" title="Enquadrado no comunicado padrão">{{ paj.sugestao_tipo }}</span></div>
         {% else %}<div class="text-tertiary" style="font-size:11px;margin-bottom:4px;">texto específico</div>{% endif %}
         <div class="text-secondary {{ '' if full else 'clamp6' }} {{ 'sug-alerta' if paj.sugestao_alerta else '' }}" style="font-size:12.5px;white-space:pre-wrap;"{% if not full %} title="{{ paj.sugestao_atual }}"{% endif %}>{{ paj.sugestao_atual }}</div>
+        {% elif not ia_ativa() %}
+        <div class="ia-off">Recurso de IA desabilitado no Modo Simples. Habilite esta função nas <a href="/configuracoes" class="accent-link">configurações</a>.</div>
         {% else %}
         <div class="text-tertiary">— <span style="font-size:11px;">(sincronize)</span></div>
         {% endif %}
@@ -574,6 +578,8 @@
 .cards-row .ia-card .ia-corpo { flex:1 1 auto; min-height:0; overflow-y:auto; }
 .cards-row .ia-card .mov-badge { align-self:flex-start; flex:0 0 auto; }
 .cards-row .ia-card .ia-acao-baixo { flex:0 0 auto; }
+/* Aviso nos cards de IA quando o painel está em Modo Simples (IA desligada) */
+.ia-off { font-size:12.5px; line-height:1.45; color:var(--text-tertiary); font-style:italic; }
 .cards-row .ia-anexos { flex:10 1 0; min-width:0; border:1px solid var(--stroke); border-radius:10px;
     padding:10px 8px; background:color-mix(in srgb, var(--accent) 4%, var(--card));
     display:flex; flex-direction:column; align-items:center; text-align:center; }
