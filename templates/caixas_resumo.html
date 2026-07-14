@@ -25,7 +25,7 @@
             <tr>
                 <th>Caixa de grupo</th>
                 <th class="text-center" style="width:10rem;">PAJs a tratar</th>
-                <th style="width:9rem;">Ação</th>
+                <th style="width:20rem;white-space:nowrap;">Ação</th>
             </tr>
         </thead>
         <tbody>
@@ -41,7 +41,12 @@
                 </td>
                 <td class="text-center"><span class="pill">{{ cx.qtd|default(0) }}</span></td>
                 <td>
-                    <a class="btn-subtle" style="padding:4px 12px;font-size:12.5px;text-decoration:none;" href="/caixa/{{ cx.slug }}">Abrir →</a>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <a class="btn-subtle" style="padding:4px 12px;font-size:12.5px;text-decoration:none;white-space:nowrap;" href="/caixa/{{ cx.slug }}">Abrir →</a>
+                        <button class="btn-subtle btn-remover-sync" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
+                                data-grupo="{{ cx.grupo }}" data-nome="{{ cx.nome }}"
+                                onclick="removerSync(this)">Remover da Sincronização</button>
+                    </div>
                 </td>
             </tr>
             {% endfor %}
@@ -60,5 +65,24 @@
               border-radius:999px; white-space:nowrap; }
 .resumo-caixa { display:inline-flex; align-items:center; gap:10px; text-decoration:none; }
 .resumo-caixa:hover .caixa-chip { filter:brightness(1.05); }
+.btn-remover-sync:hover { color:var(--c-red); border-color:var(--c-red); }
 </style>
+<script>
+// Desabilita a sincronização de uma caixa sem ir às Configurações (mantém textos/parágrafos).
+async function removerSync(btn) {
+    const grupo = btn.dataset.grupo, nome = btn.dataset.nome || grupo;
+    if (!confirm('Remover a caixa "' + nome + '" da sincronização?\n\n'
+        + 'Ela deixa de ser lida e some do menu. Os textos e parágrafos padrão são PRESERVADOS '
+        + '(dá para reabilitar depois em Configurações → Caixas para Sincronização).')) return;
+    btn.disabled = true; const orig = btn.textContent; btn.textContent = 'Removendo…';
+    try {
+        const r = await fetch('/api/config/caixa', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ grupo: grupo, on: false }) });
+        const d = await r.json();
+        if (d.ok) { location.reload(); }
+        else { alert('Erro: ' + (d.erro || 'falha')); btn.disabled = false; btn.textContent = orig; }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.textContent = orig; }
+}
+</script>
 {% endblock %}

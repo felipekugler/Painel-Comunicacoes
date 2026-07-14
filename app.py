@@ -112,7 +112,10 @@ def _data_hora_br(valor) -> str:
 
 app.state.jinja.filters["data_br"] = _data_br
 app.state.jinja.filters["data_hora_br"] = _data_hora_br
-app.state.jinja.filters["data_hora_br"] = _data_hora_br
+# Telefone BR para exibição: "(41) 99908-2652" (usado nos selos de comprovante).
+from services.texto_util import formatar_telefone_br as _tel_br  # noqa: E402
+
+app.state.jinja.filters["tel_br"] = _tel_br
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 app.include_router(dashboard_router)
 app.include_router(configuracoes_router)

@@ -37,6 +37,23 @@ def tem_emoji(texto: str | None) -> bool:
     return bool(texto) and bool(_EMOJI_RE.search(texto))
 
 
+def formatar_telefone_br(num: str | None) -> str:
+    """Formata um telefone brasileiro para exibição no padrão "(DD) NNNNN-NNNN"
+    (celular, 11 dígitos) ou "(DD) NNNN-NNNN" (fixo, 10 dígitos). Aceita qualquer
+    formato de entrada (com/sem pontuação, com/sem DDI 55). Se não reconhecer o
+    formato, devolve o valor original (não inventa dígitos)."""
+    if not num:
+        return num or ""
+    d = re.sub(r"\D", "", num)
+    if len(d) > 11 and d.startswith("55"):  # remove DDI 55 (mantém DDD 55/RS de 11 díg.)
+        d = d[2:]
+    if len(d) == 11:
+        return f"({d[:2]}) {d[2:7]}-{d[7:]}"
+    if len(d) == 10:
+        return f"({d[:2]}) {d[2:6]}-{d[6:]}"
+    return num
+
+
 def colapsar_paragrafos(texto: str | None) -> str:
     """Remove as LINHAS EM BRANCO entre parágrafos: qualquer sequência de 2+
     quebras de linha (mesmo com espaços/tabs no meio) vira UMA única quebra.

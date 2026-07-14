@@ -143,7 +143,6 @@
 
 {% macro acoes_paj(paj, c, inline_meios=false) %}
     {% if paj.tipo == 'conjunto' %}
-    <div style="text-align:center;margin-bottom:2px;"><span class="pill-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span></div>
     <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
             data-paj="{{ paj.paj_norm }}" onclick="desfazerConjunto(this)"
             title="Desfazer o conjunto e voltar à triagem">Desfazer conjunto</button>
@@ -163,6 +162,7 @@
             title="Desfazer o tratamento separado e voltar todas as tramitações deste PAJ à triagem">Voltar à triagem</button>
     {% endif %}
     {% endif %}
+    {% if ia_ativa() %}{# Reanálise só faz sentido no Modo com IA #}
     <button class="btn-subtle" style="padding:5px 9px;font-size:12px;"
             data-paj="{{ paj.paj_norm }}" onclick="reanalisarIA(this)"
             title="Descartar a análise atual e gerar uma nova pela IA (usa as movimentações selecionadas no popup)">
@@ -172,6 +172,7 @@
         </svg>
         Reanálise pela IA
     </button>
+    {% endif %}
     <button class="btn-grava grava-btn" style="padding:5px 9px;font-size:12px;box-shadow:none;"
             data-tipo="{{ paj.tipo }}"
             data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
@@ -196,16 +197,27 @@
 {% if paj.tipo == 'conjunto' %}
     {% for dt in paj.descricoes_tramites %}
     <div class="tram-item">
-        <div class="tram-meta">{{ paj.datas_tramites[loop.index0] | data_hora_br }} - {{ paj.remetentes_tramites[loop.index0] or "—" }}</div>
+        <div class="tram-meta">{{ paj.datas_tramites[loop.index0] | data_hora_br }} - {{ paj.remetentes_tramites[loop.index0] or "—" }}{% set _pz = paj.prazos_tramites[loop.index0] %}{% if _pz %} <span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ _pz }}</span>{% endif %}</div>
         {% if dt %}<div class="{{ desc_class }}" title="{{ dt }}">{{ dt }}</div>{% else %}<div class="text-tertiary" style="font-size:12.5px;">Sem descrição de trâmite.</div>{% endif %}
     </div>
     {% else %}
     <span class="text-tertiary">—</span>
     {% endfor %}
 {% else %}
-    <div class="tram-meta">{{ paj.envio_data | data_br }}{% if paj.envio_hora %} {{ paj.envio_hora }}{% endif %} - {{ paj.remetente or "—" }}</div>
+    <div class="tram-meta">{{ paj.envio_data | data_br }}{% if paj.envio_hora %} {{ paj.envio_hora }}{% endif %} - {{ paj.remetente or "—" }}{% if paj.prazo %} <span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% endif %}</div>
     {% if paj.descricao_tramite %}<div class="{{ desc_class }}" title="{{ paj.descricao_tramite }}">{{ paj.descricao_tramite }}</div>{% else %}<div class="text-tertiary" style="font-size:12.5px;">Sem descrição de trâmite.</div>{% endif %}
 {% endif %}
+{% endmacro %}
+
+{#-- Selo de triagem no canto superior direito do card "Descrição do trâmite":
+     🔗 N — conjunto  (tramitações unificadas numa só mensagem)  OU
+     ⑃ N — separados  (tramitações do MESMO PAJ tratadas individualmente). --#}
+{% macro selo_triagem(paj) %}
+{%- if paj.tipo == 'conjunto' -%}
+<span class="pill-conj tram-conj" title="Tratado em conjunto: {{ paj.n_tramites }} tramitações numa só mensagem">🔗 {{ paj.n_tramites }} — conjunto</span>
+{%- elif paj.de_triagem_separado -%}
+<span class="pill-sep tram-conj" title="Tratadas separadamente: {{ paj.n_separados }} tramitações deste PAJ, cada uma com seu próprio contato">{{ paj.n_separados }} — separados</span>
+{%- endif -%}
 {% endmacro %}
 
 {% block content %}
@@ -335,7 +347,6 @@
                             <th>PAJ</th>
                             <th>Ofício</th>
                             <th style="width:100%;">Assistido</th>
-                            <th>Prazo</th>
                             <th class="text-center" colspan="5">Contatos</th>
                         </tr>
                     </thead>
@@ -345,9 +356,6 @@
                                    class="accent-link" style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ paj.paj }}</a></td>
                             <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio">{{ paj.oficio or "—" }}</div></td>
                             <td><div class="col-assistido" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</div></td>
-                            <td>
-                                {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
-                            </td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
@@ -357,11 +365,21 @@
                     </tbody>
                 </table>
             </div>
-            {#-- Linha 2: card vermelho só com a Descrição do trâmite (rótulo + conteúdo) --#}
-            <div class="pjp-sec pjp-tram">
+            {#-- Linha 2: Descrição do trâmite (esq.) + números de WhatsApp p/ envio (dir.) --#}
+            <div class="pjp-sec pjp-tram pjp-tram-row">
                 <div class="pjp-tram-card">
+                    {{ selo_triagem(paj) }}
                     <div class="card-label">Descrição do trâmite</div>
                     {{ tram_desc(paj, desc_class='pjp-desc-3 clamp3') }}
+                </div>
+                <div class="pjp-nums-card">
+                    <div class="card-label">Número(s) de WhatsApp</div>
+                    {% if paj.whatsapp_numeros %}
+                    <ul class="pjp-nums-list">
+                        {% for n in paj.whatsapp_numeros %}<li>{{ n | tel_br }}</li>{% endfor %}
+                    </ul>
+                    <div class="pjp-nums-hint">A mesma mensagem será enviada a cada número.</div>
+                    {% else %}<div class="text-tertiary" style="font-size:12.5px;margin-top:6px;">Nenhum número de WhatsApp cadastrado.</div>{% endif %}
                 </div>
             </div>
             {#-- Linha 3: Resumo IA + Sugestão IA + Anexos (movido da linha 4) --#}
@@ -430,7 +448,6 @@
                 <th>Ofício</th>
                 <th>Assistido</th>
                 <th style="width: 100%; min-width: 12rem;">Descrição do trâmite</th>
-                <th style="width: 5rem;">Prazo</th>
                 <th class="text-center" colspan="5" style="width: 13rem;">Contatos</th>
             </tr>
         </thead>
@@ -438,7 +455,7 @@
             {% for paj in pendentes %}
             {% set c = paj.contatos or {} %}
             {% set _par = 'pj-even' if loop.index is divisibleby 2 else 'pj-odd' %}
-            <tr class="pj-head pj-toggle {{ _par }}" onclick="togglePaj(this, event)" title="Clique para abrir/fechar a análise, anexos e ações">
+            <tr class="pj-head pj-toggle {{ _par }}" data-paj="{{ paj.paj_norm }}" onclick="togglePaj(this, event)" title="Clique para abrir/fechar a análise, anexos e ações">
                 <td class="pj-caret-cell">
                     <span class="pj-caret" aria-hidden="true">
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.4" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" /></svg>
@@ -454,10 +471,7 @@
                     {# Descrição do trâmite: cabeçalho "[data/hora] - [remetente]" + o texto que o
                        ofício de origem escreveu ao encaminhar (fonte direta do motivo do contato).
                        Card vermelho off-white igual ao do layout completo (.pjp-tram-card). #}
-                    <div class="pjp-tram-card">{{ tram_desc(paj) }}</div>
-                </td>
-                <td>
-                    {% if paj.prazo %}<span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ paj.prazo }}</span>{% else %}<span class="text-tertiary">—</span>{% endif %}
+                    <div class="pjp-tram-card">{{ selo_triagem(paj) }}{{ tram_desc(paj) }}</div>
                 </td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
@@ -466,7 +480,7 @@
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
             </tr>
             <tr class="pj-cards pj-collapse {{ _par }}">
-                <td colspan="11">
+                <td colspan="10">
                     <div class="cards-row">
                         {{ card_resumo(paj) }}
                         {{ card_sugestao(paj, c) }}
@@ -521,6 +535,10 @@
               white-space:nowrap; }
 .pill-conj { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
              border-radius:999px; background:color-mix(in srgb, var(--c-addr) 20%, transparent); color:var(--c-addr); }
+/* selo "separados": tom âmbar, distinto do conjunto (azul de --c-addr) */
+.pill-sep { display:inline-flex; align-items:center; font-size:10.5px; font-weight:700; padding:2px 7px;
+            border-radius:999px; background:color-mix(in srgb, #d97706 22%, transparent); color:#b45309; }
+:root[data-theme="dark"] .pill-sep { color:#fbbf24; background:color-mix(in srgb, #d97706 28%, transparent); }
 .tri-item { margin-bottom:12px; }
 .tri-vinc { display:flex; align-items:center; gap:6px; margin:4px 0 0 16px; }
 .tri-arrow { color:var(--text-tertiary); font-size:15px; line-height:1; flex:0 0 auto; }
@@ -638,9 +656,28 @@
 /* Sugestão de CONFERÊNCIA MANUAL (a IA não identificou os dados padrão): texto em vermelho */
 .ia-corpo .sug-alerta { color:var(--c-red); font-weight:600; }
 .sug-alerta-label { color:var(--c-red); font-weight:700; text-transform:uppercase; letter-spacing:.02em; }
-.pjp-tram-card { border:1px solid color-mix(in srgb, var(--c-red) 22%, var(--stroke));
+.pjp-tram-card { position:relative; border:1px solid color-mix(in srgb, var(--c-red) 22%, var(--stroke));
                  border-radius:10px; padding:12px 14px;
                  background: color-mix(in srgb, var(--c-red) 8%, var(--card)); }
+/* Selo "conjunto" no canto superior direito do card (simples e completo) */
+.tram-conj { position:absolute; top:8px; right:10px; z-index:1; }
+/* a 1ª linha do card (rótulo no completo; cabeçalho data/remetente no simples) recua
+   à direita para não colidir com o selo */
+.pjp-tram-card:has(.tram-conj) .card-label { padding-right:120px; }
+.pjp-tram-card:has(.tram-conj) .tram-item:first-child .tram-meta { padding-right:120px; }
+/* Linha 2 alinhada EXATAMENTE à linha 3 (cards-ia3): usa o MESMO grid de colunas
+   30fr 45fr 25fr + gap 12px. A "descrição" abrange as colunas 1-2 (= Resumo+Sugestão,
+   incluindo o gap entre elas) e os "números" ocupam a coluna 3 (= Anexos, mesma
+   largura e mesmo min-width). Assim as bordas direita coincidem por construção. */
+.pjp-tram-row { display:grid; grid-template-columns: 30fr 45fr minmax(210px, 25fr);
+                gap:12px; align-items:stretch; }
+.pjp-tram-row .pjp-tram-card { grid-column: 1 / span 2; min-width:0; }
+.pjp-nums-card { grid-column: 3; min-width:0; border:1px solid var(--stroke); border-radius:10px;
+                 padding:12px 14px; background: var(--card); }
+.pjp-nums-list { list-style:none; margin:8px 0 0; padding:0; display:flex; flex-direction:column; gap:6px; }
+.pjp-nums-list li { font-family:'Cascadia Code','Consolas',monospace; font-size:13px;
+                    background: var(--layer); border:1px solid var(--stroke); border-radius:6px; padding:5px 10px; }
+.pjp-nums-hint { font-size:11px; color: var(--text-tertiary); margin-top:8px; line-height:1.4; }
 /* Linha 3: Resumo IA (33%) + Sugestão IA (67%), mesma altura fixa (rolagem interna) */
 .cards-row.cards-full { align-items:stretch; }
 .cards-ia2 > .ia-card { height:252px; overflow:hidden; }
@@ -738,16 +775,21 @@
     </p>
     <p style="font-size:14px;margin:14px 0 10px;">
         Identificamos os seguintes números de telefone no cadastro.
-        Deseja cadastrar algum deles para contatos via WhatsApp?
+        Marque <strong>um ou mais</strong> para contato via WhatsApp — a mesma mensagem
+        será enviada a cada número selecionado.
     </p>
     <div id="wa-lista" style="display:flex;flex-direction:column;gap:2px;"></div>
     <div style="margin-top:12px;border-top:1px solid var(--stroke);padding-top:12px;">
-        <label class="wa-opt" style="padding-left:0;">
-            <input type="radio" name="wa-num" id="wa-outro-chk" value="__outro__" onchange="waSyncOutro()">
-            Cadastrar outro número
-        </label>
-        <input type="text" id="wa-outro-num" class="wa-input" placeholder="(DDD) número"
-               style="display:none;margin-top:8px;">
+        <div style="font-size:13px;margin-bottom:6px;">Cadastrar outro(s) número(s)</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <input type="text" id="wa-outro-num" class="wa-input" style="flex:1;"
+                   placeholder="(DDD) número — separe vários por vírgula"
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();waAddOutro();}">
+            <button class="btn-accent" style="padding:8px 16px;white-space:nowrap;" onclick="waAddOutro()">Cadastrar</button>
+        </div>
+        <div class="text-tertiary" style="font-size:11.5px;margin-top:4px;">
+            Soma-se aos marcados acima. Para vários, separe por vírgula.
+        </div>
     </div>
     <div style="display:flex;justify-content:space-between;gap:8px;margin-top:22px;flex-wrap:wrap;">
         <button class="btn-subtle" onclick="waNaoCadastrar()">Não cadastrar nenhum</button>
@@ -816,6 +858,7 @@
         <a href="#" onclick="movMarcarTodas(false);return false;">limpar</a>
     </div>
     <div id="mov-lista" style="margin-top:8px;"></div>
+    {% if ia_ativa() %}{# Recorte manual só serve para alimentar a IA — oculto no Modo Simples #}
     <div class="mov-mais">
         <div class="mov-mais-lbl" style="margin-bottom:6px;">
             <strong>Recorte manual</strong> (opcional): cole abaixo SÓ o texto relevante para a IA. Se preenchido, PREVALECE sobre os checkboxes.
@@ -824,6 +867,7 @@
                   placeholder="Cole aqui o trecho relevante…"></textarea>
         <p class="text-tertiary" style="font-size:11px;margin:8px 0 0;">Depois de salvar, clique no botão <strong>“Reanálise pela IA”</strong> para disparar uma nova análise da IA com a seleção feita.</p>
     </div>
+    {% endif %}
     <div style="display:flex;justify-content:flex-end;align-items:center;gap:10px;margin-top:12px;">
         <span id="mov-mais-msg" class="text-tertiary" style="font-size:12px;margin-right:auto;"></span>
         <button class="btn-accent" style="padding:6px 14px;font-size:12px;" onclick="salvarSelecaoMovs(this)">Salvar seleção</button>
@@ -899,6 +943,7 @@
 
 <script>
 const CAIXA_SLUG = "{{ caixa.slug }}";
+const IA_ATIVA = {{ 'true' if ia_ativa() else 'false' }};  // Modo Simples = false → triagem imediata, sem IA
 const PARAGRAFOS = {{ paragrafos|tojson }};
 const COMUNICADOS = {{ comunicados|tojson }};
 const MEIOS_ENVIO = {{ meios_envio|tojson }};
@@ -908,14 +953,39 @@ const PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};  // prazos (dias) pré-d
 let _GRUPOS_CACHE = null, _GRUPOS_FAV = [];
 
 // ========== Layout "Pendentes": simples (retrátil) e completo (carrossel) ==========
+// Estado ABERTO das linhas persiste em sessionStorage (por caixa/URL) → salvar em um
+// modal/popup (que dá location.reload) NÃO fecha a linha; só o clique na própria linha
+// abre/fecha. A chave é a URL da caixa (cada caixa mantém seu próprio conjunto aberto).
+function _pjOpenKey() { return 'divcom-open:' + location.pathname; }
+function _pjOpenSet() {
+    try { return new Set(JSON.parse(sessionStorage.getItem(_pjOpenKey()) || '[]')); }
+    catch (e) { return new Set(); }
+}
+function _pjOpenSave(s) {
+    try { sessionStorage.setItem(_pjOpenKey(), JSON.stringify(Array.from(s))); } catch (e) {}
+}
 // LAYOUT SIMPLES: clique na linha do PAJ abre/fecha a linha de análise/ações.
 function togglePaj(row, ev) {
     // não alternar quando o clique foi num elemento interativo da linha (link, ícone de copiar, WhatsApp).
     if (ev && ev.target && ev.target.closest('a, button, input, select, textarea, [data-copy], .wa-btn, .wa-badge, .anx-clip')) return;
-    row.classList.toggle('aberto');
+    const abrir = !row.classList.contains('aberto');
+    row.classList.toggle('aberto', abrir);
     const cards = row.nextElementSibling;
-    if (cards && cards.classList.contains('pj-cards')) cards.classList.toggle('pj-open');
+    if (cards && cards.classList.contains('pj-cards')) cards.classList.toggle('pj-open', abrir);
+    const paj = row.dataset.paj;
+    if (paj) { const s = _pjOpenSet(); abrir ? s.add(paj) : s.delete(paj); _pjOpenSave(s); }
 }
+// Ao (re)carregar a caixa, reabre as linhas que estavam abertas antes do reload.
+(function () {
+    const s = _pjOpenSet();
+    if (!s.size) return;
+    document.querySelectorAll('tr.pj-head[data-paj]').forEach(row => {
+        if (!s.has(row.dataset.paj)) return;
+        row.classList.add('aberto');
+        const cards = row.nextElementSibling;
+        if (cards && cards.classList.contains('pj-cards')) cards.classList.add('pj-open');
+    });
+})();
 // LAYOUT COMPLETO: navegação entre os PAJs (um por vez).
 function pjNav(delta) {
     const car = document.getElementById('pj-carousel');
@@ -987,11 +1057,47 @@ function uniformizarColunasCompleto(){
     // restaura a visibilidade (só o painel .ativo aparece, via CSS)
     panels.forEach(p => p.style.display = '');
 }
+// ===== Alinha a LINHA 2 (descrição + números) à LINHA 3 (Resumo+Sugestão+Anexos) =====
+// A linha 3 é flex e o conteúdo dos cards distorce levemente as proporções 30/45/25,
+// então um grid fixo não bate. Aqui medimos a geometria REAL da linha 3 e fixamos as
+// colunas da linha 2 em px: descrição vai até a borda direita da Sugestão; o card de
+// números fica com a largura EXATA do card de Anexos. Alinhamento por construção.
+function alinharLinha2Completo(){
+    const rows = Array.prototype.slice.call(document.querySelectorAll('.pjp-tram-row'));
+    if (!rows.length) return;
+    // painéis inativos ficam display:none (não mensuráveis) -> tornar todos visíveis p/ medir
+    const panels = Array.prototype.slice.call(document.querySelectorAll('.pj-panel'));
+    panels.forEach(p => p.style.display = 'block');
+    rows.forEach(row => {
+        const panel = row.closest('.pj-panel');
+        const ia3 = panel && panel.querySelector('.cards-ia3');
+        if (!ia3) return;
+        const cards = Array.prototype.slice.call(ia3.children).filter(c => c.classList.contains('ia-card'));
+        const resumo = cards[0], sug = cards[1], anx = cards[2];
+        if (!resumo || !sug || !anx) return;
+        const wResumo = Math.round(resumo.getBoundingClientRect().width);
+        const wSug = Math.round(sug.getBoundingClientRect().width);
+        const wAnx = Math.round(anx.getBoundingClientRect().width);
+        // 3 colunas iguais às da linha 3. A descrição abrange col 1-2 (Resumo+gap+Sugestão)
+        // e os números ficam na col 3 (Anexos) — o gap 12px coincide, então as bordas casam.
+        row.style.gridTemplateColumns = wResumo + 'px ' + wSug + 'px ' + wAnx + 'px';
+    });
+    panels.forEach(p => p.style.display = '');
+}
 (function(){
     if (!document.querySelector('.pjp-id-table')) return;
     uniformizarColunasCompleto();
+    alinharLinha2Completo();
     // reexecuta quando as fontes terminarem de carregar (a largura do texto pode mudar)
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(uniformizarColunasCompleto);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => {
+        uniformizarColunasCompleto(); alinharLinha2Completo();
+    });
+    // recalcula ao redimensionar a janela (a linha 3 reflui; a linha 2 fixa em px precisa refazer)
+    let _rt = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(_rt);
+        _rt = setTimeout(() => { uniformizarColunasCompleto(); alinharLinha2Completo(); }, 150);
+    });
     // cards inline do layout completo: meios de envio + tramitação (por painel)
     document.querySelectorAll('.pjp-meios').forEach(construirMeiosInline);
     popularTramitarInline();
@@ -1472,14 +1578,19 @@ async function triagemRetomar() {
 }
 triagemRetomar();
 async function tratarConjunto(btn) {
-    if (!confirm('Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?')) return;
-    triagemAnalisando(btn);
+    // MODO SIMPLES (sem IA): sem análise/caixas de texto — aplica a decisão na hora.
+    const msg = IA_ATIVA
+        ? 'Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?'
+        : 'Tratar EM CONJUNTO as tramitações pendentes deste PAJ (uma única mensagem para todas)?';
+    if (!confirm(msg)) return;
+    if (IA_ATIVA) triagemAnalisando(btn); else btnSpinner(btn, 'Aplicando…');
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/conjunto', { method: 'POST' });
         const d = await r.json();
-        if (d.ok) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
-        else { alert('Erro: ' + (d.erro || 'falha')); triagemRestore(btn); }
-    } catch (e) { alert('Erro: ' + e); triagemRestore(btn); }
+        if (!d.ok) { alert('Erro: ' + (d.erro || 'falha')); IA_ATIVA ? triagemRestore(btn) : btnRestore(btn); return; }
+        if (IA_ATIVA) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
+        else { location.reload(); }                                      // simples: já concluiu → recarrega
+    } catch (e) { alert('Erro: ' + e); IA_ATIVA ? triagemRestore(btn) : btnRestore(btn); }
 }
 async function desfazerConjunto(btn) {
     if (!confirm('Desfazer o tratamento em conjunto e voltar este PAJ à triagem?')) return;
@@ -1502,14 +1613,16 @@ async function tratarSeparado(btn) {
     const tr = btn.closest('tr');
     const mapeamento = {};
     tr.querySelectorAll('.tri-sel').forEach(s => { mapeamento[s.dataset.tramite] = s.value; });
-    triagemAnalisando(btn);
+    // MODO SIMPLES (sem IA): sem análise/caixas de texto — aplica a decisão na hora.
+    if (IA_ATIVA) triagemAnalisando(btn); else btnSpinner(btn, 'Aplicando…');
     try {
         const r = await fetch('/api/caixa/' + CAIXA_SLUG + '/paj/' + encodeURIComponent(btn.dataset.paj) + '/triar/separado',
             { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mapeamento}) });
         const d = await r.json();
-        if (d.ok) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
-        else { alert('Erro: ' + (d.erro || 'falha')); triagemRestore(btn); }
-    } catch (e) { alert('Erro: ' + e); triagemRestore(btn); }
+        if (!d.ok) { alert('Erro: ' + (d.erro || 'falha')); IA_ATIVA ? triagemRestore(btn) : btnRestore(btn); return; }
+        if (IA_ATIVA) { triagemWatchPaj(CAIXA_SLUG, btn.dataset.paj); }  // roda em 2º plano; poll recarrega ao concluir
+        else { location.reload(); }                                      // simples: já concluiu → recarrega
+    } catch (e) { alert('Erro: ' + e); IA_ATIVA ? triagemRestore(btn) : btnRestore(btn); }
 }
 
 // ---------- Ver mensagem (íntegra) ----------
@@ -1724,7 +1837,9 @@ async function salvarSelecaoMovs(btn) {
     const texto = (document.getElementById('mov-recorte') || {}).value || '';
     const msg = document.getElementById('mov-mais-msg');
     if (!selecao.length && !texto.trim()) {
-        if (msg) msg.textContent = 'Marque ao menos uma movimentação ou preencha o recorte.';
+        if (msg) msg.textContent = IA_ATIVA
+            ? 'Marque ao menos uma movimentação ou preencha o recorte.'
+            : 'Marque ao menos uma movimentação.';
         return;
     }
     btn.disabled = true;
@@ -1735,7 +1850,9 @@ async function salvarSelecaoMovs(btn) {
               body: JSON.stringify({ selecao: selecao, texto: texto }) });
         const d = await r.json();
         if (d.ok) {
-            if (msg) msg.textContent = '✓ Seleção salva. Clique em "Reanálise pela IA" na linha do PAJ.';
+            if (msg) msg.textContent = IA_ATIVA
+                ? '✓ Seleção salva. Clique em "Reanálise pela IA" na linha do PAJ.'
+                : '✓ Seleção salva.';
         } else if (msg) { msg.textContent = 'Falha: ' + (d.erro || 'erro'); }
     } catch (e) {
         if (msg) msg.textContent = 'Erro: ' + e;
@@ -1835,12 +1952,6 @@ function waIconClick(btn, ev) {
     else waAbrir(btn);
 }
 
-// Mostra o campo "outro numero" so quando a opcao dele estiver marcada.
-function waSyncOutro() {
-    const outroSel = document.getElementById('wa-outro-chk').checked;
-    document.getElementById('wa-outro-num').style.display = outroSel ? 'block' : 'none';
-}
-
 function waAbrir(btn) {
     waPajAtual = btn.dataset.paj;
     document.getElementById('wa-paj').textContent = btn.dataset.pajnum || '';
@@ -1852,38 +1963,68 @@ function waAbrir(btn) {
     if (!tels.length) {
         lista.innerHTML = '<div class="text-tertiary" style="font-size:13px;">Nenhum telefone no cadastro.</div>';
     }
-    // Apenas UM numero pode ser WhatsApp -> radios (grupo wa-num).
+    // VÁRIOS números podem ser WhatsApp -> checkboxes (a mesma mensagem vai a cada um).
     tels.forEach(t => {
         const checked = sel.includes(t.numero) ? 'checked' : '';
         const obs = t.obs ? ' <span class="text-tertiary" style="font-size:12px;">— ' + waEsc(t.obs) + '</span>' : '';
         lista.insertAdjacentHTML('beforeend',
-            '<label class="wa-opt"><input type="radio" name="wa-num" class="wa-radio" value="' + waEsc(t.numero) + '" ' + checked + ' onchange="waSyncOutro()">' +
+            '<label class="wa-opt"><input type="checkbox" class="wa-chk" value="' + waEsc(t.numero) + '" ' + checked + '>' +
             '<span style="font-family:monospace;">' + waEsc(t.numero) + '</span>' + obs + '</label>');
     });
     // Número(s) já cadastrado(s) para WhatsApp que NÃO estão no cadastro de telefones
-    // (foram digitados manualmente via "Cadastrar outro número") viram opção marcada,
-    // com a descrição — assim o número persiste como escolha ao reabrir o modal.
+    // (foram digitados manualmente via "outro número") viram opção MARCADA, com a
+    // descrição e um X para descadastrar — assim o número persiste como escolha ao reabrir.
     const telNums = new Set(tels.map(t => t.numero));
     sel.forEach(n => {
         if (telNums.has(n)) return;
-        lista.insertAdjacentHTML('beforeend',
-            '<label class="wa-opt"><input type="radio" name="wa-num" class="wa-radio" value="' + waEsc(n) + '" checked onchange="waSyncOutro()">' +
-            '<span style="font-family:monospace;">' + waEsc(n) + '</span>' +
-            ' <span class="text-tertiary" style="font-size:12px;">— Cadastrado manualmente no Painel</span></label>');
+        lista.insertAdjacentHTML('beforeend', _waManualItem(n));
     });
-    document.getElementById('wa-outro-chk').checked = false;
-    const on = document.getElementById('wa-outro-num'); on.value = ''; on.style.display = 'none';
+    const on = document.getElementById('wa-outro-num'); on.value = '';
     document.getElementById('wa-modal').style.display = 'flex';
 }
 function waFechar(){ document.getElementById('wa-modal').style.display = 'none'; }
+// Item de número "cadastrado manualmente no Painel": checkbox marcado + X para remover
+// (igual à exclusão de anexos). O X apaga a linha; o Salvar persiste só os que ficaram.
+function _waManualItem(n) {
+    return '<label class="wa-opt wa-manual" data-num="' + waEsc(n) + '">' +
+        '<input type="checkbox" class="wa-chk" value="' + waEsc(n) + '" checked>' +
+        '<span style="font-family:monospace;">' + waEsc(n) + '</span>' +
+        ' <span class="text-tertiary" style="font-size:12px;">— Cadastrado manualmente no Painel</span>' +
+        '<button type="button" class="btn-subtle wa-manual-x" style="padding:2px 7px;color:#dc2626;margin-left:auto;" ' +
+        'title="Descadastrar este número" onclick="event.preventDefault();event.stopPropagation();waRemoveManual(this)">✕</button>' +
+        '</label>';
+}
+// "Cadastrar": adiciona o(s) número(s) digitado(s) à lista como itens manuais marcados
+// (sem duplicar os já presentes) e limpa a caixa de texto. Não persiste ainda — só o Salvar grava.
+function waAddOutro() {
+    const inp = document.getElementById('wa-outro-num');
+    const brutos = (inp.value || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    if (!brutos.length) { inp.focus(); return; }
+    const lista = document.getElementById('wa-lista');
+    const existentes = new Set(
+        Array.from(lista.querySelectorAll('.wa-chk')).map(c => c.value.trim()));
+    // remove o aviso "Nenhum telefone no cadastro" se estiver sozinho
+    const aviso = lista.querySelector('.text-tertiary');
+    if (aviso && !lista.querySelector('.wa-opt')) aviso.remove();
+    brutos.forEach(n => {
+        if (existentes.has(n)) return;
+        existentes.add(n);
+        lista.insertAdjacentHTML('beforeend', _waManualItem(n));
+    });
+    inp.value = ''; inp.focus();
+}
+function waRemoveManual(btn) {
+    const item = btn.closest('.wa-opt');
+    if (item) item.remove();
+}
+// Coleta = UNIÃO dos checkboxes marcados + o(s) número(s) digitado(s) em "outro"
+// (separados por vírgula/; /quebra de linha), removendo duplicatas e mantendo a ordem.
 function waColeta(){
-    const sel = document.querySelector('input[name="wa-num"]:checked');
-    if (!sel) return [];
-    if (sel.value === '__outro__') {
-        const v = document.getElementById('wa-outro-num').value.trim();
-        return v ? [v] : [];
-    }
-    return [sel.value];
+    const nums = [];
+    document.querySelectorAll('#wa-lista .wa-chk:checked').forEach(c => nums.push(c.value.trim()));
+    const outro = (document.getElementById('wa-outro-num').value || '');
+    outro.split(/[,;\n]+/).forEach(v => { const s = v.trim(); if (s) nums.push(s); });
+    return [...new Set(nums.filter(Boolean))];
 }
 async function waEnviar(nums){
     try {

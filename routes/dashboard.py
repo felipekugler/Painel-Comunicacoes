@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, File, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 
-from services import config_service, divcom_service, envio_service
+from services import analise_service, config_service, divcom_service, envio_service
 
 router = APIRouter()
 
@@ -391,8 +391,13 @@ async def remover_da_fila(slug: str, paj_norm: str, id_tramite: str, payload: di
 
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/triar/conjunto", response_class=JSONResponse)
 async def triar_conjunto(slug: str, paj_norm: str):
-    """Dispara (em segundo plano) o tratamento em conjunto do PAJ. Retorna na hora;
-    o progresso é consultado em /triagem-status."""
+    """Trata o PAJ em conjunto. Com IA: dispara em SEGUNDO PLANO (progresso em
+    /triagem-status). No MODO SIMPLES (sem IA): executa NA HORA e retorna status
+    'done' — não há análise a esperar, a decisão é aplicada imediatamente."""
+    if not analise_service.disponivel():
+        res = await divcom_service.tratar_conjunto(slug, paj_norm)
+        res.setdefault("status", "done")
+        return JSONResponse(res, status_code=200 if res.get("ok") else 400)
     res = divcom_service.iniciar_triagem(slug, paj_norm, "conjunto")
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
@@ -400,6 +405,10 @@ async def triar_conjunto(slug: str, paj_norm: str):
 @router.post("/api/caixa/{slug}/paj/{paj_norm}/triar/separado", response_class=JSONResponse)
 async def triar_separado(slug: str, paj_norm: str, payload: dict = Body(default={})):
     mapeamento = (payload or {}).get("mapeamento") or {}
+    if not analise_service.disponivel():  # Modo Simples: aplica a decisão na hora
+        res = await divcom_service.tratar_separado(slug, paj_norm, mapeamento)
+        res.setdefault("status", "done")
+        return JSONResponse(res, status_code=200 if res.get("ok") else 400)
     res = divcom_service.iniciar_triagem(slug, paj_norm, "separado", mapeamento)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 

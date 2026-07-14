@@ -983,6 +983,7 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["datas_tramites"] = [s.get("data_envio", "") for s in sols]
     d["remetentes_tramites"] = [s.get("remetente", "") for s in sols]
     d["descricoes_tramites"] = [s.get("descricao_tramite", "") for s in sols]
+    d["prazos_tramites"] = [s.get("prazo", "") for s in sols]  # prazo por tramitação (selo ao lado do remetente)
     d["resumo_ia"] = colapsar_paragrafos(conj.get("resumo_ia", ""))
     d["sugestao_tipo"] = conj.get("sugestao_tipo_editada", "")  # conjunto só tem classificação MANUAL
     d["sugestao_editada"] = conj.get("sugestao_editada", "")
@@ -1056,7 +1057,8 @@ def montar_dashboard(slug: str) -> dict:
                 elif decisao == "separado":
                     for s in pend:
                         pendentes.append({**_enriquecer_tramite(box, s, cont),
-                                          "tipo": "tramite", "de_triagem_separado": True})
+                                          "tipo": "tramite", "de_triagem_separado": True,
+                                          "n_separados": len(pend)})
                 else:
                     triagem.append(_item_triagem(box, pend, cont))
     triagem.sort(key=lambda d: d.get("paj", ""))
@@ -1086,8 +1088,9 @@ async def tratar_conjunto(slug: str, paj_norm: str) -> dict:
     id_proc = pend[0].get("id", "")
     comunicados = config_service.comunicados_da_caixa(slug)
     com_rev = config_service.comunicados_rev()
+    ia_on = analise_service.disponivel()  # Modo Simples: sem IA → decisão imediata, sem re-ler o SISDPU
     async with _triagem_ctx():  # roda em paralelo com outras triagens (até _TRIAGEM_MAX)
-        if id_proc:
+        if ia_on and id_proc:  # só re-lê o detalhamento quando a IA vai analisar
             with contextlib.suppress(Exception):
                 async with _browser_lock:  # navegador é sessão única — serializa este passo
                     det = await sisdpu_client.detalhar_paj(id_proc, n_movs=MOVS_EXTRACAO_MAX)
@@ -1965,7 +1968,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                         pipe["mov_url"] = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
                         app_mov_seq = mov_seq
                     if tramitar_grupo and ok_mov and id_proc:
-                        prazo_data, _pd = _prazo_tramitacao(p_app)
+                        _dt_data, _pd, prazo_dias = _prazo_tramitacao(p_app)
                         tramr = await _tramitar_referenciando_mov(
                             id_proc, t["paj"], tramitar_grupo, mov_seq, p_app, log)
                         pipe.update({
@@ -1977,7 +1980,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                         if tramr["tram_status"] == "tramitado":
                             app_tram_caixa = tramr["tram_caixa"]
                             yield _evento_passo("Tramitação do PAJ", True,
-                                                f'realizada para a caixa "{tramitar_grupo}" · concluir até {prazo_data}')
+                                                f'realizada para a caixa "{tramitar_grupo}" · prazo {prazo_dias}d')
                         else:
                             yield _evento_passo("Tramitação do PAJ", False,
                                                 f'falhou para a caixa "{tramitar_grupo}": {tramr["tram_detalhe"]}')
@@ -2119,20 +2122,26 @@ async def _drenar_com_passos(coro_factory):
     yield {"_result": await tarefa}
 
 
-def _montar_descricao_mov(meio_label: str, mensagem: str, numero: str,
+def _montar_descricao_mov(meio_label: str, mensagem: str, numeros,
                           prazo: int | None, nomes: list[str], tramitar_grupo: str) -> str:
     """Monta a descrição HTML PADRÃO da movimentação (título/negrito, conteúdo em
     itálico, urgente em vermelho, anexos em bullets, comprovante + linha de tramitação).
-    Usada no envio E no 'refazer' — garante que a movimentação refeita seja IDÊNTICA."""
+    Usada no envio E no 'refazer' — garante que a movimentação refeita seja IDÊNTICA.
+    `numeros` pode ser um número único (str) ou uma LISTA de números (WhatsApp para
+    vários telefones do mesmo PAJ) — nesse caso todos são listados na descrição."""
     import html as _html
     e = _html.escape
+    nums = [n for n in (numeros if isinstance(numeros, (list, tuple)) else [numeros]) if n]
+    alvo = ", ".join(e(n) for n in nums) if nums else "—"
+    rotulo_alvo = "enviada para os números" if len(nums) > 1 else "enviada para"
+    n_comp = len(nums)
     n_anx = len(nomes or [])
     urgente = (prazo is None) or (int(prazo) <= 0)
     prazo_txt = f"{int(prazo)} dias" if (prazo is not None and int(prazo) > 0) else "—"
     urg_html = '<span style="color:#c00000;"><strong>Sim</strong></span>' if urgente else "Não"
     cabecalho = "<br>".join([
         "<strong>[Painel de Comunicações]</strong>",
-        f"Mensagem {e(meio_label)} enviada para: <strong>{e(numero or '—')}</strong>",
+        f"Mensagem {e(meio_label)} {rotulo_alvo}: <strong>{alvo}</strong>",
         f"Conteúdo: <em>{e(mensagem)}</em>",
         f"Prazo indicado: {e(prazo_txt)}",
         f"Urgente: {urg_html}",
@@ -2141,8 +2150,10 @@ def _montar_descricao_mov(meio_label: str, mensagem: str, numero: str,
     bullets = ("<ul>" + "".join(f"<li>{e(n)}</li>" for n in (nomes or [])) + "</ul>") if nomes else ""
     tram_linha = (f"PAJ tramitado para <strong>{e(tramitar_grupo)}</strong>"
                   if tramitar_grupo else "PAJ não tramitado")
+    comp_linha = ("Comprovantes de envio em anexo (um por número)" if n_comp > 1
+                  else "Comprovante de envio em anexo")
     return (f"<p>{cabecalho}</p>{bullets}"
-            f"<p>Comprovante de envio em anexo<br><br>{tram_linha}</p>")
+            f"<p>{comp_linha}<br><br>{tram_linha}</p>")
 
 
 def _descricao_tramitacao(mov_seq) -> str:
@@ -2150,17 +2161,17 @@ def _descricao_tramitacao(mov_seq) -> str:
     a movimentação gerada (mov. "X"). Usada no envio e no 'refazer' (mesmo texto)."""
     seq = str(mov_seq).strip() if mov_seq not in (None, "") else ""
     ref = f' (mov. "{seq}")' if seq else ""
-    return f"Mensagem ao assistido enviada pelo Painel de Comunicações{ref}"
+    return f"Mensagem enviada pelo Painel de Comunicações{ref}"
 
 
-def _prazo_tramitacao(prazo_envio) -> tuple[str, str]:
+def _prazo_tramitacao(prazo_envio) -> tuple[str, str, int]:
     """Calcula a data de 'Nova conclusão em' da tramitação a partir do prazo (em
     dias) informado no envio. Decisão do usuário:
       - prazo > 0  -> hoje + prazo dias
       - urgente(0) -> hoje + 1 dia
       - sem prazo  -> hoje + padrão configurável (config_service, 15 dias)
-    Retorna (data 'DD/MM/AAAA', descrição do prazo). A data é sempre relativa ao
-    momento da tramitação (recalculada também no 'refazer')."""
+    Retorna (data 'DD/MM/AAAA', descrição do prazo, dias). A data é sempre relativa
+    ao momento da tramitação (recalculada também no 'refazer')."""
     try:
         p = int(prazo_envio)
     except (TypeError, ValueError):
@@ -2175,7 +2186,7 @@ def _prazo_tramitacao(prazo_envio) -> tuple[str, str]:
         dias = p
         desc = f"Aguardar retorno do assistido — prazo de {p} dia{'s' if p != 1 else ''}."
     data = (_dt.date.today() + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
-    return data, desc
+    return data, desc, dias
 
 
 async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: str,
@@ -2190,7 +2201,7 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
            "tram_url": "", "tram_descricao": ""}
     tram_desc = _descricao_tramitacao(mov_seq)
     res["tram_descricao"] = tram_desc
-    prazo_data, prazo_desc = _prazo_tramitacao(prazo)
+    prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(prazo)
     if emit is not None:
         emit({"level": "muted", "msg": f"     tramitando o PAJ → {tramitar_grupo}…"})
     try:
@@ -2205,7 +2216,7 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     if tram.get("ok"):
         res["tram_url"] = f"{sisdpu_client.SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
         _passo(log, emit, rotulo, True,
-               f'realizada para a caixa "{tramitar_grupo}" · concluir até {prazo_data}')
+               f'realizada para a caixa "{tramitar_grupo}" · prazo {prazo_dias}d')
     else:
         _passo(log, emit, rotulo, False,
                f'falhou para a caixa "{tramitar_grupo}": {tram.get("detalhe", "")}')
@@ -2213,15 +2224,17 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
 
 
 async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
-                                  anexos_meta: list[dict], comprovante_caminho: str | None,
-                                  comp_nome: str, tramitar_grupo: str, log: list,
-                                  numero: str = "", prazo: int | None = None,
+                                  anexos_meta: list[dict], comprovantes: list[dict] | None,
+                                  tramitar_grupo: str, log: list,
+                                  numeros: list[str] | None = None, prazo: int | None = None,
                                   anexos_arquivos: list[dict] | None = None, emit=None) -> dict:
     """Após um envio bem-sucedido: (1) MOVIMENTA o PAJ documentando o envio (fase
     'Mensagem ao assistido', descrição por template) anexando à movimentação OS MESMOS
-    ANEXOS da mensagem (`anexos_arquivos`, com caminho) MAIS o comprovante, todos como
-    'Correspondência'; e (2) se `tramitar_grupo` foi escolhido E a movimentação teve
-    êxito, TRAMITA o PAJ para essa caixa. Nunca levanta — captura tudo no `log`.
+    ANEXOS da mensagem (`anexos_arquivos`, com caminho) MAIS os comprovantes (UM por
+    número contatado — `comprovantes`=[{nome, caminho}]), todos como 'Correspondência';
+    e (2) se `tramitar_grupo` foi escolhido E a movimentação teve êxito, TRAMITA o PAJ
+    para essa caixa. `numeros` = os números efetivamente contatados (listados na
+    descrição). Nunca levanta — captura tudo no `log`.
     Retorna {mov_seq, mov_status, mov_detalhe, tram_caixa, tram_status, tram_detalhe}."""
     from ingestao import sisdpu_client
     from ingestao.sisdpu_client import SISDPU_URL
@@ -2236,19 +2249,22 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
         return res
     # Descrição PADRÃO da movimentação (mesma no envio e no "refazer").
     nomes = [a.get("nome", "") for a in (anexos_meta or []) if a.get("nome")]
-    descricao = _montar_descricao_mov(meio_label, mensagem, numero, prazo, nomes, tramitar_grupo)
+    descricao = _montar_descricao_mov(meio_label, mensagem, numeros or [], prazo, nomes, tramitar_grupo)
     res["mov_descricao"] = descricao  # guardado no histórico p/ permitir "refazer" idêntico
     # Anexos da MOVIMENTAÇÃO = os MESMOS anexos da mensagem (documentos enviados ao
-    # assistido) + o comprovante do envio, todos como "Correspondência".
+    # assistido) + o(s) comprovante(s) do envio (um por número contatado), todos como
+    # "Correspondência".
     mov_anexos = []
     for a in (anexos_arquivos or []):
         cam = a.get("caminho") or ""
         if cam and Path(cam).exists():
             mov_anexos.append({"nome": a.get("nome") or Path(cam).name,
                                "caminho": str(cam), "tipo": a.get("tipo") or ""})
-    if comprovante_caminho and Path(comprovante_caminho).exists():
-        mov_anexos.append({"nome": comp_nome or Path(comprovante_caminho).name,
-                           "caminho": str(comprovante_caminho), "tipo": "pdf"})
+    for comp in (comprovantes or []):
+        cam = comp.get("caminho") or ""
+        if cam and Path(cam).exists():
+            mov_anexos.append({"nome": comp.get("nome") or Path(cam).name,
+                               "caminho": str(cam), "tipo": "pdf"})
     if emit is not None:
         emit({"level": "muted", "msg": "     movimentando o PAJ (documentando o envio)…"})
     try:
@@ -2322,7 +2338,6 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
     if not numeros:
         return {"ok": False, "status": "falha",
                 "detalhe": "PAJ sem número de WhatsApp cadastrado."}
-    numero = numeros[0]
     assistido = t.get("assistido") or cont.get("assistido") or ""
     paj = t.get("paj", "")
 
@@ -2368,45 +2383,89 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 return {"ok": False, "status": "falha",
                         "detalhe": ("Conflito de sessão do SISDPU detectado — feche a OUTRA sessão do seu "
                                     "usuário no SISDPU e tente novamente. A mensagem NÃO foi enviada.")}
+        # ENVIO por NÚMERO: dispara para CADA número cadastrado (pode haver vários).
+        # Falha em um número NÃO impede os demais — a falha fica registrada só no LOG.
+        # Entre um número e outro do mesmo PAJ, espera ~70% do intervalo configurado
+        # (varia o timing para parecer mais humano). `envios` = 1 dict por número.
+        envios: list[dict] = []
         if modo == "simulado":
             await asyncio.sleep(0.4)
-            res = {"ok": True, "status": "simulado", "comprovante": None,
-                   "detalhe": f"[simulado] WhatsApp para {assistido or numero} · {msg_prazo}"}
+            for numero in numeros:
+                envios.append({"numero": numero, "ok": True, "status": "simulado",
+                               "detalhe": f"[simulado] WhatsApp para {numero} · {msg_prazo}",
+                               "comprovante": None, "comprovante_nome": ""})
+                _passo(log, emit, f"Envio da mensagem (WhatsApp) → {numero}", True,
+                       "[simulado] não enviado de verdade")
         else:
             if headless is None:
                 headless = config_service.get_whatsapp_headless()
-            if emit is not None:
-                emit({"level": "muted", "msg": f"     abrindo a conversa e enviando a mensagem a {assistido or numero}…"})
-            res = await whatsapp_client.enviar_mensagem(
-                numero=numero, mensagem=mensagem, anexos=anexos_ctx,
-                headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm,
-                mensagem_prazo=msg_prazo,
-                mensagem_referencia=(f"Contato referente ao PAJ {paj}" if paj else ""))
-        _passo(log, emit, "Envio da mensagem (WhatsApp)", res.get("ok"), res.get("detalhe", ""))
+            intervalo = int(config_service.get_whatsapp_intervalo_seg() * 0.7)
+            for i, numero in enumerate(numeros):
+                if i > 0 and intervalo > 0:
+                    if emit is not None:
+                        emit({"level": "muted", "msg": f"     aguardando {intervalo}s antes do próximo número…"})
+                    await asyncio.sleep(intervalo)
+                if emit is not None:
+                    emit({"level": "muted", "msg": f"     abrindo a conversa e enviando a mensagem a {numero}…"})
+                r1 = await whatsapp_client.enviar_mensagem(
+                    numero=numero, mensagem=mensagem, anexos=anexos_ctx,
+                    headless=headless, comprovante_dir=str(COMPROVANTES_WA_DIR), paj_ref=paj_norm,
+                    mensagem_prazo=msg_prazo,
+                    mensagem_referencia=(f"Contato referente ao PAJ {paj}" if paj else ""))
+                comp = r1.get("comprovante")
+                envios.append({"numero": numero, "ok": r1.get("ok"),
+                               "status": r1.get("status", "falha"), "detalhe": r1.get("detalhe", ""),
+                               "comprovante": comp, "comprovante_nome": Path(comp).name if comp else ""})
+                _passo(log, emit, f"Envio da mensagem (WhatsApp) → {numero}",
+                       r1.get("ok"), r1.get("detalhe", ""))
 
-        if not res.get("ok"):
+        oks = [e for e in envios if e.get("ok")]
+        fails = [e for e in envios if not e.get("ok")]
+
+        # NENHUM número deu certo → mantém o item na fila como falha (rede de segurança).
+        if not oks:
+            det = "; ".join(f"{e['numero']}: {e['detalhe']}" for e in fails) or "falha no envio"
             box2 = _ler_box(slug, paj_norm)
             alvo = _achar_alvo(box2)
             if alvo is not None:
                 e = alvo.get("envio") or {}
-                e["falhas"] = {"whatsapp": res.get("detalhe", "falha")}
+                e["falhas"] = {"whatsapp": det}
                 e["falha_em"] = _dt.datetime.now().isoformat(timespec="seconds")
                 alvo["envio"] = e
                 _gravar_box(slug, box2)
-            return res
+            return {"ok": False, "status": "falha", "detalhe": det}
 
-        comprovante = res.get("comprovante")
-        comp_nome = Path(comprovante).name if comprovante else ""
+        # PELO MENOS um número deu certo → conclui normalmente com os bem-sucedidos.
+        # Os que falharam ficam SÓ no log (não voltam à fila, decisão do usuário).
+        for e in fails:
+            _passo(log, emit, f"Falha no envio → {e['numero']} (registrada apenas no log)",
+                   False, e["detalhe"])
+
+        numeros_ok = [e["numero"] for e in oks]
+        comprovantes = [{"nome": e["comprovante_nome"], "caminho": e["comprovante"]}
+                        for e in oks if e.get("comprovante")]
+        # p/ histórico/UI: nome do PDF associado a cada número contatado
+        comprovantes_reg = [{"nome": e["comprovante_nome"], "numero": e["numero"]}
+                            for e in oks if e.get("comprovante_nome")]
+        comps_nomes = [c["nome"] for c in comprovantes_reg]
+        status_geral = "enviado" if (not fails and modo != "simulado") else (
+            "simulado" if modo == "simulado" else "parcial")
+        detalhe_geral = f"WhatsApp para {', '.join(numeros_ok)}" + (
+            f" · falha em {', '.join(e['numero'] for e in fails)}" if fails else "")
+        res = {"ok": True, "status": status_geral, "detalhe": detalhe_geral}
+
         if modo != "simulado":
-            _passo(log, emit, "Comprovante de envio (PDF)", bool(comprovante),
-                   comp_nome if comprovante else "não foi possível gerar o comprovante")
+            _passo(log, emit, "Comprovantes de envio (PDF)", bool(comprovantes),
+                   (f"{len(comprovantes)} comprovante(s) — um por número"
+                    if comprovantes else "não foi possível gerar comprovante"))
 
         # PIPELINE: movimenta (documenta o envio) e, se escolhido, tramita — só em modo
-        # REAL (o SISDPU é sempre real; em simulado não mexemos no PAJ).
+        # REAL (o SISDPU é sempre real; em simulado não mexemos no PAJ). Movimentação
+        # ÚNICA, listando todos os números contatados + um comprovante para cada.
         if modo != "simulado":
             mov_tram = await _movimentar_e_tramitar(
-                t, "WhatsApp", mensagem, anexos_meta, comprovante, comp_nome, tramitar_grupo, log,
-                numero=numero, prazo=prazo_wa, anexos_arquivos=anexos_ctx, emit=emit)
+                t, "WhatsApp", mensagem, anexos_meta, comprovantes, tramitar_grupo, log,
+                numeros=numeros_ok, prazo=prazo_wa, anexos_arquivos=anexos_ctx, emit=emit)
         else:
             mov_tram = {"mov_seq": None, "mov_status": "nao_aplicavel", "mov_detalhe": "",
                         "tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": ""}
@@ -2430,7 +2489,11 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "tram_grupo": tramitar_grupo,            # caixa PRETENDIDA (mesmo se falhar)
             "mov_descricao": mov_tram.get("mov_descricao", ""),  # p/ "refazer" a movimentação
             "status": res.get("status", "enviado"), "detalhe": res.get("detalhe", ""),
-            "comprovante": comp_nome,  # nome do PDF em dados/_comprovantes_whatsapp/
+            # comprovante(s) — 1 PDF por número contatado (em dados/_comprovantes_whatsapp/).
+            # `comprovante` = 1º (retrocompat); `comprovantes` = lista [{nome, numero}].
+            "comprovante": (comps_nomes[0] if comps_nomes else ""),
+            "comprovantes": comprovantes_reg,
+            "numeros": numeros_ok,
             # documentação no PAJ (movimentação + tramitação opcional) + log individual
             "mov_seq": mov_tram["mov_seq"], "mov_status": mov_tram["mov_status"],
             "mov_detalhe": mov_tram["mov_detalhe"], "mov_url": mov_tram.get("mov_url", ""),
@@ -2445,7 +2508,9 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
         if alvo is not None:
             entry = {"em": reg["ts"], "meios": ["whatsapp"], "mensagem": mensagem,
                      "status": res.get("status", "enviado"), "envio_id": envio_id,
-                     "historico_ids": [reg["id"]], "anexos": anexos_meta, "comprovante": comp_nome,
+                     "historico_ids": [reg["id"]], "anexos": anexos_meta,
+                     "comprovante": (comps_nomes[0] if comps_nomes else ""),
+                     "comprovantes": comprovantes_reg, "numeros": numeros_ok,
                      "mov_seq": mov_tram["mov_seq"], "tram_caixa": mov_tram["tram_caixa"]}
             if conjunto:
                 entry["tramite_ids"] = ids
@@ -2462,7 +2527,8 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             else:
                 alvo["envio"] = {}
             _gravar_box(slug, box2)
-        return {**res, "comprovante_nome": comp_nome, "historico_id": reg["id"]}
+        return {**res, "comprovante_nome": (comps_nomes[0] if comps_nomes else ""),
+                "comprovantes": comprovantes_reg, "historico_id": reg["id"]}
 
 
 # ==================== REFAZER movimentação/tramitação (recuperação de falha) ====================
@@ -2485,8 +2551,12 @@ def _mov_anexos_do_registro(rec: dict) -> list[dict]:
         if cam and Path(cam).exists():
             itens.append({"nome": a.get("nome") or a.get("arquivo") or Path(cam).name,
                           "caminho": str(cam), "tipo": a.get("tipo") or ""})
-    comp = rec.get("comprovante")
-    if comp:
+    # Comprovante(s): 1 por número contatado. Registros novos têm `comprovantes`
+    # [{nome, numero}]; os antigos têm só `comprovante` (string única).
+    comps = [c.get("nome") for c in (rec.get("comprovantes") or []) if c.get("nome")]
+    if not comps and rec.get("comprovante"):
+        comps = [rec["comprovante"]]
+    for comp in comps:
         p = COMPROVANTES_WA_DIR / comp
         if p.exists():
             itens.append({"nome": comp, "caminho": str(p), "tipo": "pdf"})
@@ -2521,10 +2591,10 @@ async def refazer_movimentacao(historico_id: str) -> dict:
     descricao = rec.get("mov_descricao") or ""
     if not descricao:
         _meios = {"whatsapp": "WhatsApp", "app_sisdpu": "App SISDPU", "email": "E-mail"}
-        numero = (ler_contato(rec.get("paj_norm", "")).get("whatsapp_numeros") or [""])[0]
+        numeros = rec.get("numeros") or ler_contato(rec.get("paj_norm", "")).get("whatsapp_numeros") or [""]
         nomes = [a.get("nome", "") for a in (rec.get("anexos") or []) if a.get("nome")]
         descricao = _montar_descricao_mov(
-            _meios.get(rec.get("meio", ""), "WhatsApp"), rec.get("mensagem", ""), numero,
+            _meios.get(rec.get("meio", ""), "WhatsApp"), rec.get("mensagem", ""), numeros,
             rec.get("prazo"), nomes, rec.get("tram_grupo") or "")
     mov_anexos = _mov_anexos_do_registro(rec)
     if not _pode_exclusivo():
@@ -2587,7 +2657,7 @@ async def refazer_tramitacao(historico_id: str) -> dict:
         historico_service.atualizar(historico_id, {"log": log_novo})
         return {"ok": False, "erro": "Há uma operação em andamento. Aguarde e tente de novo."}
     tram_desc = _descricao_tramitacao(rec.get("mov_seq"))
-    prazo_data, prazo_desc = _prazo_tramitacao(rec.get("prazo"))
+    prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(rec.get("prazo"))
     async with _entrar_exclusivo_fila():
         try:
             tram = await sisdpu_client.tramitar_paj(
@@ -2596,7 +2666,8 @@ async def refazer_tramitacao(historico_id: str) -> dict:
         except Exception as e:  # noqa: BLE001
             tram = {"ok": False, "detalhe": f"exceção: {e}"}
     _log_passo(log_novo, "Refazer tramitação do PAJ", tram.get("ok"),
-               f"→ {grupo} (concluir até {prazo_data}): {tram.get('detalhe', '')}")
+               (f'realizada para a caixa "{grupo}" · prazo {prazo_dias}d' if tram.get("ok")
+                else f'falhou para a caixa "{grupo}": {tram.get("detalhe", "")}'))
     if tram.get("ok"):
         historico_service.atualizar(historico_id, {
             "tram_status": "tramitado", "tram_caixa": grupo, "tram_detalhe": tram.get("detalhe", ""),
