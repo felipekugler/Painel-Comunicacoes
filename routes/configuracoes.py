@@ -1,4 +1,4 @@
-"""Rota de Configurações do Painel DIVCOM (multi-caixa).
+"""Rota de Configurações do Painel de Comunicações (multi-caixa).
 
 - GET  /configuracoes                       -> página de configurações
 - POST /api/config/movimentacoes            -> nº de movimentações analisadas
@@ -14,7 +14,8 @@ from fastapi import APIRouter, Body, File, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ingestao import sisdpu_client
-from services import analise_service, config_service, divcom_service, historico_service
+from services import (analise_service, config_service, credenciais_service,
+                      painel_comunicacoes_service, historico_service)
 
 router = APIRouter()
 
@@ -60,6 +61,10 @@ async def configuracoes(request: Request):
         caixas_disponiveis=caixas_disp,
         caixas=caixas_com,
         backups=historico_service.listar_backups(),
+        seg_configurado=credenciais_service.configurado(),
+        seg_destrancado=credenciais_service.destrancado(),
+        seg_env_legado=credenciais_service.env_tem_credenciais(),
+        seg_usuario=credenciais_service.get_usuario(),
     ))
 
 
@@ -116,7 +121,7 @@ async def set_ia_modo(payload: dict = Body(...)):
 
 @router.post("/api/config/abrir-tela-cheia", response_class=JSONResponse)
 async def set_abrir_tela_cheia(payload: dict = Body(...)):
-    """Liga/desliga a abertura do painel em TELA CHEIA no lançador (Painel-DIVCOM.bat).
+    """Liga/desliga a abertura do painel em TELA CHEIA no lançador (Painel-Comunicacoes.bat).
     Vale a partir da PRÓXIMA vez que o painel for aberto pelo atalho."""
     on = bool((payload or {}).get("on"))
     return {"ok": True, "on": config_service.set_abrir_tela_cheia(on)}
@@ -196,7 +201,7 @@ async def resetar_painel(payload: dict = Body(default={})):
     mantém textos/parágrafos padrão e caixas, limpando só os dados operacionais."""
     total = bool((payload or {}).get("total"))
     try:
-        return divcom_service.resetar_painel(total)
+        return painel_comunicacoes_service.resetar_painel(total)
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
 
@@ -205,7 +210,7 @@ async def resetar_painel(payload: dict = Body(default={})):
 async def atualizar_caixas():
     """Faz um login rápido e relista as caixas de grupo disponíveis."""
     try:
-        res = await sisdpu_client.listar_caixa_grupo(config_service.CAIXA_DIVCOM_GRUPO)
+        res = await sisdpu_client.listar_caixa_grupo(config_service.CAIXA_SEED_GRUPO)
         grupos = res.get("grupos_disponiveis", [])
         config_service.set_caixas_disponiveis(grupos)
         return {"ok": True, "caixas": grupos}
@@ -268,7 +273,7 @@ async def add_anexos_padrao(kind: str, oid: str, slug: str = "",
                             arquivos: list[UploadFile] = File(default=[])):
     if kind not in ("comunicado", "paragrafo"):
         return JSONResponse({"ok": False, "erro": "tipo inválido"}, status_code=400)
-    res = divcom_service.adicionar_anexos_padrao(kind, oid, slug or None,
+    res = painel_comunicacoes_service.adicionar_anexos_padrao(kind, oid, slug or None,
                                                  await _ler_uploads(arquivos))
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
@@ -276,14 +281,14 @@ async def add_anexos_padrao(kind: str, oid: str, slug: str = "",
 @router.post("/api/config/anexos-padrao/{kind}/{oid}/remover/{anexo_id}", response_class=JSONResponse)
 async def del_anexo_padrao(kind: str, oid: str, anexo_id: str, payload: dict = Body(default={})):
     slug = (payload or {}).get("slug") or None
-    res = divcom_service.remover_anexo_padrao(kind, oid, slug, anexo_id)
+    res = painel_comunicacoes_service.remover_anexo_padrao(kind, oid, slug, anexo_id)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.get("/api/config/anexos-padrao/{oid}/arquivo/{arquivo}")
 async def baixar_anexo_padrao(oid: str, arquivo: str):
-    p = divcom_service.caminho_anexo_padrao(oid, arquivo).resolve()
-    base = divcom_service.ANEXOS_PADRAO_DIR.resolve()
+    p = painel_comunicacoes_service.caminho_anexo_padrao(oid, arquivo).resolve()
+    base = painel_comunicacoes_service.ANEXOS_PADRAO_DIR.resolve()
     if base not in p.parents or not p.is_file():
         return JSONResponse({"ok": False, "erro": "arquivo não encontrado"}, status_code=404)
     nome = arquivo.split("__", 1)[1] if "__" in arquivo else arquivo

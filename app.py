@@ -1,9 +1,10 @@
-"""Painel DIVCOM — gestao da caixa de entrada de grupo "01 - PREV_DIVCOM".
+"""Painel de Comunicações — gestao das caixas de entrada de grupo do SISDPU.
 
-Painel web para SERVIDORES da DPU: lista os PAJs que aguardam contato com o
-assistido, a providencia necessaria em cada um e o status do contato.
+Painel web para SERVIDORES da DPU: lista, para as caixas de grupo escolhidas, os
+PAJs que aguardam contato com o assistido, a providencia necessaria em cada um e
+o status do contato (por Aplicativo SISDPU e WhatsApp).
 
-Duplicado do PAINEL SISDPU (do defensor); roda na porta 8002 para coexistir.
+Derivado do PAINEL SISDPU (do defensor); roda na porta 8002 para coexistir.
 Auto-gerencia processo: mata qualquer python na porta antes de iniciar,
 grava PID file. Evita duplicatas.
 """
@@ -25,11 +26,12 @@ from config import OFICIO_DESCRICAO
 from routes.configuracoes import router as configuracoes_router
 from routes.dashboard import router as dashboard_router
 from routes.historico import router as historico_router
+from routes.seguranca import router as seguranca_router
 
 BASE_DIR = Path(__file__).resolve().parent
 PID_FILE = BASE_DIR / ".server.pid"
 LOGS_DIR = BASE_DIR / "logs"
-# PAINEL DIVCOM roda na porta 8002 para coexistir com o PAINEL SISDPU (8001)
+# PAINEL COMUNICAÇÕES roda na porta 8002 para coexistir com o PAINEL SISDPU (8001)
 # na mesma maquina sem conflito de porta.
 PORT = 8002
 
@@ -55,7 +57,7 @@ _configurar_logging()
 # Versao do painel — fonte unica. Exposta a todos os templates via Jinja globals.
 APP_VERSION = "0.1.0"
 
-app = FastAPI(title="painel-divcom", version=APP_VERSION)
+app = FastAPI(title="painel-comunicacoes", version=APP_VERSION)
 app.state.jinja = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(BASE_DIR / "templates")),
     autoescape=True,
@@ -64,17 +66,27 @@ app.state.jinja = jinja2.Environment(
 app.state.jinja.globals["app_version"] = APP_VERSION
 app.state.jinja.globals["oficio_descricao"] = OFICIO_DESCRICAO
 # Menu dinamico: caixas habilitadas + contagem de PAJs (usado pela sidebar).
-from services import divcom_service as _ds  # noqa: E402
+from services import painel_comunicacoes_service as _ds  # noqa: E402
 
 app.state.jinja.globals["menu_caixas"] = _ds.menu_caixas
 app.state.jinja.globals["total_prontos"] = _ds.contar_prontos_envio
 app.state.jinja.globals["prontos_por_meio"] = _ds.prontos_por_meio
 app.state.jinja.globals["prontos_meios"] = _ds.PRONTOS_MEIOS
 app.state.jinja.globals["cor_caixa"] = _ds.cor_caixa
-# Modo de IA (Simples × com IA) — global CALLABLE (sempre atual) p/ os cards de IA.
+# Modo de IA (Simples × com IA) — globals CALLABLE (sempre atuais).
+from services import analise_service as _analise  # noqa: E402
 from services import config_service as _cs  # noqa: E402
 
 app.state.jinja.globals["ia_ativa"] = _cs.get_ia_ativa
+# Modo EFETIVO (toggle + ANALISE_ATIVA + claude instalado) — usado no selo do cabeçalho.
+app.state.jinja.globals["ia_disponivel"] = _analise.disponivel
+# Estado do acesso ao SISDPU — usado no selo de status do cabeçalho (conectado/usuário).
+from services import credenciais_service as _cred  # noqa: E402
+
+app.state.jinja.globals["sisdpu_destrancado"] = _cred.destrancado
+app.state.jinja.globals["sisdpu_usuario"] = _cred.get_usuario
+app.state.jinja.globals["sisdpu_env"] = _cred.env_tem_credenciais
+app.state.jinja.globals["sisdpu_conflito"] = _cred.conexao_conflito
 
 
 # Formatadores de data — datas exibidas ao usuario saem no padrao BR DD/MM/AAAA.
@@ -120,6 +132,10 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.include_router(dashboard_router)
 app.include_router(configuracoes_router)
 app.include_router(historico_router)
+app.include_router(seguranca_router)
+# Sem cadeado de navegação: o painel abre livremente. A senha-mestra só é pedida
+# (via modal no front-end) quando o usuário aciona uma função que usa o SISDPU e a
+# sessão ainda não está destrancada — ver garantirSisdpu() em base.html.
 
 
 def _cleanup_port(port: int) -> None:
@@ -170,7 +186,7 @@ if __name__ == "__main__":
     time.sleep(1)  # aguarda SO liberar porta
 
     PID_FILE.write_text(str(os.getpid()))
-    print(f"[app] Painel DIVCOM PID={os.getpid()} — http://127.0.0.1:{PORT}")
+    print(f"[app] Painel de Comunicações PID={os.getpid()} — http://127.0.0.1:{PORT}")
     try:
         uvicorn.run(app, host="127.0.0.1", port=PORT, reload=False)
     finally:

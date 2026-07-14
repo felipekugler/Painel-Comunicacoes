@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Caixa DIVCOM{% endblock %}
+{% block title %}{{ caixa.nome if caixa else 'Painel de Comunicações' }}{% endblock %}
 
 {#- Macro: icone de metodo de contato (chip). Colorido se cadastrado, apagado se nao. -#}
 {% macro contato_icon(tipo, ativo, detalhe='', copiavel=false) %}
@@ -956,7 +956,7 @@ let _GRUPOS_CACHE = null, _GRUPOS_FAV = [];
 // Estado ABERTO das linhas persiste em sessionStorage (por caixa/URL) → salvar em um
 // modal/popup (que dá location.reload) NÃO fecha a linha; só o clique na própria linha
 // abre/fecha. A chave é a URL da caixa (cada caixa mantém seu próprio conjunto aberto).
-function _pjOpenKey() { return 'divcom-open:' + location.pathname; }
+function _pjOpenKey() { return 'pcom-open:' + location.pathname; }
 function _pjOpenSet() {
     try { return new Set(JSON.parse(sessionStorage.getItem(_pjOpenKey()) || '[]')); }
     catch (e) { return new Set(); }
@@ -1578,6 +1578,7 @@ async function triagemRetomar() {
 }
 triagemRetomar();
 async function tratarConjunto(btn) {
+    if (!(await window.garantirSisdpu())) return;
     // MODO SIMPLES (sem IA): sem análise/caixas de texto — aplica a decisão na hora.
     const msg = IA_ATIVA
         ? 'Tratar EM CONJUNTO: a IA vai sintetizar UMA mensagem que atenda a todas as tramitações pendentes deste PAJ. Continuar?'
@@ -1610,6 +1611,7 @@ async function voltarTriagem(btn) {
 }
 // ---------- Tratar separadamente (one-click): lê os dropdowns da própria linha ----------
 async function tratarSeparado(btn) {
+    if (!(await window.garantirSisdpu())) return;
     const tr = btn.closest('tr');
     const mapeamento = {};
     tr.querySelectorAll('.tri-sel').forEach(s => { mapeamento[s.dataset.tramite] = s.value; });
@@ -1886,6 +1888,7 @@ async function reanalisarIA(btn) {
 
 // ---------- Sincronizar apenas um PAJ ----------
 async function sincronizarPaj(btn) {
+    if (!(await window.garantirSisdpu())) return;
     const paj = btn.dataset.paj;
     const spin = btn.querySelector('.spin-mini');
     const ic = btn.querySelector('.ic-sync');
@@ -2111,7 +2114,8 @@ function sincronizar() {
 function sincronizarTodas() {
     iniciarSync('/api/sincronizar-todas/stream', 'Todas as caixas');
 }
-function iniciarSync(url, nome, prefixo) {
+async function iniciarSync(url, nome, prefixo) {
+    if (!(await window.garantirSisdpu())) return;
     const log = document.getElementById('sync-log');
     const foot = document.getElementById('sync-foot');
     log.innerHTML = '';

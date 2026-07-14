@@ -379,6 +379,22 @@
         [x-cloak] { display: none !important; }
         .toggle-sidebar { display: none; }
         @media (min-width: 769px) { .toggle-sidebar { display: flex; } }
+        /* Selo do modo (Simples x IA) ao lado do botao de Menu */
+        .modo-badge { display:inline-flex; align-items:center; gap:6px; margin-left:12px;
+            padding:3px 11px; border-radius:999px; font-size:11.5px; font-weight:600;
+            border:1px solid var(--stroke-strong); white-space:nowrap; letter-spacing:.01em; }
+        .modo-badge .dot { width:7px; height:7px; border-radius:50%; flex:none; }
+        .modo-badge.modo-ia { color:var(--accent); background:var(--accent-soft); border-color:transparent; }
+        .modo-badge.modo-ia .dot { background:var(--accent); }
+        .modo-badge.modo-simples { color:var(--text-secondary); background:var(--layer-alt); }
+        .modo-badge.modo-simples .dot { background:var(--text-tertiary); }
+        /* Selo de status do SISDPU (conectado/desconectado + usuário) */
+        .modo-badge.sisdpu-on { color:var(--c-zap); background:color-mix(in srgb, var(--c-zap) 14%, transparent); border-color:transparent; }
+        .modo-badge.sisdpu-on .dot { background:var(--c-zap); }
+        .modo-badge.sisdpu-off { color:var(--text-secondary); background:var(--layer-alt); }
+        .modo-badge.sisdpu-off .dot { background:var(--text-tertiary); }
+        .modo-badge.sisdpu-warn { color:#8a5a00; background:color-mix(in srgb, #c98a00 16%, transparent); border-color:#d9a441; }
+        .modo-badge.sisdpu-warn .dot { background:#d9a441; }
         @media (max-width: 768px) {
             .sidebar { width: 100%; min-height: auto; position: relative; transform: none !important; }
             .sidebar.hidden { transform: none !important; }
@@ -478,6 +494,17 @@
             </a>
         </nav>
 
+        <!-- Selecionar Caixas (atalho p/ Configurações → Caixas para Sincronização) -->
+        <div class="px-3 pb-1">
+            <button type="button" class="btn-subtle" onclick="irSelecionarCaixas()"
+                    style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" style="width:18px;height:18px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                </svg>
+                Selecionar Caixas
+            </button>
+        </div>
+
         <!-- Sincronizar todas -->
         <div class="px-3 pb-1">
             <button id="btn-sync-todas" class="btn-amarelo" onclick="sincronizarTodasMenu()">
@@ -508,6 +535,26 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
             </button>
+            {% if ia_disponivel() %}
+            <span class="modo-badge modo-ia" title="Modo com IA: o Claude gera resumo, classificação e sugestão de mensagem na sincronização.">
+                <span class="dot"></span>Modo IA</span>
+            {% else %}
+            <span class="modo-badge modo-simples" title="Modo Simples: sem IA — as mensagens são escritas e os textos padrão aplicados manualmente.">
+                <span class="dot"></span>Modo Simples</span>
+            {% endif %}
+            {% set _sconflito = (sisdpu_destrancado() and sisdpu_conflito()) %}
+            {% set _sconect = (sisdpu_destrancado() or sisdpu_env()) %}
+            <span id="sisdpu-badge" class="modo-badge {{ 'sisdpu-warn' if _sconflito else ('sisdpu-on' if _sconect else 'sisdpu-off') }}"
+                  title="{% if _sconflito %}Conflito de sessão do SISDPU (login em outra estação) — clique em Reconectar.{% elif _sconect %}Conectado ao SISDPU{% if sisdpu_usuario() %} — usuário {{ sisdpu_usuario() }}{% endif %}. Pronto para sincronizar e enviar.{% else %}Desconectado — a senha-mestra será pedida ao acionar uma função do SISDPU.{% endif %}">
+                <span class="dot"></span>{% if _sconflito %}SISDPU · conflito de sessão{% elif _sconect %}SISDPU{% if sisdpu_usuario() %} · {{ sisdpu_usuario() }}{% endif %}{% else %}SISDPU desconectado{% endif %}</span>
+            <button type="button" id="btn-reconectar-sisdpu" class="btn-subtle" onclick="reconectarSisdpu()"
+                    title="Reconectar a sessão do SISDPU (use em caso de conflito de sessão)"
+                    style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;font-size:11.5px;margin-left:8px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" style="width:14px;height:14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                Reconectar
+            </button>
         </div>
 
         <div class="{% block content_class %}px-6 lg:px-10 pt-2 pb-10 w-full{% endblock %} flex-1 min-w-0">
@@ -518,9 +565,119 @@
     <!-- Toast container -->
     <div class="toast-container" id="toast-container"></div>
 
+    <!-- Modal global: desbloqueio/configuração do SISDPU (pedido só ao acionar função que usa o SISDPU) -->
+    <div id="sisdpu-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;">
+      <div style="width:100%;max-width:400px;background:var(--layer,#fff);border:1px solid var(--stroke-strong,#c4d0cc);border-radius:14px;padding:24px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <span style="width:38px;height:38px;border-radius:50%;background:var(--accent-soft,#e8f0fd);color:var(--accent,#2f6feb);display:inline-flex;align-items:center;justify-content:center;flex:none;">
+            <svg style="width:20px;height:20px;" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+          </span>
+          <h3 id="sisdpu-modal-titulo" class="font-display" style="font-size:17px;margin:0;">Desbloquear acesso ao SISDPU</h3>
+        </div>
+        <p id="sisdpu-modal-sub" style="font-size:13px;color:var(--text-secondary,#5b6b68);margin:0 0 16px;line-height:1.5;">Digite a senha-mestra para liberar o acesso ao SISDPU nesta sessão.</p>
+        <div id="sisdpu-setup-fields" style="display:none;">
+          <input id="sisdpu-usuario" type="text" placeholder="Usuário do SISDPU" autocomplete="off" style="width:100%;height:40px;padding:0 12px;margin-bottom:10px;border:1px solid var(--stroke-strong,#c4d0cc);border-radius:8px;background:var(--layer-alt,#f6f9f8);color:var(--text,#16211f);font-size:14px;">
+          <input id="sisdpu-senha" type="password" placeholder="Senha do SISDPU" autocomplete="off" style="width:100%;height:40px;padding:0 12px;margin-bottom:10px;border:1px solid var(--stroke-strong,#c4d0cc);border-radius:8px;background:var(--layer-alt,#f6f9f8);color:var(--text,#16211f);font-size:14px;">
+        </div>
+        <input id="sisdpu-mestra" type="password" placeholder="Senha-mestra" autocomplete="off" onkeydown="if(event.key==='Enter')sisdpuModalConfirmar()" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--stroke-strong,#c4d0cc);border-radius:8px;background:var(--layer-alt,#f6f9f8);color:var(--text,#16211f);font-size:14px;">
+        <div id="sisdpu-mestra2-wrap" style="display:none;margin-top:10px;">
+          <input id="sisdpu-mestra2" type="password" placeholder="Confirmar senha-mestra" autocomplete="off" onkeydown="if(event.key==='Enter')sisdpuModalConfirmar()" style="width:100%;height:40px;padding:0 12px;border:1px solid var(--stroke-strong,#c4d0cc);border-radius:8px;background:var(--layer-alt,#f6f9f8);color:var(--text,#16211f);font-size:14px;">
+        </div>
+        <div id="sisdpu-modal-erro" style="display:none;color:var(--c-red,#a3282a);font-size:12.5px;margin-top:11px;"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;">
+          <button type="button" class="btn-subtle" onclick="sisdpuModalCancelar()">Cancelar</button>
+          <button type="button" class="btn-accent" id="sisdpu-modal-ok" onclick="sisdpuModalConfirmar()">Desbloquear</button>
+        </div>
+      </div>
+    </div>
+
     <script>
         {% set _cx = menu_caixas() %}
         window.PRIMEIRA_CAIXA = "{{ _cx[0].slug if _cx else '' }}";
+        // ---- Desbloqueio/configuração do SISDPU sob demanda (modal global) ----
+        let _sisdpuResolve = null, _sisdpuSetup = false;
+        function _sEl(id){ return document.getElementById(id); }
+        function abrirModalSisdpu(configurado, resolve){
+            _sisdpuResolve = resolve; _sisdpuSetup = !configurado;
+            _sEl('sisdpu-setup-fields').style.display = _sisdpuSetup ? 'block' : 'none';
+            _sEl('sisdpu-mestra2-wrap').style.display = _sisdpuSetup ? 'block' : 'none';
+            _sEl('sisdpu-modal-titulo').textContent = _sisdpuSetup ? 'Configurar acesso ao SISDPU' : 'Desbloquear acesso ao SISDPU';
+            _sEl('sisdpu-modal-sub').textContent = _sisdpuSetup
+                ? 'Informe as credenciais do SISDPU e crie uma senha-mestra. As credenciais ficam cifradas; a senha-mestra não é gravada.'
+                : 'Digite a senha-mestra para liberar o acesso ao SISDPU nesta sessão.';
+            _sEl('sisdpu-modal-ok').textContent = _sisdpuSetup ? 'Salvar e continuar' : 'Desbloquear';
+            ['sisdpu-usuario','sisdpu-senha','sisdpu-mestra','sisdpu-mestra2'].forEach(id => { const e=_sEl(id); if(e) e.value=''; });
+            _sEl('sisdpu-modal-erro').style.display = 'none';
+            _sEl('sisdpu-modal').style.display = 'flex';
+            setTimeout(() => { const f=_sEl(_sisdpuSetup ? 'sisdpu-usuario' : 'sisdpu-mestra'); if(f) f.focus(); }, 60);
+        }
+        function _sisdpuErro(msg){ const e=_sEl('sisdpu-modal-erro'); e.textContent=msg; e.style.display='block'; }
+        function sisdpuModalCancelar(){
+            _sEl('sisdpu-modal').style.display='none';
+            const r=_sisdpuResolve; _sisdpuResolve=null; if(r) r(false);
+        }
+        async function sisdpuModalConfirmar(){
+            const ok=_sEl('sisdpu-modal-ok'); ok.disabled=true; _sEl('sisdpu-modal-erro').style.display='none';
+            try{
+                let url, corpo;
+                if(_sisdpuSetup){
+                    const u=_sEl('sisdpu-usuario').value.trim(), s=_sEl('sisdpu-senha').value,
+                          m=_sEl('sisdpu-mestra').value, m2=_sEl('sisdpu-mestra2').value;
+                    if(!u||!s||!m){ _sisdpuErro('Preencha usuário, senha e senha-mestra.'); ok.disabled=false; return; }
+                    if(m.length<6){ _sisdpuErro('A senha-mestra deve ter ao menos 6 caracteres.'); ok.disabled=false; return; }
+                    if(m!==m2){ _sisdpuErro('A confirmação da senha-mestra não confere.'); ok.disabled=false; return; }
+                    url='/api/credenciais'; corpo={usuario:u,senha:s,senha_mestra:m,senha_mestra_confirma:m2};
+                } else {
+                    const m=_sEl('sisdpu-mestra').value;
+                    if(!m){ _sisdpuErro('Digite a senha-mestra.'); ok.disabled=false; return; }
+                    url='/api/desbloquear'; corpo={senha_mestra:m};
+                }
+                const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(corpo)});
+                const d=await r.json().catch(()=>({}));
+                if(r.ok && d.ok){
+                    _sEl('sisdpu-modal').style.display='none';
+                    if(window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
+                    const res=_sisdpuResolve; _sisdpuResolve=null; if(res) res(true);
+                } else { _sisdpuErro(d.erro||'Não foi possível concluir. Tente novamente.'); ok.disabled=false; }
+            }catch(e){ _sisdpuErro('Erro: '+e); ok.disabled=false; }
+        }
+        // Resolve true se já pode usar o SISDPU (destrancado/legado) ou após desbloquear;
+        // false se o usuário cancelar. Chame com: if(!(await garantirSisdpu())) return;
+        window.garantirSisdpu = function(){
+            return new Promise((resolve) => {
+                fetch('/api/seguranca/status').then(r => r.json()).then(st => {
+                    if(!st || !st.ok){ resolve(true); return; }
+                    if(st.destrancado || st.env_legado){ resolve(true); return; }
+                    abrirModalSisdpu(!!st.configurado, resolve);
+                }).catch(() => resolve(true));
+            });
+        };
+        // Atualiza o selo de status do SISDPU no cabeçalho (após desbloquear, sem recarregar).
+        window.atualizarBadgeSisdpu = function(){
+            const el = document.getElementById('sisdpu-badge'); if(!el) return;
+            fetch('/api/seguranca/status').then(r => r.json()).then(st => {
+                if(!st || !st.ok) return;
+                const conflito = st.destrancado && st.conflito;
+                const conectado = st.destrancado || st.env_legado;
+                if(conflito){
+                    el.className = 'modo-badge sisdpu-warn';
+                    el.innerHTML = '<span class="dot"></span>SISDPU · conflito de sessão';
+                    el.title = st.conflito_detalhe
+                        || 'Conflito de sessão do SISDPU (login em outra estação) — clique em Reconectar.';
+                } else if(conectado){
+                    el.className = 'modo-badge sisdpu-on';
+                    el.innerHTML = '<span class="dot"></span>SISDPU' + (st.usuario ? (' · ' + st.usuario) : '');
+                    el.title = 'Conectado ao SISDPU' + (st.usuario ? (' — usuário ' + st.usuario) : '')
+                             + '. Pronto para sincronizar e enviar.';
+                } else {
+                    el.className = 'modo-badge sisdpu-off';
+                    el.innerHTML = '<span class="dot"></span>SISDPU desconectado';
+                    el.title = st.configurado
+                        ? 'Desconectado — a senha-mestra será pedida ao acionar uma função do SISDPU.'
+                        : 'Sem credenciais — serão pedidas ao acionar uma função do SISDPU.';
+                }
+            }).catch(() => {});
+        };
         // Botão "Sincronizar todas" da sidebar: se a página tiver a função (dashboard),
         // executa direto; caso contrário (ex: Configurações), vai para a 1ª caixa e
         // dispara automaticamente via ?sync=todas.
@@ -528,6 +685,45 @@
             if (typeof sincronizarTodas === 'function') { sincronizarTodas(); }
             else if (window.PRIMEIRA_CAIXA) { location.href = '/caixa/' + window.PRIMEIRA_CAIXA + '?sync=todas'; }
         }
+        // Vai para Configurações já na aba "Caixas para Sincronização".
+        window.irSelecionarCaixas = function() {
+            try { sessionStorage.setItem('cfg-tab', 'caixas'); } catch (e) {}
+            window.location.href = '/configuracoes';
+        };
+        // Aviso nos links que abrem o SISDPU em nova aba: usam um login SEPARADO do
+        // painel; logar lá pode conflitar com a sessão do painel (1 sessão por usuário).
+        window.marcarLinksSisdpu = function() {
+            var aviso = 'Abre o SISDPU no seu navegador (login SEPARADO do painel). '
+                + 'Fazer login aqui pode conflitar com a sessão do painel — o SISDPU '
+                + 'permite apenas uma sessão por usuário.';
+            document.querySelectorAll('a[target="_blank"][href*="sisdpu"]').forEach(function(a) {
+                if (a.dataset.sisdpuAviso) return;
+                a.dataset.sisdpuAviso = '1';
+                a.title = a.title ? (a.title + ' — ' + aviso) : aviso;
+            });
+        };
+        document.addEventListener('DOMContentLoaded', window.marcarLinksSisdpu);
+        // Reconectar a sessão do SISDPU (recupera de conflito de sessão / sessão derrubada).
+        window.reconectarSisdpu = async function() {
+            if (!(await window.garantirSisdpu())) return;
+            var btn = document.getElementById('btn-reconectar-sisdpu'); if (!btn) return;
+            var orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Reconectando…';
+            try {
+                var r = await fetch('/api/seguranca/reconectar', { method: 'POST' });
+                var d = await r.json().catch(function(){ return {}; });
+                if (d.ok) {
+                    btn.innerHTML = '✓ Reconectado';
+                    setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; }, 2500);
+                    if (window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
+                } else {
+                    btn.innerHTML = orig; btn.disabled = false;
+                    alert('Não foi possível reconectar: ' + (d.detalhe || 'erro'));
+                }
+            } catch (e) {
+                btn.innerHTML = orig; btn.disabled = false;
+                alert('Erro ao reconectar: ' + e);
+            }
+        };
     </script>
 
     <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->

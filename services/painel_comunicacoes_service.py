@@ -1,4 +1,4 @@
-"""Serviço de dados do Painel DIVCOM — MULTI-CAIXA (modelo híbrido).
+"""Serviço de dados do Painel de Comunicações — MULTI-CAIXA (modelo híbrido).
 
 Armazenamento:
 - dados/_contatos/<PAJ>.json  → COMPARTILHADO por PAJ (dados do assistido):
@@ -31,7 +31,7 @@ from ingestao import sisdpu_client
 from services import analise_service, config_service
 from services.texto_util import colapsar_paragrafos, remover_emojis
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL DIVCOM/Projeto
+BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICAÇÕES/Projeto
 # Dados sincronizados FORA da pasta Projeto (ao lado dela).
 DADOS_DIR = BASE_DIR.parent / "dados"
 CONTATOS_DIR = DADOS_DIR / "_contatos"
@@ -844,6 +844,7 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["contato_mensagem"] = ult.get("mensagem", "")
     d["contato_em"] = ult.get("em", "")
     d["contato_somente_leitura"] = bool(ult.get("somente_leitura"))
+    d["alerta_fora_caixa"] = sol.get("alerta_fora_caixa")  # selo "conferência manual (possível remoção)"
     return d
 
 
@@ -1018,6 +1019,7 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["contato_mensagem"] = ult.get("mensagem", "")
     d["contato_em"] = ult.get("em", "")
     d["contato_somente_leitura"] = bool(ult.get("somente_leitura"))
+    d["alerta_fora_caixa"] = box.get("conjunto", {}).get("alerta_fora_caixa")  # selo conferência manual
     return d
 
 
@@ -1479,7 +1481,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         pajs_atuais: set[str] = set()
         trabalhos_ia: list[dict] = []  # análises coletadas na Fase 1, rodadas em paralelo na Fase 2
         if por_paj:
-            yield _sep(); yield _sep()  # separa o cabeçalho da lista de PAJs
+            yield _sep()  # separa o cabeçalho da lista de PAJs
         i = 0
         for paj_norm, itens_paj in por_paj.items():
             i += 1
@@ -1538,7 +1540,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         # Cada job cobre UM PAJ (box) — assim cada arquivo JSON é escrito por uma
         # única tarefa (sem corrida de escrita); o paralelismo é ENTRE PAJs.
         if trabalhos_ia:
-            yield _sep(); yield _sep()  # separa a lista de PAJs da fase de análise
+            yield _sep()  # separa a lista de PAJs da fase de análise
             conc = config_service.get_analise_concorrencia()
             paralelo = f"até {conc} análises por lote" if conc > 1 else "uma de cada vez (sequencial)"
             yield {"level": "info",
@@ -1604,14 +1606,14 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                         _gravar_box(slug, d)
                         saidos.append(d.get("paj", ""))
         if saidos:
-            yield _sep(); yield _sep()
+            yield _sep()
             yield {"level": "info", "msg": f"{len(saidos)} PAJ(s) saíram da caixa: {', '.join(saidos)}"}
 
         dur = time.monotonic() - t0
         resumo = {"ok": True, "slug": slug, "grupo": nome_grupo,
                   "qtd_pajs": len(pajs_atuais), "qtd_solicitacoes": total_envios,
                   "novos": n_novos, "saidos": len(saidos), "duracao": round(dur, 1)}
-        yield _sep(); yield _sep()
+        yield _sep()
         yield {"level": "ok",
                "msg": f"Concluído em {dur:.0f}s — {len(pajs_atuais)} PAJ(s), "
                       f"{n_novos} novo(s), {len(saidos)} saíram."}
@@ -1641,6 +1643,8 @@ async def sincronizar_todas_stream():
     tot_pajs = tot_novos = tot_saidos = 0
     falhas = 0
     for idx, cx in enumerate(caixas, 1):
+        if idx > 1:  # separa visualmente o bloco desta caixa do da caixa anterior
+            yield _sep(); yield _sep()
         yield {"level": "novo", "msg": f"══ [{idx}/{len(caixas)}] {cx['nome']} ══"}
         async for ev in sincronizar_stream(cx["slug"], anunciar_modo=False):
             if ev.get("done"):
@@ -1795,8 +1799,11 @@ async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
     box = _ler_box(slug, paj_norm)
     if not box:
         return {"ok": False, "erro": "PAJ não encontrado"}
-    if not _pode_exclusivo():
-        return {"ok": False, "erro": "Há uma operação em andamento (sincronização/envio/triagem). Aguarde."}
+    # Reanálise tem o MESMO perfil das triagens (só IA, sem navegador, escreve apenas
+    # o box do próprio PAJ) → roda em PARALELO com triagens/outras reanálises (até
+    # _TRIAGEM_MAX), recusando somente enquanto uma op EXCLUSIVA (sync/envio) roda.
+    if _ocupado_exclusivo():
+        return {"ok": False, "erro": "Há uma sincronização/envio em andamento. Aguarde."}
     if not analise_service.disponivel():
         return {"ok": True}  # IA desativada — nada a fazer
 
@@ -1810,7 +1817,7 @@ async def reanalisar_paj(slug: str, paj_norm: str) -> dict:
     if not movs_ia:
         return {"ok": False, "erro": "Nenhuma movimentação selecionada para a IA"}
 
-    async with _sync_lock:
+    async with _triagem_ctx():  # paralelo com triagens/reanálises (até _TRIAGEM_MAX)
         box = _ler_box(slug, paj_norm)
         mudou = await asyncio.to_thread(
             _reanalisar_box, box, cont, comunicados, com_rev, caixa["nome"],
@@ -1844,6 +1851,39 @@ def _achar_item_fila(fila: list[dict], paj_norm: str, tipo: str, id_tramite: str
         elif it.get("tipo") != "conjunto" and it.get("id_tramite") == id_tramite:
             return it
     return None
+
+
+async def _tramites_fora_da_caixa(ids: list[str]) -> list[str]:
+    """Verifica (leve, no SISDPU) quais dos `id_tramite` originários NÃO estão mais na
+    caixa de grupo — provável conclusão/remoção por outro usuário. Best-effort: em erro
+    de checagem retorna [] (não bloqueia o envio)."""
+    ids = [str(i).strip() for i in (ids or []) if str(i).strip()]
+    if not ids:
+        return []
+    try:
+        pres = await sisdpu_client.checar_tramites_na_caixa(ids)
+    except Exception:  # noqa: BLE001
+        return []
+    return [i for i in ids if not pres.get(i, True)]
+
+
+_ALERTA_FORA_CAIXA_DET = (
+    "A tramitação saiu da caixa — provavelmente já foi tratada/concluída por outro "
+    "usuário. Envio cancelado; confira manualmente (possível remoção)."
+)
+
+
+def _marcar_alerta_fora_caixa(slug: str, paj_norm: str, tipo: str, id_tramite: str) -> None:
+    """Marca a tramitação/conjunto com 'alerta_fora_caixa' (selo de conferência manual /
+    possível remoção). NÃO é preservado por _solic_de_item → some sozinho na próxima
+    sincronização (que também remove o item se ele realmente saiu)."""
+    box = _ler_box(slug, paj_norm)
+    alvo = box.get("conjunto") if tipo == "conjunto" else _achar_solic(box, id_tramite)
+    if alvo is None:
+        return
+    alvo["alerta_fora_caixa"] = {"em": _dt.datetime.now().isoformat(timespec="seconds"),
+                                 "detalhe": _ALERTA_FORA_CAIXA_DET}
+    _gravar_box(slug, box)
 
 
 async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
@@ -1882,6 +1922,19 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     yield {"level": "novo",
            "msg": f"{rotulo}PAJ {t['paj']} — {etiqueta} — {nome} · "
                   f"{', '.join(envio_service.label_meio(m) for m in meios)}{anx_txt}"}
+
+    # Verificação anti-duplicidade (só em modo REAL): a(s) tramitação(ões) originária(s)
+    # ainda está(ão) na caixa? Se TODAS saíram (outro usuário já concluiu), NÃO envia —
+    # loga em vermelho e marca o item para conferência manual (possível remoção).
+    ids_orig = [i for i in ids if str(i).strip()]
+    if ids_orig and any(config_service.get_envio_modo_meio(m) == "real" for m in meios):
+        fora = await _tramites_fora_da_caixa(ids_orig)
+        if fora and len(fora) == len(ids_orig):
+            yield {"level": "erro", "msg": f"     ✗ Verificação na caixa: {_ALERTA_FORA_CAIXA_DET}"}
+            _marcar_alerta_fora_caixa(slug, paj_norm, "conjunto" if conjunto else "tramite",
+                                      "" if conjunto else ids_orig[0])
+            yield {"_status": "pulado"}
+            return
 
     cont = ler_contato(paj_norm)
     anexos_meta = t.get("anexos", []) or []
@@ -2563,6 +2616,15 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 return {"ok": False, "status": "falha",
                         "detalhe": ("Conflito de sessão do SISDPU detectado — feche a OUTRA sessão do seu "
                                     "usuário no SISDPU e tente novamente. A mensagem NÃO foi enviada.")}
+            # Anti-duplicidade: a(s) tramitação(ões) originária(s) ainda está(ão) na caixa?
+            # Se TODAS saíram (outro usuário já concluiu), NÃO envia — loga em vermelho e
+            # marca o item para conferência manual (possível remoção).
+            ids_norm = [i for i in ids if str(i).strip()]
+            fora = await _tramites_fora_da_caixa(ids_norm)
+            if ids_norm and fora and len(fora) == len(ids_norm):
+                _passo(log, emit, "Verificação na caixa", False, _ALERTA_FORA_CAIXA_DET)
+                _marcar_alerta_fora_caixa(slug, paj_norm, tipo, id_tramite)
+                return {"ok": False, "status": "fora_da_caixa", "detalhe": _ALERTA_FORA_CAIXA_DET}
         # ENVIO por NÚMERO: dispara para CADA número cadastrado (pode haver vários).
         # Falha em um número NÃO impede os demais — a falha fica registrada só no LOG.
         # Entre um número e outro do mesmo PAJ, espera ~70% do intervalo configurado
@@ -3233,7 +3295,7 @@ async def enviar_whatsapp_tramite_stream(slug: str, paj_norm: str, id_tramite: s
 def resetar_painel(total: bool) -> dict:
     """Reseta o painel. Move os dados OPERACIONAIS (PAJs/tramitações por caixa,
     contatos e histórico) para uma lixeira (reversível). Se `total`, também
-    restaura o config ao padrão de fábrica (config_divcom.json.bak é salvo antes).
+    restaura o config ao padrão de fábrica (config_painel_comunicacoes.json.bak é salvo antes).
     Se parcial, PRESERVA a parametrização (textos/parágrafos/caixas/ajustes)."""
     ts = _dt.datetime.now().strftime("%Y-%m-%d-%H%M%S")
     modo = "total" if total else "parcial"
@@ -3266,54 +3328,6 @@ def resetar_painel(total: bool) -> dict:
 
     return {"ok": True, "modo": modo, "caixas_limpas": caixas_movidas,
             "lixeira": str(lixeira)}
-
-
-# ==================== migração do formato antigo (flat) ====================
-def _migrar_flat() -> None:
-    """Move dados/PAJ-*.json (formato antigo, plano) para dados/divcom/ (caixa)
-    + dados/_contatos/ (compartilhado). Executado uma vez no import."""
-    flat = list(DADOS_DIR.glob("PAJ-*.json"))
-    if not flat:
-        return
-    for f in flat:
-        paj_norm = f.stem
-        # Já migrado? (registro da caixa existe) — só remove o plano, NUNCA
-        # sobrescreve dados novos.
-        if _box_file("divcom", paj_norm).exists():
-            with contextlib.suppress(Exception):
-                f.unlink()
-            continue
-        d = _read_json(f)
-        if not d:
-            with contextlib.suppress(Exception):
-                f.unlink()
-            continue
-        paj_norm = d.get("paj_norm") or f.stem
-        # registro por caixa (divcom)
-        box = {
-            "paj_norm": paj_norm, "paj": d.get("paj", ""),
-            "em_caixa": d.get("em_caixa", True),
-            "atualizado_em": d.get("atualizado_em", ""),
-            "solicitacoes": d.get("solicitacoes", []),
-            "resumo_ia": d.get("resumo_ia", ""), "resumo_ia_chave": d.get("resumo_ia_chave", ""),
-            "sugestao_ia": d.get("sugestao_ia", ""), "sugestao_tipo": d.get("sugestao_tipo", ""),
-            "sugestao_editada": d.get("sugestao_editada", ""),
-        }
-        _gravar_box("divcom", box)
-        # contato compartilhado
-        cont = ler_contato(paj_norm)
-        if d.get("assistido"):
-            cont["assistido"] = d["assistido"]
-        if d.get("contatos"):
-            cont["contatos"] = d["contatos"]
-        for k in ("telefones", "emails", "enderecos", "whatsapp_numeros"):
-            if d.get(k):
-                cont[k] = d[k]
-        if d.get("whatsapp_config"):
-            cont["whatsapp_config"] = d["whatsapp_config"]
-        _gravar_contato(cont)
-        with contextlib.suppress(Exception):
-            f.unlink()
 
 
 def _migrar_local_dados() -> None:
@@ -3384,5 +3398,4 @@ def _migrar_para_tramite() -> None:
 _migrar_local_dados()
 DADOS_DIR.mkdir(parents=True, exist_ok=True)
 CONTATOS_DIR.mkdir(exist_ok=True)
-_migrar_flat()
 _migrar_para_tramite()

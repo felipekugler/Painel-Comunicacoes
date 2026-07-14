@@ -5,7 +5,7 @@
   apontando para o painel — equivalente a já entrar com F11.
 - Tela cheia DESLIGADA (padrão): abre como aba no navegador padrão do sistema.
 
-Chamado pelo Painel-DIVCOM.bat no lugar de `start "" URL`. Rodar com o Python do
+Chamado pelo Painel-Comunicacoes.bat no lugar de `start "" URL`. Rodar com o Python do
 venv, a partir da pasta Projeto (para importar config_service).
 
 GOTCHA conhecido: se o Chrome JÁ estiver aberto, ele tende a reusar a instância e

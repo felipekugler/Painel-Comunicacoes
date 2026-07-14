@@ -406,6 +406,7 @@ function histLogFechar() { document.getElementById('log-modal').style.display = 
 
 // ---------- Refazer movimentação/tramitação/conclusão que falharam ----------
 async function refazerEtapa(btn, tipo) {
+    if (!(await window.garantirSisdpu())) return;
     const nome = tipo === 'movimentacao' ? 'movimentação' : (tipo === 'conclusao' ? 'conclusão' : 'tramitação');
     if (!confirm('Refazer a ' + nome + ' deste PAJ?\n\nO painel checa o conflito de sessão do SISDPU antes de tentar.')) return;
     btn.disabled = true; const orig = btn.textContent; btn.textContent = 'refazendo…';

@@ -101,6 +101,7 @@
                 <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
                 <td data-sort="{{ paj.assistido }}">
                     <div class="col-assistido-flex">{{ paj.assistido or "—" }}</div>
+                    {% if paj.alerta_fora_caixa %}<div class="mt-1"><span title="{{ paj.alerta_fora_caixa.detalhe }}" style="display:inline-block;font-size:10.5px;font-weight:600;color:#8a5a00;background:color-mix(in srgb, #c98a00 15%, transparent);border:1px solid #d9a441;border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ Conferência manual — saiu da caixa (possível remoção)</span></div>{% endif %}
                     {% if paj.envio_falhas %}<div class="mt-1" style="display:flex;flex-direction:column;gap:3px;">
                         {% for meio, det in paj.envio_falhas.items() %}
                         <span title="{{ det }}" style="display:block;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;">⚠ {{ meio_labels.get(meio, meio) }}: {{ det }}</span>
@@ -253,6 +254,7 @@
                 <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio-flex">{{ paj.oficio or "—" }}</div></td>
                 <td data-sort="{{ paj.assistido }}">
                     <div class="col-assistido-flex">{{ paj.assistido or "—" }}</div>
+                    {% if paj.alerta_fora_caixa %}<div class="mt-1"><span title="{{ paj.alerta_fora_caixa.detalhe }}" style="display:inline-block;font-size:10.5px;font-weight:600;color:#8a5a00;background:color-mix(in srgb, #c98a00 15%, transparent);border:1px solid #d9a441;border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ Conferência manual — saiu da caixa (possível remoção)</span></div>{% endif %}
                     {% if paj.envio_falhas and paj.envio_falhas.get('whatsapp') %}
                     <div class="mt-1"><span title="{{ paj.envio_falhas['whatsapp'] }}" style="display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden;font-size:10.5px;font-weight:600;color:var(--c-red);border:1px solid var(--c-red);border-radius:6px;padding:2px 7px;line-height:1.35;">⚠ {{ paj.envio_falhas['whatsapp'] }}</span></div>
                     {% endif %}
@@ -851,6 +853,7 @@ function grupoUnificavel(g) {
 }
 
 async function enviarSelecionados() {
+    if (!(await window.garantirSisdpu())) return;
     const itens = itensSelecionados();
     if (!itens.length) { mostrarToast('Marque ao menos um PAJ'); return; }
     const conflitos = detectarConflitos(itens);
@@ -1158,6 +1161,7 @@ function fmtTelBR(num) {
     return num || '';
 }
 async function enviarWhatsapp(btn) {
+    if (!(await window.garantirSisdpu())) return;
     const cell = btn.closest('.wa-acao');
     const slug = btn.dataset.slug, paj = btn.dataset.paj, tramite = btn.dataset.tramite || '';
     const tipo = btn.dataset.tipo || 'tramite';
@@ -1192,6 +1196,7 @@ async function enviarWhatsapp(btn) {
 
 // ---------- Envio INDIVIDUAL por meio (App / E-mail), 1 clique → popup passo a passo ----------
 async function enviarItem(btn) {
+    if (!(await window.garantirSisdpu())) return;
     const cell = btn.closest('.wa-acao');
     const rotulo = btn.dataset.meiolabel || 'este meio';
     if (!confirm('Enviar esta mensagem por ' + rotulo + ' agora?\n\nO andamento (envio → movimentação → tramitação) aparece no popup, passo a passo.')) return;
@@ -1214,6 +1219,7 @@ async function enviarItem(btn) {
 
 // ---------- WhatsApp: envio EM LOTE (marcados) com intervalo entre mensagens ----------
 async function enviarLoteWhatsapp() {
+    if (!(await window.garantirSisdpu())) return;
     const itens = itensSelecionados();
     if (!itens.length) { mostrarToast('Marque ao menos um PAJ'); return; }
     if (!confirm('Enviar ' + itens.length + ' mensagem(ns) pelo WhatsApp EM LOTE?\n\n'

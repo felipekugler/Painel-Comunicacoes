@@ -76,6 +76,7 @@
 
 <!-- ===================== Barra de abas ===================== -->
 <div class="cfg-tabs" role="tablist">
+    <button class="cfg-tab" data-tab="login" onclick="abrirTab('login')">Configurações de login</button>
     <button class="cfg-tab" data-tab="geral" onclick="abrirTab('geral')">Configurações Gerais</button>
     <button class="cfg-tab" data-tab="ia" onclick="abrirTab('ia')">Configuração de IA</button>
     <button class="cfg-tab" data-tab="caixas" onclick="abrirTab('caixas')">Caixas para Sincronização</button>
@@ -87,6 +88,72 @@
         {{ cx.nome }}{% if not cx.habilitada %} 🔒{% endif %}
     </button>
     {% endfor %}
+</div>
+
+<!-- ===================== Aba: Configurações de login ===================== -->
+<div class="cfg-panel" data-panel="login">
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-bottom:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Acesso ao SISDPU</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            As credenciais do SISDPU podem ficar <strong>cifradas no computador</strong>, protegidas por uma
+            <strong>senha-mestra</strong> que só você sabe. A senha-mestra não é gravada — você a digita ao abrir o painel.
+        </p>
+        <div style="font-size:13.5px;margin-bottom:14px;">
+            Situação:
+            {% if seg_configurado %}
+                <strong style="color:var(--c-zap);">protegido por senha-mestra</strong>{% if seg_usuario %} — usuário <span style="font-family:'Cascadia Code',monospace;">{{ seg_usuario }}</span> (sessão destrancada){% endif %}.
+            {% elif seg_env_legado %}
+                <strong>não protegido</strong> — usando as credenciais do arquivo <span style="font-family:'Cascadia Code',monospace;">.env</span>.
+            {% else %}
+                <strong>sem credenciais salvas</strong> — a senha-mestra será pedida quando você acionar uma função do SISDPU (sincronizar, enviar, etc.).
+            {% endif %}
+        </div>
+        {% if seg_configurado and seg_env_legado %}
+        <div style="background:var(--c-amber-soft,#fbf3df);color:#8a5a00;border-radius:8px;padding:9px 12px;font-size:12.3px;margin-bottom:14px;">
+            O <span style="font-family:'Cascadia Code',monospace;">.env</span> ainda contém a senha do SISDPU. Como agora ela está protegida pela senha-mestra, você pode <strong>remover a linha <span style="font-family:'Cascadia Code',monospace;">SISDPU_PASSWORD</span></strong> do <span style="font-family:'Cascadia Code',monospace;">.env</span>.
+        </div>
+        {% endif %}
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+            <button type="button" id="btn-testar-login" class="btn-accent" onclick="testarLogin()">Testar acesso ao SISDPU</button>
+            {% if seg_configurado %}
+            <a href="/desbloquear?trocar=1" class="btn-subtle" style="text-decoration:none;display:inline-flex;align-items:center;padding:8px 14px;">Trocar credenciais / senha-mestra</a>
+            <button type="button" class="btn-subtle" onclick="bloquearAgora()">Bloquear agora</button>
+            {% else %}
+            <a href="/desbloquear?trocar=1" class="btn-subtle" style="text-decoration:none;display:inline-flex;align-items:center;padding:8px 14px;">Proteger com senha-mestra</a>
+            {% endif %}
+        </div>
+        <div id="testar-login-res" style="margin-top:13px;font-size:13px;line-height:1.5;display:none;"></div>
+        <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">O teste faz um login real no SISDPU com as credenciais atuais para confirmar usuário e senha.</p>
+        <script>
+        function bloquearAgora(){
+            if(!confirm('Bloquear agora? A senha-mestra será pedida no próximo acesso ao SISDPU (o painel continua acessível).')) return;
+            fetch('/api/bloquear',{method:'POST'}).then(()=>{ location.reload(); });
+        }
+        async function testarLogin(){
+            if (!(await window.garantirSisdpu())) return;
+            const btn=document.getElementById('btn-testar-login');
+            const res=document.getElementById('testar-login-res');
+            const orig=btn.textContent; btn.disabled=true; btn.textContent='Testando…';
+            res.style.display='block'; res.style.color='var(--text-secondary)';
+            res.textContent='Conectando ao SISDPU e testando o login… (pode levar alguns segundos)';
+            try{
+                const r=await fetch('/api/seguranca/testar-login',{method:'POST'});
+                const d=await r.json().catch(()=>({}));
+                if(d.ok){
+                    res.style.color='var(--c-zap)';
+                    res.textContent='✓ '+(d.detalhe||'Acesso confirmado — usuário e senha corretos.');
+                } else if(d.status==='credenciais'){
+                    res.style.color='var(--c-red)';
+                    res.textContent='✗ '+(d.detalhe||'Usuário ou senha incorretos — confira as credenciais.');
+                } else {
+                    res.style.color='#a06500';
+                    res.textContent='⚠ '+(d.detalhe||'Não foi possível testar agora. Verifique a conexão e tente de novo.');
+                }
+            }catch(e){ res.style.color='var(--c-red)'; res.textContent='✗ Erro ao testar: '+e; }
+            finally{ btn.disabled=false; btn.textContent=orig; }
+        }
+        </script>
+    </div>
 </div>
 
 <!-- ===================== Aba: Configurações Gerais ===================== -->
@@ -571,10 +638,10 @@ function abrirTab(id){
     try { sessionStorage.setItem('cfg-tab', id); } catch(e){}
 }
 (function(){
-    let id = 'geral';
-    try { id = sessionStorage.getItem('cfg-tab') || 'geral'; } catch(e){}
+    let id = 'login';
+    try { id = sessionStorage.getItem('cfg-tab') || 'login'; } catch(e){}
     const btn = document.querySelector('.cfg-tab[data-tab="' + id + '"]');
-    if (!btn || btn.disabled) id = 'geral';   // aba salva sumiu/inativou -> volta ao início
+    if (!btn || btn.disabled) id = 'login';   // aba salva sumiu/inativou -> volta ao início
     abrirTab(id);
 })();
 async function resetarPainel(total){
@@ -754,6 +821,7 @@ async function toggleCaixa(grupo, on){
     else alert('Erro ao alterar caixa');
 }
 async function atualizarCaixas(){
+    if (!(await window.garantirSisdpu())) return;
     const b=document.getElementById('btn-atualizar-caixas'); b.disabled=true; b.textContent='Atualizando…';
     try{
         const r=await fetch('/api/config/caixas/atualizar',{method:'POST'});

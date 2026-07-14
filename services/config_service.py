@@ -1,4 +1,4 @@
-"""Configurações do Painel DIVCOM (persistidas em config_divcom.json).
+"""Configurações do Painel de Comunicações (persistidas em config_painel_comunicacoes.json).
 
 - n_movimentacoes: quantas das últimas movimentações do PAJ enviar ao Claude.
 - comunicados: modelos de texto padrão GERAIS (fallback p/ caixas sem os próprios).
@@ -21,7 +21,7 @@ import uuid
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-CONFIG_FILE = BASE_DIR / "config_divcom.json"
+CONFIG_FILE = BASE_DIR / "config_painel_comunicacoes.json"
 
 N_MOVIMENTACOES_PADRAO = 5
 
@@ -40,7 +40,10 @@ PRAZOS_PREDEF_PADRAO = [5, 10, 15, 30]
 LAYOUT_PENDENTES_PADRAO = "simples"
 LAYOUTS_PENDENTES = ("simples", "completo")
 
-CAIXA_DIVCOM_GRUPO = "01 - PREV_DIVCOM"
+# Valor-semente do "Atualizar lista": só abre a página de caixas de grupo e lê
+# TODAS as caixas disponíveis (independe deste valor). De propósito NÃO casa com
+# nenhuma caixa real — agnóstico à unidade (cada unidade tem suas próprias caixas).
+CAIXA_SEED_GRUPO = "(descoberta de caixas)"
 
 _COMUNICADOS_SEED = [
     {"tipo": "Comunicado de perícia médica",
@@ -70,24 +73,24 @@ _PARAGRAFOS_SEED = [
 
 # ---------------- slug / nome de caixa ----------------
 def slugify(texto: str) -> str:
-    """"01 - PREV_DIVCOM" -> "divcom"; "01- PREV_ANÁLISE BI" -> "analise-bi"."""
-    t = texto or ""
-    # remove o prefixo "NN - PREV_" / "NN- PREV_" se houver
-    m = re.search(r"PREV[_\s-]*(.+)$", t, re.IGNORECASE)
-    if m:
-        t = m.group(1)
-    t = unicodedata.normalize("NFKD", t).encode("ascii", "ignore").decode()
+    """Identificador técnico (slug) do nome da caixa — GENÉRICO, aplicável a
+    QUALQUER nome de caixa, de qualquer unidade/setor. NÃO presume nenhum prefixo:
+    normaliza o nome INTEIRO para minúsculas ASCII, trocando espaços, acentos e
+    símbolos por hifens (colapsando repetições). É usado como chave da caixa, nome
+    da pasta em dados/ e trecho da URL (/caixa/<slug>) — por isso precisa ser seguro
+    para sistema de arquivos e URL, e preservar a distinção entre caixas diferentes.
+    Ex.: "01 - PREV_AUDIENCIAS" -> "01-prev-audiencias";
+         "05 - CRIM_AUDIÊNCIAS" -> "05-crim-audiencias";
+         "Núcleo Cível / Zona Sul" -> "nucleo-civel-zona-sul"."""
+    t = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode()
     t = re.sub(r"[^a-zA-Z0-9]+", "-", t).strip("-").lower()
     return t or "caixa"
 
 
 def nome_caixa(grupo: str) -> str:
-    """"01 - PREV_AJUIZADOS" -> "Caixa Ajuizados"."""
-    t = grupo or ""
-    m = re.search(r"PREV[_\s-]*(.+)$", t, re.IGNORECASE)
-    base = m.group(1) if m else t
-    base = base.replace("_", " ").strip().title()
-    return f"Caixa {base}"
+    """Nome EXIBIDO da caixa = exatamente como cadastrado no SISDPU, sem tratamento
+    cosmético (ex.: "01 - PREV_AUDIENCIAS" continua "01 - PREV_AUDIENCIAS")."""
+    return (grupo or "").strip()
 
 
 def _default() -> dict:
@@ -142,7 +145,7 @@ def _bump_rev(d: dict) -> None:
 
 def resetar_config() -> None:
     """Restaura o config ao padrão de fábrica (usado no RESET TOTAL). O _gravar
-    salva config_divcom.json.bak antes, então é reversível."""
+    salva config_painel_comunicacoes.json.bak antes, então é reversível."""
     _gravar(_default())
 
 
@@ -311,7 +314,7 @@ def get_whatsapp_headless() -> bool:
 
 # ---------------- abrir o painel em tela cheia ----------------
 def get_abrir_tela_cheia() -> bool:
-    """Se True, o lançador (Painel-DIVCOM.bat → abrir_painel.py) abre o painel em
+    """Se True, o lançador (Painel-Comunicacoes.bat → abrir_painel.py) abre o painel em
     TELA CHEIA (Chrome/Edge --start-fullscreen, equivalente ao F11 no arranque).
     Padrão False (abre como aba do navegador padrão)."""
     return bool(ler_config().get("abrir_tela_cheia", False))

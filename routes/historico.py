@@ -4,7 +4,7 @@ de qualquer caixa. Tabela pesquisável e classificável (client-side)."""
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from services import divcom_service, envio_service, historico_service
+from services import painel_comunicacoes_service, envio_service, historico_service
 
 router = APIRouter()
 
@@ -19,7 +19,7 @@ async def historico(request: Request):
         if not r.get("url_detalhe"):
             chave = (r.get("caixa_slug"), r.get("paj_norm"))
             if chave not in _url_cache and chave[0] and chave[1]:
-                _url_cache[chave] = divcom_service.url_detalhe_do_paj(chave[0], chave[1])
+                _url_cache[chave] = painel_comunicacoes_service.url_detalhe_do_paj(chave[0], chave[1])
             r["url_detalhe"] = _url_cache.get(chave, "")
     template = request.app.state.jinja.get_template("historico.html")
     return HTMLResponse(template.render(request=request, registros=registros))
@@ -28,21 +28,21 @@ async def historico(request: Request):
 @router.post("/api/historico/{historico_id}/refazer-movimentacao", response_class=JSONResponse)
 async def refazer_movimentacao(historico_id: str):
     """Refaz a movimentação que falhou (ex.: após resolver um conflito de sessão)."""
-    res = await divcom_service.refazer_movimentacao(historico_id)
+    res = await painel_comunicacoes_service.refazer_movimentacao(historico_id)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.post("/api/historico/{historico_id}/refazer-tramitacao", response_class=JSONResponse)
 async def refazer_tramitacao(historico_id: str):
     """Refaz a tramitação que falhou/não foi realizada (exige movimentação OK antes)."""
-    res = await divcom_service.refazer_tramitacao(historico_id)
+    res = await painel_comunicacoes_service.refazer_tramitacao(historico_id)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
 @router.post("/api/historico/{historico_id}/refazer-conclusao", response_class=JSONResponse)
 async def refazer_conclusao(historico_id: str):
     """Refaz a conclusão (admissão + baixa) do(s) trâmite(s) originário(s) que falhou."""
-    res = await divcom_service.refazer_conclusao(historico_id)
+    res = await painel_comunicacoes_service.refazer_conclusao(historico_id)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
@@ -51,7 +51,7 @@ async def reenviar(historico_id: str, payload: dict = Body(default={})):
     """Recoloca o PAJ na fila de envio (Prontos) para os meios escolhidos — reenvio
     por um meio adicional de um PAJ já contatado."""
     meios = (payload or {}).get("meios") or []
-    res = divcom_service.reenviar_do_historico(historico_id, meios)
+    res = painel_comunicacoes_service.reenviar_do_historico(historico_id, meios)
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 

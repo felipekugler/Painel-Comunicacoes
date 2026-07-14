@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  Painel DIVCOM — inicia o servidor (se precisar) e abre o browser
+rem  Painel de Comunicações — inicia o servidor (se precisar) e abre o browser
 rem  Usar: dar duplo clique, ou criar atalho no desktop/barra de tarefas
 rem ============================================================
 
@@ -30,8 +30,8 @@ if %ERRORLEVEL% EQU 0 (
 )
 
 rem Nao esta rodando — inicia em janela separada e abre o browser
-echo Iniciando Painel DIVCOM...
-start "Painel DIVCOM" /MIN "%PYTHON%" "%ROOT%app.py"
+echo Iniciando Painel de Comunicações...
+start "Painel de Comunicações" /MIN "%PYTHON%" "%ROOT%app.py"
 
 rem Aguarda 4s pro servidor subir
 timeout /T 4 /NOBREAK >nul

@@ -33,8 +33,8 @@ data/
 .claude/settings.local.json
 
 # Estado de runtime / config mutavel (tem seu proprio backup .bak)
-config_divcom.json
-config_divcom.json.bak
+config_painel_comunicacoes.json
+config_painel_comunicacoes.json.bak
 
 # Backups locais deste projeto
 backups/
