@@ -1537,7 +1537,7 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         if trabalhos_ia:
             yield _sep(); yield _sep()  # separa a lista de PAJs da fase de análise
             conc = config_service.get_analise_concorrencia()
-            paralelo = f"até {conc} em paralelo" if conc > 1 else "uma de cada vez (sequencial)"
+            paralelo = f"até {conc} análises por lote" if conc > 1 else "uma de cada vez (sequencial)"
             yield {"level": "info",
                    "msg": f"Analisando {len(trabalhos_ia)} PAJ(s) com IA ({paralelo})…"}
             sem = asyncio.Semaphore(conc)
@@ -1567,7 +1567,6 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                             tinfo["mov_foco"] = mf
                         ana = await asyncio.to_thread(
                             analise_service.analisar_paj, job["movs"], comunicados, nome_caixa, tinfo)
-                        dt = sol.get("data_envio", "")
                         if ana:
                             sol["resumo_ia"] = ana.get("resumo", "")
                             sol["sugestao_ia"] = ana.get("sugestao", "")
@@ -1577,10 +1576,10 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
                             _auto_incluir_anexos_padrao_por_tipo(job["paj_norm"], sol, comunicados)
                             mudou = True
                             logs.append({"level": "ok",
-                                         "msg": f"     ✓ PAJ {job['paj']} · tramitação de {dt}: análise recebida"})
+                                         "msg": f"     ✓ PAJ {job['paj']} · análise IA recebida"})
                         else:
                             logs.append({"level": "erro",
-                                         "msg": f"     ✗ PAJ {job['paj']} · tramitação de {dt}: IA não retornou (ver manualmente)"})
+                                         "msg": f"     ✗ PAJ {job['paj']} · análise IA não recebida (ver manualmente)"})
                     if mudou:
                         _gravar_box(slug, box)
                 return logs
