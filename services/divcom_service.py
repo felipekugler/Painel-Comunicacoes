@@ -1478,8 +1478,6 @@ async def sincronizar_stream(slug: str, anunciar_modo: bool = True):
         i = 0
         for paj_norm, itens_paj in por_paj.items():
             i += 1
-            if i > 1:
-                yield _sep()  # 1 linha em branco entre PAJs
             paj = itens_paj[0].get("paj", "")
             upsert_paj(slug, paj, itens_paj, em_caixa=True)
             pajs_atuais.add(paj_norm)
@@ -2631,7 +2629,9 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
     enviados = falhas = 0
     for i, it in enumerate(itens, 1):
         if i > 1:
-            yield {"level": "muted", "msg": f"     aguardando {intervalo}s antes da próxima…"}
+            yield _sep()
+            yield {"level": "info", "msg": f"aguardando {intervalo}s antes da próxima…"}
+            yield _sep()
             await asyncio.sleep(intervalo)
         paj_lbl = it.get("paj") or it.get("paj_norm")
         yield {"level": "novo", "msg": f"[{i}/{len(itens)}] {paj_lbl} — abrindo conversa…"}
@@ -2659,6 +2659,7 @@ async def enviar_whatsapp_lote_stream(selecao: list[dict]):
             if not n_passos:
                 yield {"level": "erro", "msg": f"     ✗ {res.get('detalhe') or res.get('erro') or 'falha'}"}
     dur = time.monotonic() - t0
+    yield _sep()
     yield {"level": "ok",
            "msg": f"Concluído em {dur:.0f}s — {enviados} enviado(s), {falhas} com falha."}
     yield {"done": True, "resumo": {"ok": True, "enviados": enviados, "falhas": falhas,
