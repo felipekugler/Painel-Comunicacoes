@@ -1033,15 +1033,24 @@ def montar_dashboard(slug: str) -> dict:
         for f in bdir.glob("PAJ-*.json"):
             with contextlib.suppress(Exception):
                 box = json.loads(f.read_text(encoding="utf-8"))
-                if not box.get("em_caixa", True):
-                    continue
+                em_caixa = box.get("em_caixa", True)
                 cont = ler_contato(box.get("paj_norm", ""))
                 sols = box.get("solicitacoes", [])
-                # tramitações gravadas para envio entram sempre na fila (as já enviadas
-                # não pendentes ficam de fora — só no Histórico).
+                # tramitações gravadas para envio entram SEMPRE na fila — inclusive
+                # quando o PAJ já saiu da caixa (em_caixa=False): é o caso do "Reenviar"
+                # de um trâmite já concluído. (As já enviadas/não-pendentes ficam de fora.)
                 for s in sols:
                     if (s.get("envio") or {}).get("status") == "gravado":
                         fila.append({**_enriquecer_tramite(box, s, cont), "tipo": "tramite"})
+                # PAJ FORA da caixa: honramos só os itens gravados para envio (incl. o
+                # conjunto, no reenvio de conjunto); nada de pendentes/triagem (esses só
+                # valem enquanto o PAJ está na caixa). Com o PAJ ainda na caixa, o conjunto
+                # é tratado no bloco de triagem abaixo — por isso o guard evita duplicar.
+                if not em_caixa:
+                    conj = box.get("conjunto") or {}
+                    if conj and (conj.get("envio") or {}).get("status") == "gravado":
+                        fila.append(_enriquecer_conjunto(box, cont))
+                    continue
                 pend = _sols_pendentes(box)
                 if not pend:
                     continue
@@ -1926,8 +1935,14 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     # Verificação anti-duplicidade (só em modo REAL): a(s) tramitação(ões) originária(s)
     # ainda está(ão) na caixa? Se TODAS saíram (outro usuário já concluiu), NÃO envia —
     # loga em vermelho e marca o item para conferência manual (possível remoção).
+    # EXCEÇÃO — REENVIO: o trâmite originário já foi concluído e saiu da caixa POR
+    # DEFINIÇÃO; a verificação não se aplica (acusaria "fora da caixa" indevidamente).
     ids_orig = [i for i in ids if str(i).strip()]
-    if ids_orig and any(config_service.get_envio_modo_meio(m) == "real" for m in meios):
+    algum_real = any(config_service.get_envio_modo_meio(m) == "real" for m in meios)
+    if ids_orig and algum_real and t.get("reenvio"):
+        yield {"level": "muted",
+               "msg": "     Verificação na caixa dispensada (reenvio — trâmite originário já concluído)."}
+    elif ids_orig and algum_real:
         fora = await _tramites_fora_da_caixa(ids_orig)
         if fora and len(fora) == len(ids_orig):
             yield {"level": "erro", "msg": f"     ✗ Verificação na caixa: {_ALERTA_FORA_CAIXA_DET}"}
@@ -2619,12 +2634,18 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             # Anti-duplicidade: a(s) tramitação(ões) originária(s) ainda está(ão) na caixa?
             # Se TODAS saíram (outro usuário já concluiu), NÃO envia — loga em vermelho e
             # marca o item para conferência manual (possível remoção).
-            ids_norm = [i for i in ids if str(i).strip()]
-            fora = await _tramites_fora_da_caixa(ids_norm)
-            if ids_norm and fora and len(fora) == len(ids_norm):
-                _passo(log, emit, "Verificação na caixa", False, _ALERTA_FORA_CAIXA_DET)
-                _marcar_alerta_fora_caixa(slug, paj_norm, tipo, id_tramite)
-                return {"ok": False, "status": "fora_da_caixa", "detalhe": _ALERTA_FORA_CAIXA_DET}
+            # EXCEÇÃO — REENVIO: o trâmite originário já foi concluído e saiu da caixa POR
+            # DEFINIÇÃO; pular a verificação (senão acusaria "fora da caixa" indevidamente).
+            if t.get("reenvio"):
+                _passo(log, emit, "Verificação na caixa", None,
+                       "reenvio — dispensada (trâmite originário já concluído)")
+            else:
+                ids_norm = [i for i in ids if str(i).strip()]
+                fora = await _tramites_fora_da_caixa(ids_norm)
+                if ids_norm and fora and len(fora) == len(ids_norm):
+                    _passo(log, emit, "Verificação na caixa", False, _ALERTA_FORA_CAIXA_DET)
+                    _marcar_alerta_fora_caixa(slug, paj_norm, tipo, id_tramite)
+                    return {"ok": False, "status": "fora_da_caixa", "detalhe": _ALERTA_FORA_CAIXA_DET}
         # ENVIO por NÚMERO: dispara para CADA número cadastrado (pode haver vários).
         # Falha em um número NÃO impede os demais — a falha fica registrada só no LOG.
         # Entre um número e outro do mesmo PAJ, espera ~70% do intervalo configurado

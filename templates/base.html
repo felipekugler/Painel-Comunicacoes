@@ -555,6 +555,16 @@
                 </svg>
                 Reconectar
             </button>
+            {% if sisdpu_destrancado() %}
+            <button type="button" id="btn-bloquear-sisdpu" class="btn-subtle" onclick="bloquearPainel()"
+                    title="Bloquear o painel: esquece as credenciais do SISDPU da memória (a senha-mestra será pedida novamente ao usar uma função do SISDPU)"
+                    style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;font-size:11.5px;margin-left:6px;">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" style="width:14px;height:14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 0h10.5a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H6.75a1.5 1.5 0 0 1-1.5-1.5v-6a1.5 1.5 0 0 1 1.5-1.5Z" />
+                </svg>
+                Bloquear Painel
+            </button>
+            {% endif %}
         </div>
 
         <div class="{% block content_class %}px-6 lg:px-10 pt-2 pb-10 w-full{% endblock %} flex-1 min-w-0">
@@ -722,6 +732,26 @@
             } catch (e) {
                 btn.innerHTML = orig; btn.disabled = false;
                 alert('Erro ao reconectar: ' + e);
+            }
+        };
+        // Bloquear o painel: esquece as credenciais do SISDPU da memória (exige a
+        // senha-mestra de novo ao usar funções do SISDPU). NÃO exige desbloqueio antes.
+        window.bloquearPainel = async function() {
+            if (!confirm('Bloquear o painel? As credenciais do SISDPU serão esquecidas e a '
+                       + 'senha-mestra será pedida novamente ao usar uma função do SISDPU.')) return;
+            var btn = document.getElementById('btn-bloquear-sisdpu'); if (!btn) return;
+            var orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Bloqueando…';
+            try {
+                var r = await fetch('/api/bloquear', { method: 'POST' });
+                var d = await r.json().catch(function(){ return {}; });
+                if (d.ok) { location.reload(); }
+                else {
+                    btn.innerHTML = orig; btn.disabled = false;
+                    alert('Não foi possível bloquear: ' + (d.detalhe || d.erro || 'erro'));
+                }
+            } catch (e) {
+                btn.innerHTML = orig; btn.disabled = false;
+                alert('Erro ao bloquear: ' + e);
             }
         };
     </script>
