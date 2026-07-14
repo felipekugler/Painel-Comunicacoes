@@ -148,6 +148,7 @@
                                     data-paj="{{ paj.paj_norm }}" data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                     data-meio="{{ meio_key }}" data-meiolabel="{{ meio_label }}"
                                     data-multi="{{ 1 if (paj.envio_meios|length) > 1 else 0 }}"
+                                    data-jaenviado="{{ 1 if paj.enviados else 0 }}"
                                     onclick="removerDaFila(this)"
                                     title="Remover o envio por {{ meio_label }} deste PAJ">Remover</button>
                         </div>
@@ -294,6 +295,7 @@
                                     data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
                                     data-meio="{{ meio_key }}" data-meiolabel="{{ meio_label }}"
                                     data-multi="{{ 1 if (paj.envio_meios|length) > 1 else 0 }}"
+                                    data-jaenviado="{{ 1 if paj.enviados else 0 }}"
                                     onclick="removerDaFila(this)" title="Remover o envio por {{ meio_label }} deste PAJ">Remover</button>
                         </div>
                     </div>
@@ -798,9 +800,12 @@ async function removerDaFila(btn) {
     const meio = btn.dataset.meio || '';
     const rotulo = btn.dataset.meiolabel || 'este meio';
     const multi = btn.dataset.multi === '1';
+    const jaenviado = btn.dataset.jaenviado === '1';
     const msg = multi
         ? 'Remover o envio por ' + rotulo + ' deste PAJ?\n\nEle continua na fila dos demais meios (não volta para "Pendentes").'
-        : 'Remover o envio por ' + rotulo + ' deste PAJ?\n\nComo é o único meio, ele volta para "Pendentes" na caixa de origem.';
+        : jaenviado
+        ? 'Este PAJ já foi contatado por outro meio.\n\nRemover o envio por ' + rotulo + ' apenas cancela este meio — o PAJ permanece como JÁ TRATADO (não volta para "Pendentes", pois já foi contatado). Para reenviá-lo depois, use o botão "Reenviar" no Histórico.'
+        : 'Remover o envio por ' + rotulo + ' deste PAJ?\n\nComo é o único meio e ainda não foi enviado, ele volta para "Pendentes" na caixa de origem.';
     if (!confirm(msg)) return;
     try {
         const slug = btn.dataset.slug;

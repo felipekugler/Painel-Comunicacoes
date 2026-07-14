@@ -833,6 +833,7 @@ def _enriquecer_tramite(box: dict, sol: dict, cont: dict | None = None) -> dict:
     d["anexos"] = anx
     d["n_anexos"] = len(anx)
     d["tem_anexo"] = len(anx) > 0
+    d["reenvio"] = sol.get("reenvio") or None  # selo de reenvio (origem no histórico)
     # já enviados por tramitação
     env = sol.get("enviados", []) or []
     d["enviados"] = env
@@ -973,6 +974,7 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     d["em_caixa"] = box.get("em_caixa", True)
     d["tramite_ids"] = ids
     d["n_tramites"] = len(ids)
+    d["reenvio"] = conj.get("reenvio") or None  # selo de reenvio (origem no histórico)
     d["id"] = prim.get("id", "")          # id interno do processo (p/ o Playwright abrir a tela)
     d["oficio"] = prim.get("oficio_origem", "")
     d["url_detalhe"] = prim.get("url_detalhe", "")
@@ -1955,6 +1957,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
             # foi escolhida uma caixa no "Gravar para envio", TRAMITAMOS logo em seguida,
             # referenciando essa movimentação. Tudo registrado no log passo-a-passo.
             log, pipe = [], {}
+            _log_inicial(log, t, caixa.get("grupo", ""))  # sincronização + identificação
             if meio == "app_sisdpu":
                 _log_passo(log, "Notificação no aplicativo", True, env_txt)
                 if st == "enviado":
@@ -1967,6 +1970,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                     if ok_mov and id_proc:
                         pipe["mov_url"] = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}"
                         app_mov_seq = mov_seq
+                    pode_concluir = False
                     if tramitar_grupo and ok_mov and id_proc:
                         _dt_data, _pd, prazo_dias = _prazo_tramitacao(p_app)
                         tramr = await _tramitar_referenciando_mov(
@@ -1979,6 +1983,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                         })
                         if tramr["tram_status"] == "tramitado":
                             app_tram_caixa = tramr["tram_caixa"]
+                            pode_concluir = True
                             yield _evento_passo("Tramitação do PAJ", True,
                                                 f'realizada para a caixa "{tramitar_grupo}" · prazo {prazo_dias}d')
                         else:
@@ -1993,11 +1998,44 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                         pipe["tram_status"] = "nao_solicitada"
                         _log_passo(log, "Tramitação do PAJ", None, "não solicitada")
                         yield _evento_passo("Tramitação do PAJ", None, "não solicitada")
+                        pode_concluir = ok_mov
+                    # CONCLUSÃO do(s) trâmite(s) ORIGINÁRIO(S) sincronizado(s) — só quando a
+                    # movimentação teve êxito E (tramitação OK ou não solicitada).
+                    ids_orig = [x for x in ids if x]
+                    previa = _conclusao_previa(ids_orig) if (pode_concluir and ids_orig) else None
+                    if previa:
+                        det = _detalhe_ja_concluido(previa)
+                        pipe["concluido_status"] = "ja_concluido"
+                        pipe["concluido_detalhe"] = det
+                        _log_passo(log, "Conclusão do trâmite originário", True, det + " — etapa pulada")
+                        yield _evento_passo("Conclusão do trâmite originário", True, det + " — etapa pulada")
+                    elif pode_concluir and ids_orig:
+                        yield {"level": "muted",
+                               "msg": f"     admitindo e concluindo {len(ids_orig)} trâmite(s) originário(s)…"}
+                        try:
+                            conc = await sisdpu_client.concluir_paj(ids_orig)
+                        except Exception as e:  # noqa: BLE001
+                            conc = {"ok": False, "detalhe": f"exceção: {e}"}
+                        adm_ok, adm_det, conc_ok, conc_det = _resumo_conclusao(conc)
+                        _log_passo(log, "Admissão na caixa de grupo", adm_ok, adm_det)
+                        yield _evento_passo("Admissão na caixa de grupo", adm_ok, adm_det)
+                        _log_passo(log, "Conclusão na caixa de entrada", conc_ok, conc_det)
+                        yield _evento_passo("Conclusão na caixa de entrada", conc_ok, conc_det)
+                        pipe["concluido_status"] = "concluido" if conc_ok else "falha"
+                        pipe["concluido_detalhe"] = conc_det
+                    else:
+                        motivo = ("não realizada (tramitação não teve êxito)" if not pode_concluir
+                                  else "sem trâmite originário identificado")
+                        pipe["concluido_status"] = "nao_realizada"
+                        pipe["concluido_detalhe"] = motivo
+                        _log_passo(log, "Conclusão do trâmite originário", None, motivo)
+                        yield _evento_passo("Conclusão do trâmite originário", None, motivo)
                 else:  # simulado
                     pipe["mov_status"] = "nao_aplicavel"
                     pipe["tram_status"] = "nao_solicitada"
-                    _log_passo(log, "Movimentação/Tramitação", None, "modo simulado — não executadas")
-                    yield _evento_passo("Movimentação/Tramitação", None, "modo simulado — não executadas")
+                    pipe["concluido_status"] = "nao_aplicavel"
+                    _log_passo(log, "Movimentação/Tramitação/Conclusão", None, "modo simulado — não executadas")
+                    yield _evento_passo("Movimentação/Tramitação/Conclusão", None, "modo simulado — não executadas")
             reg = historico_service.registrar({
                 **base_reg,
                 "meio": meio, "meios": [meio],
@@ -2008,7 +2046,9 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
                 "mov_seq": mov_seq,
                 "id_processo": id_proc,         # p/ "refazer" tramitação
                 "log": log,
-                "status": st, "detalhe": detalhe,
+                # status "reenviado" (laranja) quando o envio veio do botão Reenviar
+                "status": ("reenviado" if (t.get("reenvio") and st in ("enviado", "simulado")) else st),
+                "detalhe": detalhe, "reenvio": t.get("reenvio") or None,
                 # reservados p/ controle futuro de resposta/baixa (por meio):
                 "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
                 **pipe,
@@ -2071,10 +2111,20 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     yield {"_status": status}
 
 
-def _log_passo(log: list, etapa: str, ok: bool | None, detalhe: str) -> None:
-    """Anexa um passo ao log individual do envio (usado na coluna LOG do histórico)."""
+def _usuario_sisdpu() -> str:
+    """Usuário SISDPU (login) sob o qual o painel executa as etapas — registrado ao
+    lado de cada passo do log. Todas as ações do painel correm por este usuário."""
+    import os
+    return os.environ.get("SISDPU_USERNAME", "") or "—"
+
+
+def _log_passo(log: list, etapa: str, ok: bool | None, detalhe: str, ts: str | None = None) -> None:
+    """Anexa um passo ao log individual do envio (usado na coluna LOG do histórico).
+    Grava também o USUÁRIO SISDPU que executou o passo. `ts` permite datar um passo
+    reconstruído (ex.: sincronização) com o horário real do evento."""
     log.append({
-        "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+        "ts": ts or _dt.datetime.now().isoformat(timespec="seconds"),
+        "usuario": _usuario_sisdpu(),
         "etapa": etapa,
         "ok": (None if ok is None else bool(ok)),
         "detalhe": str(detalhe or "")[:600],
@@ -2223,6 +2273,123 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     return res
 
 
+def _ids_originarios(fonte: dict) -> list[str]:
+    """Ids dos trâmites ORIGINÁRIOS (sincronizados na caixa de grupo, que deram origem
+    ao envio) de um item da fila OU de um registro do histórico: `tramite_ids` (conjunto)
+    ou, na falta, o `id_tramite` único."""
+    ids = [str(i).strip() for i in (fonte.get("tramite_ids") or []) if str(i).strip()]
+    if not ids:
+        one = str(fonte.get("id_tramite") or "").strip()
+        if one:
+            ids = [one]
+    return ids
+
+
+def _log_inicial(log: list, t: dict, grupo: str) -> None:
+    """Prepara o log com as etapas ANTERIORES ao envio, reconstruídas do item:
+    (1) SINCRONIZAÇÃO — captação do(s) trâmite(s) na caixa de grupo;
+    (2) IDENTIFICAÇÃO — ids, descrição(ões) e forma de tratamento (separado/conjunto).
+    Assim o log da coluna LOG cobre TODO o fluxo, desde a sincronização."""
+    ids = _ids_originarios(t)
+    conjunto = bool(t.get("conjunto")) or len(ids) > 1
+    ren = t.get("reenvio") or {}
+    if ren:
+        # REENVIO: o log abre pela ESCOLHA de reenviar (não pela sincronização).
+        meio_orig = _MEIO_LABEL.get(ren.get("meio_orig", ""), ren.get("meio_orig") or "—")
+        det = "Reenvio solicitado a partir do histórico"
+        if ren.get("evento_data"):
+            det += f" (envio original de {ren['evento_data']}, meio {meio_orig})"
+        _log_passo(log, "Reenvio solicitado", None, det, ts=ren.get("em"))
+    else:
+        # timestamp real da sincronização, se o item guardou (senão, fica sem override)
+        ts_sync = t.get("incluido_em") or t.get("sincronizado_em") or None
+        _log_passo(log, "Sincronização", True,
+                   f"Trâmite(s) captado(s) na caixa de grupo '{grupo}' durante a sincronização.",
+                   ts=ts_sync)
+    descs = t.get("descricoes_tramites") or ([t.get("descricao_tramite")] if t.get("descricao_tramite") else [])
+    descs = [d for d in descs if d]
+    desc_txt = " | ".join(descs) if descs else "(sem descrição)"
+    _log_passo(log, "Identificação do(s) trâmite(s)", True,
+               f"{len(ids)} trâmite(s) [{', '.join(ids) or '—'}] · tratamento "
+               f"{'conjunto' if conjunto else 'separado'} · descrição: {desc_txt}")
+
+
+def _resumo_conclusao(r: dict) -> tuple:
+    """A partir do retorno de `concluir_paj`, resume as DUAS etapas: admissão (retirada
+    da caixa de grupo) e conclusão (baixa na caixa do usuário).
+    Retorna (adm_ok, adm_det, conc_ok, conc_det)."""
+    resultados = r.get("resultados", {}) or {}
+    n = len(resultados)
+    n_adm = sum(1 for v in resultados.values() if v.get("admitido") is True)
+    ja_fora = sum(1 for v in resultados.values() if v.get("admitido") is None)
+    adm_ok = n > 0 and all(v.get("admitido") in (True, None) for v in resultados.values())
+    conc_ok = bool(r.get("ok"))
+    adm_det = f"{n_adm}/{n} admitido(s) (retirado(s) da caixa de grupo)"
+    if ja_fora:
+        adm_det += f"; {ja_fora} já fora do grupo"
+    conc_det = r.get("detalhe", "")
+    return adm_ok, adm_det, conc_ok, conc_det
+
+
+_MEIO_LABEL = {"whatsapp": "WhatsApp", "app_sisdpu": "App SISDPU", "email": "e-mail"}
+
+
+def _conclusao_previa(ids: list[str], excluir_rec_id: str = "") -> dict | None:
+    """Procura no histórico um registro (≠ excluir_rec_id) que JÁ concluiu (status
+    'concluido' ou 'ja_concluido') ao menos um dos trâmites ORIGINÁRIOS `ids`. Serve
+    para NÃO tentar concluir de novo quando o MESMO trâmite já foi baixado por outro
+    meio. Retorna {meio, ts, rec_id} do mais recente, ou None."""
+    from services import historico_service
+    ids_set = {str(i).strip() for i in (ids or []) if str(i).strip()}
+    if not ids_set:
+        return None
+    achado = None
+    for rec in historico_service.listar():
+        if excluir_rec_id and rec.get("id") == excluir_rec_id:
+            continue
+        if rec.get("concluido_status") not in ("concluido", "ja_concluido"):
+            continue
+        if ids_set & set(_ids_originarios(rec)):
+            if achado is None or (rec.get("ts", "") > achado.get("ts", "")):
+                achado = {"meio": rec.get("meio", ""), "ts": rec.get("ts", ""), "rec_id": rec.get("id", "")}
+    return achado
+
+
+def _detalhe_ja_concluido(previa: dict) -> str:
+    meio = _MEIO_LABEL.get(previa.get("meio", ""), previa.get("meio") or "outro meio")
+    quando = (previa.get("ts", "") or "")[:16].replace("T", " ")
+    return f"já concluído pelo meio {meio}" + (f" em {quando}" if quando else "")
+
+
+async def _concluir_originarios(ids: list[str], log: list, emit=None) -> dict:
+    """ADMITE (retira da caixa de grupo) + CONCLUI (baixa na caixa do usuário) o(s)
+    trâmite(s) ORIGINÁRIO(S) — os sincronizados que geraram o envio (NÃO a tramitação
+    que o painel cria). Registra DUAS etapas (admissão + conclusão) no log/popup.
+    Se o trâmite JÁ foi concluído por OUTRO meio, PULA e registra isso.
+    Retorna {concluido_status, concluido_detalhe}."""
+    ids = [str(i).strip() for i in (ids or []) if str(i).strip()]
+    if not ids:
+        _passo(log, emit, "Conclusão do trâmite originário", None,
+               "nenhum trâmite originário identificado (registro sem id_tramite)")
+        return {"concluido_status": "nao_realizada", "concluido_detalhe": "sem id de trâmite originário"}
+    previa = _conclusao_previa(ids)
+    if previa:
+        det = _detalhe_ja_concluido(previa)
+        _passo(log, emit, "Conclusão do trâmite originário", True, det + " — etapa pulada")
+        return {"concluido_status": "ja_concluido", "concluido_detalhe": det}
+    if emit is not None:
+        emit({"level": "muted", "msg": f"     admitindo e concluindo {len(ids)} trâmite(s) originário(s)…"})
+    try:
+        r = await sisdpu_client.concluir_paj(ids)
+    except Exception as e:  # noqa: BLE001
+        r = {"ok": False, "status": "falha", "detalhe": f"exceção: {e}"}
+    adm_ok, adm_det, conc_ok, conc_det = _resumo_conclusao(r)
+    _passo(log, emit, "Admissão na caixa de grupo", adm_ok, adm_det)
+    _passo(log, emit, "Conclusão na caixa de entrada", conc_ok, conc_det)
+    return {"concluido_status": ("concluido" if conc_ok else "falha"),
+            "concluido_detalhe": conc_det}
+
+
 async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
                                   anexos_meta: list[dict], comprovantes: list[dict] | None,
                                   tramitar_grupo: str, log: list,
@@ -2240,7 +2407,8 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     from ingestao.sisdpu_client import SISDPU_URL
     res = {"mov_seq": None, "mov_status": "falha", "mov_detalhe": "", "mov_url": "",
            "tram_caixa": "", "tram_status": ("nao_solicitada" if not tramitar_grupo else "pendente"),
-           "tram_detalhe": "", "tram_url": "", "tram_descricao": ""}
+           "tram_detalhe": "", "tram_url": "", "tram_descricao": "",
+           "concluido_status": "nao_realizada", "concluido_detalhe": ""}
     id_proc = t.get("id") or ""
     paj = t.get("paj", "")
     if not id_proc:
@@ -2288,14 +2456,25 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
             res["tram_status"] = "nao_realizada"
             res["tram_detalhe"] = "Tramitação cancelada: movimentação não teve êxito."
             _passo(log, emit, "Tramitação do PAJ", False, "cancelada (movimentação não teve êxito)")
+        res["concluido_detalhe"] = "não realizada (movimentação não teve êxito)"
+        _passo(log, emit, "Conclusão do trâmite originário", None, res["concluido_detalhe"])
         return res
     if tramitar_grupo:
         tramr = await _tramitar_referenciando_mov(
             id_proc, paj, tramitar_grupo, res["mov_seq"], prazo, log, emit=emit)
         res.update({k: tramr[k] for k in
                     ("tram_caixa", "tram_status", "tram_detalhe", "tram_url", "tram_descricao")})
+        pode_concluir = (tramr["tram_status"] == "tramitado")
     else:
         _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
+        pode_concluir = True
+    # CONCLUSÃO do(s) trâmite(s) ORIGINÁRIO(S): só quando a movimentação teve êxito E
+    # (a tramitação teve êxito OU não foi solicitada).
+    if pode_concluir:
+        res.update(await _concluir_originarios(_ids_originarios(t), log, emit))
+    else:
+        res["concluido_detalhe"] = "não realizada (tramitação não teve êxito)"
+        _passo(log, emit, "Conclusão do trâmite originário", None, res["concluido_detalhe"])
     return res
 
 
@@ -2363,6 +2542,7 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
     # ENFILEIRA (aguarda a vez) em vez de recusar: se já há um envio/sync em andamento,
     # este espera na fila (FIFO) e roda em seguida.
     log: list = []
+    _log_inicial(log, t, caixa.get("grupo", ""))  # sincronização + identificação
     async with _entrar_exclusivo_fila():
         # CHECAGEM PRÉVIA de conflito de sessão do SISDPU (modo real): evita ENVIAR a
         # mensagem e só depois falhar na movimentação/tramitação. Se houver conflito,
@@ -2468,8 +2648,9 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 numeros=numeros_ok, prazo=prazo_wa, anexos_arquivos=anexos_ctx, emit=emit)
         else:
             mov_tram = {"mov_seq": None, "mov_status": "nao_aplicavel", "mov_detalhe": "",
-                        "tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": ""}
-            _passo(log, emit, "Movimentação/Tramitação", None, "modo simulado — não executadas")
+                        "tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": "",
+                        "concluido_status": "nao_aplicavel", "concluido_detalhe": ""}
+            _passo(log, emit, "Movimentação/Tramitação/Conclusão", None, "modo simulado — não executadas")
 
         envio_id = uuid.uuid4().hex[:12]
         reg = historico_service.registrar({
@@ -2488,7 +2669,10 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "id_processo": t.get("id", ""),          # p/ "refazer" mov/tram
             "tram_grupo": tramitar_grupo,            # caixa PRETENDIDA (mesmo se falhar)
             "mov_descricao": mov_tram.get("mov_descricao", ""),  # p/ "refazer" a movimentação
-            "status": res.get("status", "enviado"), "detalhe": res.get("detalhe", ""),
+            # status "reenviado" (laranja) quando o envio veio do botão Reenviar
+            "status": ("reenviado" if (t.get("reenvio") and res.get("status") in ("enviado", "simulado"))
+                       else res.get("status", "enviado")),
+            "detalhe": res.get("detalhe", ""), "reenvio": t.get("reenvio") or None,
             # comprovante(s) — 1 PDF por número contatado (em dados/_comprovantes_whatsapp/).
             # `comprovante` = 1º (retrocompat); `comprovantes` = lista [{nome, numero}].
             "comprovante": (comps_nomes[0] if comps_nomes else ""),
@@ -2500,6 +2684,9 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "tram_caixa": mov_tram["tram_caixa"], "tram_status": mov_tram["tram_status"],
             "tram_detalhe": mov_tram["tram_detalhe"], "tram_url": mov_tram.get("tram_url", ""),
             "tram_descricao": mov_tram.get("tram_descricao", ""),  # tooltip da coluna "Tramitado"
+            # conclusão (admissão + baixa) do(s) trâmite(s) ORIGINÁRIO(S)
+            "concluido_status": mov_tram.get("concluido_status", "nao_realizada"),
+            "concluido_detalhe": mov_tram.get("concluido_detalhe", ""),
             "log": log,
             "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
         })
@@ -2679,6 +2866,128 @@ async def refazer_tramitacao(historico_id: str) -> dict:
     historico_service.atualizar(historico_id, {"tram_status": "falha",
                                                "tram_detalhe": tram.get("detalhe", ""), "log": log_novo})
     return {"ok": False, "erro": tram.get("detalhe", "Falha na tramitação.")}
+
+
+async def refazer_conclusao(historico_id: str) -> dict:
+    """Refaz a CONCLUSÃO (admissão + baixa) do(s) trâmite(s) ORIGINÁRIO(S) — os
+    sincronizados que geraram o envio — de um registro cuja conclusão falhou/não foi
+    realizada. Checa conflito; atualiza o registro (concluido_status/detalhe + log)."""
+    from services import historico_service
+    rec = historico_service.obter(historico_id)
+    if not rec:
+        return {"ok": False, "erro": "Registro não encontrado."}
+    log_novo = list(rec.get("log") or [])
+    _log_passo(log_novo, "Refazer conclusão — solicitado", None, "reprocessamento manual da conclusão")
+    ids = _ids_originarios(rec)
+    id_proc = _id_processo_do_registro(rec)
+    if not ids:
+        _log_passo(log_novo, "Refazer conclusão", False, "registro sem id de trâmite originário")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Registro sem id de trâmite originário para concluir."}
+    conf = await sisdpu_client.checar_conflito_sessao(id_proc or None)
+    if conf.get("conflito"):
+        _log_passo(log_novo, "Refazer — checagem de sessão", False, "conflito detectado — refazimento abortado")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Conflito de sessão do SISDPU — feche a outra sessão e tente de novo."}
+    _log_passo(log_novo, "Refazer — checagem de sessão", True, "sem conflito de sessão")
+    if not _pode_exclusivo():
+        _log_passo(log_novo, "Refazer conclusão", None, "operação em andamento — tente de novo")
+        historico_service.atualizar(historico_id, {"log": log_novo})
+        return {"ok": False, "erro": "Há uma operação em andamento. Aguarde e tente de novo."}
+    async with _entrar_exclusivo_fila():
+        try:
+            conc = await sisdpu_client.concluir_paj(ids)
+        except Exception as e:  # noqa: BLE001
+            conc = {"ok": False, "detalhe": f"exceção: {e}"}
+    ok = bool(conc.get("ok"))
+    _log_passo(log_novo, "Refazer conclusão do trâmite originário", ok, conc.get("detalhe", ""))
+    historico_service.atualizar(historico_id, {
+        "concluido_status": "concluido" if ok else "falha",
+        "concluido_detalhe": conc.get("detalhe", ""),
+        "log": log_novo,
+    })
+    return {"ok": True} if ok else {"ok": False, "erro": conc.get("detalhe", "Falha na conclusão.")}
+
+
+def _reconstruir_solic_do_registro(rec: dict) -> dict:
+    """Monta uma solicitação a partir de um REGISTRO do histórico, para reenviar o
+    EVENTO ORIGINAL (MESMO trâmite/mensagem) mesmo que o trâmite já tenha sido concluído
+    e saído do box. Preserva o `id_tramite` ORIGINAL do registro — o reenvio NÃO se ancora
+    em trâmites novos que tenham chegado depois (esses são outros assuntos, não tratados)."""
+    return {
+        "id_tramite": rec.get("id_tramite", ""),
+        "id": rec.get("id_processo", "") or "",
+        "oficio_origem": rec.get("oficio", ""),
+        "remetente": "",
+        "data_envio": rec.get("tramite_data", ""),
+        "prazo": "",
+        "url_detalhe": rec.get("url_detalhe", ""),
+        "descricao_tramite": rec.get("descricao_tramite", ""),
+        "atribuicao": "",
+        "resumo_ia": "", "resumo_ia_chave": "", "sugestao_ia": "",
+        "sugestao_tipo": rec.get("tipo", ""), "sugestao_tipo_editada": "",
+        "sugestao_editada": "",
+        "mov_seq": "",
+        "anexos": rec.get("anexos", []) or [],
+        "envio": {},
+        "enviados": [],
+    }
+
+
+def reenviar_do_historico(historico_id: str, meios: list[str]) -> dict:
+    """Recoloca na fila de envio (Prontos) o EVENTO do histórico, para contatar por um
+    meio ADICIONAL. Ater-se ao TRÂMITE ORIGINÁRIO do registro (mesmo id/mensagem) — NÃO
+    usa trâmites novos que tenham chegado depois. Se o trâmite original já saiu do box
+    (concluído/sincronizado), a solicitação é RECONSTRUÍDA a partir do registro e
+    reinjetada, preservando o id original. A conclusão, se já feita, é pulada no envio.
+    (Conjunto: exige que o conjunto ainda esteja no box.)"""
+    from services import historico_service, envio_service
+    rec = historico_service.obter(historico_id)
+    if not rec:
+        return {"ok": False, "erro": "Registro não encontrado."}
+    meios = [m for m in (meios or []) if m in envio_service.MEIOS]
+    if not meios:
+        return {"ok": False, "erro": "Selecione ao menos um meio para reenviar."}
+    slug = rec.get("caixa_slug", "")
+    paj_norm = rec.get("paj_norm", "")
+    if not (slug and paj_norm):
+        return {"ok": False, "erro": "Registro sem caixa/PAJ — não é possível reenviar."}
+    mensagem = rec.get("mensagem", "")
+    prazo = rec.get("prazo", 5)
+    prazos = {m: prazo for m in ("app_sisdpu", "whatsapp", "email")}
+    tramitar_grupo = rec.get("tram_grupo", "") or ""
+    somente_leitura = bool(rec.get("somente_leitura"))
+
+    # selo de REENVIO: marca a origem (registro, quando, meio original) para o envio
+    # gravar status "reenviado" e o log abrir com "Reenvio solicitado".
+    marca = {"de": historico_id, "meio_orig": rec.get("meio", ""),
+             "em": _dt.datetime.now().isoformat(timespec="seconds"),
+             "evento_data": (rec.get("ts", "") or "")[:16].replace("T", " ")}
+    if bool(rec.get("conjunto")):
+        box = _ler_box(slug, paj_norm)
+        if not (box and box.get("conjunto")):
+            return {"ok": False, "erro": ("O conjunto deste envio não está mais na caixa — não é "
+                                          "possível reenviar automaticamente. Trate pela caixa de origem.")}
+        box["conjunto"]["reenvio"] = marca
+        _gravar_box(slug, box)
+        gravar_conjunto(slug, paj_norm, mensagem, meios, somente_leitura, prazos, tramitar_grupo)
+    else:
+        idt = rec.get("id_tramite", "")
+        if not idt:
+            return {"ok": False, "erro": "Registro sem id de trâmite originário — não é possível reenviar."}
+        box = _ler_box(slug, paj_norm) or {"paj_norm": paj_norm, "paj": rec.get("paj", ""),
+                                           "em_caixa": False, "solicitacoes": []}
+        box.setdefault("solicitacoes", [])
+        # reinjeta a solicitação do trâmite ORIGINAL (se não estiver mais no box), sem
+        # mexer nos demais trâmites do PAJ (ex.: trâmites novos ainda não tratados)
+        if not _achar_solic(box, idt):
+            box["solicitacoes"].append(_reconstruir_solic_do_registro(rec))
+        _achar_solic(box, idt)["reenvio"] = marca  # marca o selo de reenvio na solicitação
+        _gravar_box(slug, box)
+        gravar_para_envio(slug, paj_norm, idt, mensagem, meios, somente_leitura, prazos, tramitar_grupo)
+    labels = ", ".join(_MEIO_LABEL.get(m, m) for m in meios)
+    return {"ok": True, "meios": meios, "slug": slug,
+            "detalhe": f"Recolocado na fila (trâmite originário) para: {labels}."}
 
 
 async def enviar_whatsapp_lote_stream(selecao: list[dict]):

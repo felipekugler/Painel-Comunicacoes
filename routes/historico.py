@@ -39,6 +39,22 @@ async def refazer_tramitacao(historico_id: str):
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
+@router.post("/api/historico/{historico_id}/refazer-conclusao", response_class=JSONResponse)
+async def refazer_conclusao(historico_id: str):
+    """Refaz a conclusão (admissão + baixa) do(s) trâmite(s) originário(s) que falhou."""
+    res = await divcom_service.refazer_conclusao(historico_id)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/historico/{historico_id}/reenviar", response_class=JSONResponse)
+async def reenviar(historico_id: str, payload: dict = Body(default={})):
+    """Recoloca o PAJ na fila de envio (Prontos) para os meios escolhidos — reenvio
+    por um meio adicional de um PAJ já contatado."""
+    meios = (payload or {}).get("meios") or []
+    res = divcom_service.reenviar_do_historico(historico_id, meios)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
 @router.post("/api/historico/limpar", response_class=JSONResponse)
 async def limpar_historico(payload: dict = Body(...)):
     modo = (payload.get("modo") or "tudo") if isinstance(payload, dict) else "tudo"

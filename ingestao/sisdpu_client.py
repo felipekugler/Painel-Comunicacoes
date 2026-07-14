@@ -1589,6 +1589,125 @@ async def tramitar_paj(
     return {"ok": ok, "status": "tramitado" if ok else "falha", "detalhe": detalhe, "pajs": numeros}
 
 
+# ---- Concluir PAJ: ADMITIR (caixa de grupo) + CONCLUIR (caixa do usuário) ----
+# Ativa a aba "Caixa de Entrada do Grupo" (renderiza as tabelas de grupo).
+_JS_ATIVA_ABA_GRUPO = r"""() => {
+    const links = document.querySelectorAll('.ui-tabs-nav a, a[href*="tabView:tab"]');
+    for (const a of links) if ((a.textContent||'').toLowerCase().includes('caixa de entrada do grupo')) { a.click(); return true; }
+    return false;
+}"""
+# O trâmite (data-rk) está em ALGUMA tabela de grupo? (linha tem link "Admitir").
+_JS_TRAMITE_NO_GRUPO = r"""(idt) => {
+    for (const tr of document.querySelectorAll('tr[data-rk="'+idt+'"]')) {
+        for (const a of tr.querySelectorAll('a, button'))
+            if ((a.textContent||'').replace(/\s+/g,' ').trim().toLowerCase() === 'admitir') return true;
+    }
+    return false;
+}"""
+# Clica o link "Admitir" da linha data-rk (retira da caixa de grupo → caixa do usuário).
+_JS_ADMITIR_TRAMITE = r"""(idt) => {
+    for (const tr of document.querySelectorAll('tr[data-rk="'+idt+'"]')) {
+        for (const a of tr.querySelectorAll('a, button'))
+            if ((a.textContent||'').replace(/\s+/g,' ').trim().toLowerCase() === 'admitir') { a.click(); return true; }
+    }
+    return false;
+}"""
+# O trâmite está na tabela da CAIXA DO USUÁRIO?
+_JS_TRAMITE_NA_CAIXA = r"""(idt) => {
+    const t = document.querySelector('[id="tabView:caixaEntradaTab1Form:tramites"]');
+    return !!(t && t.querySelector('tbody tr[data-rk="'+idt+'"]'));
+}"""
+# Marca o checkbox (id estável baseado no id_tramite), se ainda não marcado.
+_JS_MARCA_CHECKBOX = r"""(idt) => {
+    const box = document.querySelector('[id="tabView:caixaEntradaTab1Form:tramites_'+idt+'_checkbox"]');
+    if (!box) return false;
+    if (!/ui-state-active/.test(box.getAttribute('class')||'')) box.click();
+    return true;
+}"""
+_JS_CLICA_BTN_CONCLUIR = r"""() => {
+    const b = document.querySelector('[id="tabView:caixaEntradaTab1Form:btnConcluir"]');
+    if (!b) return false; b.click(); return true;
+}"""
+
+
+async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
+    """ADMITE (retira da caixa de grupo) e CONCLUI (baixa na caixa do usuário) o(s)
+    TRÂMITE(S) ORIGINÁRIO(S) — os sincronizados na caixa de grupo que deram origem ao
+    envio das mensagens (NÃO a tramitação que o painel cria). Recebe a lista de
+    `id_tramite` (o data-rk lido na sincronização; NÃO muda ao admitir).
+
+    Fluxo: caixaEntrada → aba de grupo → clica "Admitir" de cada trâmite → volta à
+    caixa do usuário → marca o checkbox de cada um (id estável
+    `...:tramites_{id}_checkbox`) → clica "Concluir" (btnConcluir). Confirma relendo.
+    Retorna {ok, status, detalhe, resultados:{id:{admitido,concluido}}}. status:
+    'concluido' | 'parcial' | 'falha' | 'dry_run'."""
+    ids = [str(i).strip() for i in (id_tramites or []) if str(i).strip()]
+    if not ids:
+        return {"ok": False, "status": "falha", "detalhe": "Nenhum id de trâmite informado."}
+    _log.info("concluir_paj(%s) dry=%s", ids, dry_run)
+    res = {i: {"admitido": False, "concluido": False} for i in ids}
+    if dry_run:
+        return {"ok": True, "status": "dry_run",
+                "detalhe": f"[dry_run] Admitiria+concluiria os trâmites {ids}.", "resultados": res}
+
+    await _ensure_logged_in()
+    page = await _get_page()
+    cx_url = f"{SISDPU_URL}/pages/caixaentrada/caixaEntrada.xhtml"
+
+    # ---------- FASE 1: ADMITIR na caixa de grupo ----------
+    await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page); await page.wait_for_timeout(600)
+    if not await _resolver_conflito_login(page):
+        return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO, "resultados": res}
+    await page.evaluate(_JS_ATIVA_ABA_GRUPO)
+    await _wait_pf_ajax(page); await page.wait_for_timeout(900)
+    for i in ids:
+        try:
+            if await page.evaluate(_JS_TRAMITE_NO_GRUPO, i):
+                if await page.evaluate(_JS_ADMITIR_TRAMITE, i):
+                    await _wait_pf_ajax(page, timeout=15000); await page.wait_for_timeout(800)
+                    res[i]["admitido"] = True
+            else:
+                # não está no grupo — talvez já tenha sido admitido antes; segue p/ conclusão
+                res[i]["admitido"] = None
+        except Exception as e:  # noqa: BLE001
+            _log.warning("concluir_paj: admitir %s falhou: %s", i, e)
+
+    # ---------- FASE 2: CONCLUIR na caixa do usuário ----------
+    await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page); await page.wait_for_timeout(700)
+    marcados = 0
+    for i in ids:
+        try:
+            if await page.evaluate(_JS_TRAMITE_NA_CAIXA, i) and await page.evaluate(_JS_MARCA_CHECKBOX, i):
+                marcados += 1
+        except Exception as e:  # noqa: BLE001
+            _log.warning("concluir_paj: marcar %s falhou: %s", i, e)
+    if marcados:
+        await page.evaluate(_JS_CLICA_BTN_CONCLUIR)
+        await _wait_pf_ajax(page, timeout=15000); await page.wait_for_timeout(1300)
+
+    # ---------- VERIFICAÇÃO: sumiu da caixa do usuário E da caixa de grupo ----------
+    await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page); await page.wait_for_timeout(600)
+    na_caixa = {i: await page.evaluate(_JS_TRAMITE_NA_CAIXA, i) for i in ids}
+    await page.evaluate(_JS_ATIVA_ABA_GRUPO)
+    await _wait_pf_ajax(page); await page.wait_for_timeout(800)
+    no_grupo = {i: await page.evaluate(_JS_TRAMITE_NO_GRUPO, i) for i in ids}
+    for i in ids:
+        res[i]["concluido"] = not na_caixa[i] and not no_grupo[i]
+
+    concluidos = [i for i in ids if res[i]["concluido"]]
+    if len(concluidos) == len(ids):
+        status, ok = "concluido", True
+    elif concluidos:
+        status, ok = "parcial", False
+    else:
+        status, ok = "falha", False
+    detalhe = f"{len(concluidos)}/{len(ids)} trâmite(s) concluído(s)."
+    return {"ok": ok, "status": status, "detalhe": detalhe, "resultados": res}
+
+
 async def listar_grupos_unidade(id_processo: str | None = None) -> list[str]:
     """Lê a lista de caixas de GRUPO da unidade (opções do dropdown 'Tramitar para Grupo
     da Unidade' da tela Tramitar PAJ). Retorna os nomes (sem 'Selecione...'). Usa a tela

@@ -19,6 +19,7 @@ Thumbs.db
 # Logs
 *.log
 logs/
+logs_app.txt
 
 # Tooling caches
 .ruff_cache/
