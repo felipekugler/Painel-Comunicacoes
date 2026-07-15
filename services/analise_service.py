@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 from services.texto_util import colapsar_paragrafos, remover_emojis
@@ -94,16 +95,33 @@ _INSTRUCOES = (
 )
 
 
-# Núcleo estável do aviso que a IA emite quando NÃO consegue preencher os dados
-# obrigatórios de um comunicado padrão (ver _INSTRUCOES). Usado para DETECTAR o
-# caso e destacar a sugestão em vermelho (conferência manual). Sem emoji — só texto.
-_NUCLEO_CONFERENCIA = "dados padrão não identificados"
+# Gatilhos do aviso de conferência manual, comparados SEM acento (a IA às vezes
+# gera o texto sem acentuação). Qualquer sugestão que COMECE com "verifique o paj"
+# — o padrão de aviso que a IA emite quando o defensor precisa olhar o PAJ — deve
+# ficar em vermelho, seja o motivo "dados padrão não identificados" (campos de
+# comunicado que não puderam ser preenchidos, ver _INSTRUCOES) ou qualquer outro.
+# Também mantemos o núcleo antigo como gatilho no meio do texto, por segurança.
+_PREFIXO_CONFERENCIA = "verifique o paj"
+_NUCLEO_CONFERENCIA = "dados padrao nao identificados"
+
+
+def _sem_acento(s: str) -> str:
+    """Remove acentos (marcas de combinação Unicode) para comparação tolerante."""
+    return "".join(
+        c for c in unicodedata.normalize("NFD", s)
+        if unicodedata.category(c) != "Mn"
+    )
 
 
 def precisa_conferencia_manual(sugestao: str | None) -> bool:
-    """True quando a sugestão é o aviso de dados padrão não identificados — sinal de
-    que o usuário precisa conferir o PAJ manualmente (destacar em vermelho no painel)."""
-    return bool(sugestao) and _NUCLEO_CONFERENCIA in sugestao.lower()
+    """True quando a sugestão é um aviso para o usuário conferir o PAJ manualmente
+    (destacar em vermelho no painel). Dispara para QUALQUER sugestão que comece com
+    'Verifique o PAJ' — insensível a acento e ao tipo de hífen/travessão — ou que
+    contenha o núcleo 'dados padrão não identificados'."""
+    if not sugestao:
+        return False
+    base = _sem_acento(sugestao).lower().lstrip()
+    return base.startswith(_PREFIXO_CONFERENCIA) or _NUCLEO_CONFERENCIA in base
 
 
 def _desescapar_json(s: str) -> str:
