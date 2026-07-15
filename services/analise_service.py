@@ -312,6 +312,68 @@ def _run_claude(prompt: str) -> str | None:
     return result
 
 
+def testar_conexao() -> dict:
+    """Faz uma chamada MÍNIMA real ao Claude CLI para confirmar que a IA está de fato
+    utilizável — não só que o binário existe, mas que a conta está AUTENTICADA e com
+    COTA disponível. Diferente de claude_instalado() (que só checa o PATH).
+
+    Retorna {"ok": bool, "status": str, "detalhe": str}, com status em:
+    'ok' | 'nao_instalado' | 'nao_autenticado' | 'cota' | 'erro'.
+    """
+    if not claude_instalado():
+        return {"ok": False, "status": "nao_instalado",
+                "detalhe": "O programa 'claude' não foi encontrado nesta máquina. "
+                           "Instale o Claude Code para usar o Modo com IA."}
+    cmd = [*CLAUDE_CMD, "-p", "--output-format", "json"]
+    if ANALISE_MODELO:
+        cmd += ["--model", ANALISE_MODELO]
+    prompt = "Responda apenas com a palavra OK."
+    try:
+        proc = subprocess.run(
+            cmd, input=prompt.encode("utf-8"), capture_output=True,
+            timeout=min(ANALISE_TIMEOUT_SEG, 60), cwd=str(BASE_DIR),
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "status": "erro",
+                "detalhe": "O Claude não respondeu a tempo (timeout). Tente novamente."}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "status": "erro", "detalhe": f"Falha ao invocar o Claude: {e}"}
+
+    saida = proc.stdout.decode("utf-8", errors="replace").strip()
+    erro_txt = proc.stderr.decode("utf-8", errors="replace").strip()
+    baixo = (saida + " " + erro_txt).lower()
+
+    # Cota/limite de uso atingido — a conta está conectada, mas sem uso disponível agora.
+    if any(s in baixo for s in ("session limit", "usage limit", "hit your", "rate limit", "quota")):
+        return {"ok": False, "status": "cota",
+                "detalhe": "Conta conectada, mas o limite de uso foi atingido. "
+                           "As análises voltam quando a cota renovar."}
+    # Não autenticado / sem login.
+    if any(s in baixo for s in ("login", "authenticat", "not logged", "unauthor",
+                                "api key", "credit balance", "please run", "/login")):
+        return {"ok": False, "status": "nao_autenticado",
+                "detalhe": "O Claude está instalado, mas a conta não está conectada. "
+                           "Abra um terminal, rode 'claude' e faça login uma vez."}
+    # Envelope JSON de sucesso?
+    if saida and proc.returncode == 0:
+        try:
+            env = json.loads(saida)
+        except json.JSONDecodeError:
+            env = {"result": saida, "is_error": False}
+        if not env.get("is_error"):
+            result = env.get("result")
+            if isinstance(result, dict):
+                result = result.get("text", "")
+            if (result or "").strip():
+                modelo = ANALISE_MODELO or "padrão da conta"
+                return {"ok": True, "status": "ok",
+                        "detalhe": f"Conexão confirmada — o Claude respondeu (modelo: {modelo})."}
+    # Falha genérica não classificada.
+    detalhe = (erro_txt or saida or "não foi possível confirmar a conexão.").strip()
+    return {"ok": False, "status": "erro",
+            "detalhe": f"Não foi possível confirmar a conexão com o Claude: {detalhe[:300]}"}
+
+
 _INSTRUCOES_CONJUNTO = (
     "Você auxilia servidores da Defensoria Pública da União na central de contatos "
     "com assistidos. Este PAJ tem VÁRIAS tramitações pendentes (cada uma pede um "

@@ -76,22 +76,22 @@
 
 <!-- ===================== Barra de abas ===================== -->
 <div class="cfg-tabs" role="tablist">
-    <button class="cfg-tab" data-tab="login" onclick="abrirTab('login')">Configurações de login</button>
+    <button class="cfg-tab" data-tab="acesso" onclick="abrirTab('acesso')">Configurações de Acesso</button>
     <button class="cfg-tab" data-tab="geral" onclick="abrirTab('geral')">Configurações Gerais</button>
-    <button class="cfg-tab" data-tab="ia" onclick="abrirTab('ia')">Configuração de IA</button>
     <button class="cfg-tab" data-tab="caixas" onclick="abrirTab('caixas')">Caixas para Sincronização</button>
-    <button class="cfg-tab" data-tab="gerais" onclick="abrirTab('gerais')">Mensagens Gerais</button>
-    {% for cx in caixas %}
-    <button class="cfg-tab {% if not cx.habilitada %}cfg-tab-off{% endif %}" data-tab="cx-{{ cx.slug }}"
-            onclick="abrirTab('cx-{{ cx.slug }}')"
-            {% if not cx.habilitada %}title="Caixa não sincronizada — configurações em somente leitura"{% endif %}>
-        {{ cx.nome }}{% if not cx.habilitada %} 🔒{% endif %}
-    </button>
-    {% endfor %}
+    <button class="cfg-tab" data-tab="cadastro" onclick="abrirTab('cadastro')">Cadastro de Textos/Parágrafos padrão</button>
 </div>
 
-<!-- ===================== Aba: Configurações de login ===================== -->
-<div class="cfg-panel" data-panel="login">
+<!-- ===================== Aba: Configurações de Acesso ===================== -->
+<div class="cfg-panel" data-panel="acesso">
+    <div class="cfg-subtabs" role="tablist">
+        <button class="cfg-subtab" data-subtab="acc-sisdpu" onclick="abrirSubTab('acc-sisdpu')">SISDPU</button>
+        <button class="cfg-subtab" data-subtab="acc-claude" onclick="abrirSubTab('acc-claude')">Claude</button>
+        <button class="cfg-subtab" data-subtab="acc-whatsapp" onclick="abrirSubTab('acc-whatsapp')">WhatsApp</button>
+    </div>
+
+    <!-- Subaba: SISDPU -->
+    <div class="cfg-subpanel" data-subpanel="acc-sisdpu">
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-bottom:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Acesso ao SISDPU</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
@@ -154,7 +154,168 @@
         }
         </script>
     </div>
-</div>
+    </div><!-- /acc-sisdpu -->
+
+    <!-- Subaba: Claude -->
+    <div class="cfg-subpanel" data-subpanel="acc-claude">
+    <div class="fluent-card" style="padding:22px;max-width:760px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configuração de IA</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            O painel funciona em <strong>dois modos</strong>. Escolha conforme você tenha (ou não) uma conta
+            de IA (Claude) conectada nesta máquina — nem todos precisarão da IA para usar o painel.
+        </p>
+        <div id="ia-seg" class="modo-seg">
+            <button type="button" class="{{ 'ativo' if not ia_ativa else '' }}" onclick="definirIaModo(false, this)">Modo Simples</button>
+            <button type="button" class="{{ 'ativo' if ia_ativa else '' }}" onclick="definirIaModo(true, this)">Modo com IA</button>
+        </div>
+        <p id="ia-status" class="text-tertiary" style="font-size:12px;margin-top:10px;">
+            {% if ia_ativa %}Modo com IA ativado.{% else %}Modo Simples ativado (IA desligada).{% endif %}
+        </p>
+        {% if not claude_instalado %}
+        <p style="font-size:12.5px;margin-top:8px;padding:8px 10px;border-radius:8px;color:var(--c-red);
+                  border:1px solid color-mix(in srgb, var(--c-red) 40%, transparent);
+                  background:color-mix(in srgb, var(--c-red) 8%, transparent);">
+            O Claude CLI <strong>não foi detectado</strong> nesta máquina. No “Modo com IA”, as análises só
+            serão geradas depois que o Claude estiver instalado e conectado; enquanto isso, o painel opera
+            normalmente como no Modo Simples.
+        </p>
+        {% endif %}
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">Testar a conexão com o Claude</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 12px;">
+            O painel detecta o Claude automaticamente — não é preciso cadastrar conta nem chave aqui. Este teste
+            confirma que ele está <strong>instalado, conectado (login feito) e com uso disponível</strong>. A
+            autenticação da conta é feita uma vez fora do painel: abra um terminal, rode <span style="font-family:'Cascadia Code',monospace;">claude</span> e faça login.
+        </p>
+        <button type="button" id="btn-testar-ia" class="btn-accent" onclick="testarIA()">Testar conexão com o Claude</button>
+        <div id="testar-ia-res" style="margin-top:13px;font-size:13px;line-height:1.5;display:none;"></div>
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que a IA faz no painel</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
+            No <strong>Modo com IA</strong>, ao sincronizar cada PAJ a IA analisa as últimas movimentações e:
+        </p>
+        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
+            <li><strong>Resumo</strong>: resume a providência de contato necessária com o assistido.</li>
+            <li><strong>Classificação (Tipo)</strong>: enquadra a tramitação num <em>texto padrão</em>, quando cabível.</li>
+            <li><strong>Sugestão de mensagem</strong>: redige uma mensagem pronta ao assistido, adaptada ao caso.</li>
+            <li><strong>Anexo automático</strong>: ao classificar num texto padrão com anexo vinculado, inclui o anexo na tramitação.</li>
+        </ul>
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que continua funcionando sem IA (Modo Simples)</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
+            <strong>Todo o núcleo do painel</strong> permanece operacional — apenas não há geração automática
+            de resumo/classificação/sugestão. Você escreve a mensagem ou usa os modelos padrão manualmente:
+        </p>
+        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
+            <li>Sincronização das caixas (lista de PAJs, movimentações e prazos).</li>
+            <li>Contatos do assistido: telefone, e-mail, endereço e WhatsApp.</li>
+            <li><strong>Textos e parágrafos padrão manuais</strong> (com seus anexos vinculados).</li>
+            <li>Gravar para envio, envio por App SISDPU / WhatsApp e comprovante.</li>
+            <li>Movimentação e tramitação no SISDPU; histórico, anexos, refazer e log.</li>
+        </ul>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:760px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências para análise da IA</h2>
+        <p class="text-tertiary" style="font-size:12px;margin:0 0 4px;">Só têm efeito no <strong>Modo com IA</strong>.</p>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Quantidade de movimentações a analisar</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas à IA
+            na <strong>sincronização inicial</strong> do PAJ. Todas as movimentações continuam
+            sendo extraídas e guardadas; este número define apenas quantas (as mais recentes)
+            a IA analisa por padrão. Depois, no <strong>histórico de movimentações</strong> de
+            cada PAJ (botão “últimas movimentações” no painel), é possível <strong>selecionar
+            movimentações específicas</strong> — ou colar um <strong>trecho</strong> do texto —
+            e reanalisar o PAJ com exatamente o que interessa.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-movs" style="font-size:14px;">Movimentações analisadas:</label>
+            <input type="number" id="n-movs" class="wa-input" style="width:90px;" min="1" max="30" value="{{ n_movimentacoes }}">
+            <button class="btn-accent" onclick="salvarMovs()">Salvar</button>
+            <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
+
+        <div class="grava-sep" style="margin:18px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Análises de IA em paralelo</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
+            Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
+            Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
+            Use <strong>1</strong> para análise sequencial (uma de cada vez). Recomendado: 4 a 6.
+        </p>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <label for="n-conc" style="font-size:14px;">Análises simultâneas:</label>
+            <input type="number" id="n-conc" class="wa-input" style="width:90px;" min="1" max="{{ analise_concorrencia_max }}" value="{{ analise_concorrencia }}">
+            <button class="btn-accent" onclick="salvarConcorrencia()">Salvar</button>
+            <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
+    </div>
+    <script>
+    async function testarIA(){
+        const btn=document.getElementById('btn-testar-ia');
+        const res=document.getElementById('testar-ia-res');
+        const orig=btn.textContent; btn.disabled=true; btn.textContent='Testando…';
+        res.style.display='block'; res.style.color='var(--text-secondary)';
+        res.textContent='Chamando o Claude para confirmar a conexão… (pode levar alguns segundos)';
+        try{
+            const r=await fetch('/api/ia/testar',{method:'POST'});
+            const d=await r.json().catch(()=>({}));
+            if(d.ok){
+                res.style.color='var(--c-zap)';
+                res.textContent='✓ '+(d.detalhe||'Conexão confirmada com o Claude.');
+            } else if(d.status==='cota'){
+                res.style.color='#a06500';
+                res.textContent='⚠ '+(d.detalhe||'Limite de uso atingido. Tente mais tarde.');
+            } else {
+                res.style.color='var(--c-red)';
+                res.textContent='✗ '+(d.detalhe||'Não foi possível confirmar a conexão com o Claude.');
+            }
+        }catch(e){ res.style.color='var(--c-red)'; res.textContent='✗ Erro ao testar: '+e; }
+        finally{ btn.disabled=false; btn.textContent=orig; }
+    }
+    </script>
+    </div><!-- /acc-claude -->
+
+    <!-- Subaba: WhatsApp -->
+    <div class="cfg-subpanel" data-subpanel="acc-whatsapp">
+    <div class="fluent-card" style="padding:22px;max-width:720px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configurações de mensagens por WhatsApp</h2>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Conexão com o WhatsApp Web</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 12px;">
+            Conecte o painel a uma conta de WhatsApp (use um <strong>número dedicado</strong> da unidade). O login
+            é feito <strong>uma única vez</strong>, por QR Code, e a sessão fica salva para os próximos envios.
+        </p>
+        <button type="button" id="btn-wa-login" class="btn-accent" onclick="conectarWhatsapp()">Conectar WhatsApp (ler QR Code)</button>
+        <div id="wa-login-res" style="margin-top:12px;font-size:13px;line-height:1.5;display:none;"></div>
+        <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">
+            Vai abrir uma janela do navegador no WhatsApp Web. No celular do número dedicado, toque em
+            <strong>Aparelhos conectados → Conectar um aparelho</strong> e escaneie o QR. Ao carregar as conversas,
+            o login está salvo — pode fechar a janela.
+        </p>
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Intervalo entre mensagens</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Intervalo <strong>mínimo</strong> (em segundos) entre mensagens no envio <strong>em lote</strong> pelo WhatsApp —
+            imita o ritmo humano e <strong>reduz o risco de banimento</strong> da conta. Mínimo 5s (recomendado ≥ 20s).
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <input type="number" id="wa-intervalo" class="wa-input" style="width:90px;" min="5" max="600" value="{{ whatsapp_intervalo }}">
+            <span class="text-secondary" style="font-size:13px;">segundos</span>
+            <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
+            <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+    </div><!-- /acc-whatsapp -->
+</div><!-- /acesso -->
 
 <!-- ===================== Aba: Configurações Gerais ===================== -->
 <div class="cfg-panel" data-panel="geral">
@@ -205,22 +366,6 @@
                         onclick="definirLayout('completo',this)">Completo (um por vez)</button>
             </div>
             <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Vale ao (re)abrir a caixa.</p>
-        </div>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configurações de mensagens por WhatsApp</h2>
-
-        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Intervalo entre mensagens</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
-            Intervalo <strong>mínimo</strong> (em segundos) entre mensagens no envio <strong>em lote</strong> pelo WhatsApp —
-            imita o ritmo humano e <strong>reduz o risco de banimento</strong> da conta. Mínimo 5s (recomendado ≥ 20s).
-        </p>
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <input type="number" id="wa-intervalo" class="wa-input" style="width:90px;" min="5" max="600" value="{{ whatsapp_intervalo }}">
-            <span class="text-secondary" style="font-size:13px;">segundos</span>
-            <button class="btn-subtle" onclick="salvarWaIntervalo()">Salvar</button>
-            <span id="wa-intervalo-msg" class="text-tertiary" style="font-size:12px;"></span>
         </div>
     </div>
 
@@ -368,98 +513,6 @@
     </div>
 </div>
 
-<!-- ===================== Aba: Configuração de IA ===================== -->
-<div class="cfg-panel" data-panel="ia">
-    <div class="fluent-card" style="padding:22px;max-width:760px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Configuração de IA</h2>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            O painel funciona em <strong>dois modos</strong>. Escolha conforme você tenha (ou não) uma conta
-            de IA (Claude) conectada nesta máquina — nem todos precisarão da IA para usar o painel.
-        </p>
-        <div id="ia-seg" class="modo-seg">
-            <button type="button" class="{{ 'ativo' if not ia_ativa else '' }}" onclick="definirIaModo(false, this)">Modo Simples</button>
-            <button type="button" class="{{ 'ativo' if ia_ativa else '' }}" onclick="definirIaModo(true, this)">Modo com IA</button>
-        </div>
-        <p id="ia-status" class="text-tertiary" style="font-size:12px;margin-top:10px;">
-            {% if ia_ativa %}Modo com IA ativado.{% else %}Modo Simples ativado (IA desligada).{% endif %}
-        </p>
-        {% if not claude_instalado %}
-        <p style="font-size:12.5px;margin-top:8px;padding:8px 10px;border-radius:8px;color:var(--c-red);
-                  border:1px solid color-mix(in srgb, var(--c-red) 40%, transparent);
-                  background:color-mix(in srgb, var(--c-red) 8%, transparent);">
-            O Claude CLI <strong>não foi detectado</strong> nesta máquina. No “Modo com IA”, as análises só
-            serão geradas depois que o Claude estiver instalado e conectado; enquanto isso, o painel opera
-            normalmente como no Modo Simples.
-        </p>
-        {% endif %}
-
-        <div class="grava-sep" style="margin:20px 0 16px;"></div>
-        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que a IA faz no painel</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
-            No <strong>Modo com IA</strong>, ao sincronizar cada PAJ a IA analisa as últimas movimentações e:
-        </p>
-        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
-            <li><strong>Resumo</strong>: resume a providência de contato necessária com o assistido.</li>
-            <li><strong>Classificação (Tipo)</strong>: enquadra a tramitação num <em>comunicado padrão</em>, quando cabível.</li>
-            <li><strong>Sugestão de mensagem</strong>: redige uma mensagem pronta ao assistido, adaptada ao caso.</li>
-            <li><strong>Anexo automático</strong>: ao classificar num comunicado com anexo padrão vinculado, inclui o anexo na tramitação.</li>
-        </ul>
-
-        <div class="grava-sep" style="margin:20px 0 16px;"></div>
-        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 6px;">O que continua funcionando sem IA (Modo Simples)</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 8px;">
-            <strong>Todo o núcleo do painel</strong> permanece operacional — apenas não há geração automática
-            de resumo/classificação/sugestão. Você escreve a mensagem ou usa os modelos padrão manualmente:
-        </p>
-        <ul class="text-secondary" style="font-size:13px;line-height:1.6;margin:0;padding-left:20px;">
-            <li>Sincronização das caixas (lista de PAJs, movimentações e prazos).</li>
-            <li>Contatos do assistido: telefone, e-mail, endereço e WhatsApp.</li>
-            <li><strong>Comunicados e parágrafos padrão manuais</strong> (com seus anexos vinculados).</li>
-            <li>Gravar para envio, envio por App SISDPU / WhatsApp e comprovante.</li>
-            <li>Movimentação e tramitação no SISDPU; histórico, anexos, refazer e log.</li>
-        </ul>
-    </div>
-
-    <div class="fluent-card" style="padding:22px;max-width:760px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Preferências para análise da IA</h2>
-        <p class="text-tertiary" style="font-size:12px;margin:0 0 4px;">Só têm efeito no <strong>Modo com IA</strong>.</p>
-
-        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Quantidade de movimentações a analisar</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            Quantas das <strong>últimas movimentações</strong> de cada PAJ são enviadas à IA
-            na <strong>sincronização inicial</strong> do PAJ. Todas as movimentações continuam
-            sendo extraídas e guardadas; este número define apenas quantas (as mais recentes)
-            a IA analisa por padrão. Depois, no <strong>histórico de movimentações</strong> de
-            cada PAJ (botão “últimas movimentações” no painel), é possível <strong>selecionar
-            movimentações específicas</strong> — ou colar um <strong>trecho</strong> do texto —
-            e reanalisar o PAJ com exatamente o que interessa.
-        </p>
-        <div style="display:flex;align-items:center;gap:12px;">
-            <label for="n-movs" style="font-size:14px;">Movimentações analisadas:</label>
-            <input type="number" id="n-movs" class="wa-input" style="width:90px;" min="1" max="30" value="{{ n_movimentacoes }}">
-            <button class="btn-accent" onclick="salvarMovs()">Salvar</button>
-            <span id="movs-status" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 5. Intervalo: 1 a 30.</p>
-
-        <div class="grava-sep" style="margin:18px 0 16px;"></div>
-
-        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Análises de IA em paralelo</h3>
-        <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">
-            Quantas análises de IA rodam <strong>ao mesmo tempo</strong> durante a sincronização.
-            Mais = sync mais rápido, porém maior uso de CPU e maior risco de atingir o limite de uso.
-            Use <strong>1</strong> para análise sequencial (uma de cada vez). Recomendado: 4 a 6.
-        </p>
-        <div style="display:flex;align-items:center;gap:12px;">
-            <label for="n-conc" style="font-size:14px;">Análises simultâneas:</label>
-            <input type="number" id="n-conc" class="wa-input" style="width:90px;" min="1" max="{{ analise_concorrencia_max }}" value="{{ analise_concorrencia }}">
-            <button class="btn-accent" onclick="salvarConcorrencia()">Salvar</button>
-            <span id="conc-status" class="text-tertiary" style="font-size:12px;"></span>
-        </div>
-        <p class="text-tertiary" style="font-size:11.5px;margin-top:10px;">Padrão: 6. Intervalo: 1 a {{ analise_concorrencia_max }}. Vale já na próxima sincronização (sem reiniciar).</p>
-    </div>
-</div>
-
 <!-- ===================== Aba: Caixas para Sincronização ===================== -->
 <div class="cfg-panel" data-panel="caixas">
     <div class="fluent-card" style="padding:22px;max-width:980px;">
@@ -499,40 +552,54 @@
     </div>
 </div>
 
-<!-- ===================== Abas por caixa ===================== -->
-{% for cx in caixas %}
-<div class="cfg-panel" data-panel="cx-{{ cx.slug }}">
-    {% if not cx.habilitada %}
-    <div class="aviso-ro" style="max-width:980px;">
-        <strong>Caixa não sincronizada.</strong> As configurações abaixo estão preservadas, mas em
-        <strong>somente leitura</strong>. Habilite a caixa em "Caixas para Sincronização" para editá-la.
-    </div>
-    {% endif %}
-    {{ tabela_comunicados(
-        "Comunicado Padrão da " ~ cx.nome,
-        "Modelos específicos desta caixa. Use [colchetes] para variáveis que o Claude deve preencher com os dados do caso (ex.: [processo], [chave], [juízo]). Se a caixa tiver comunicados próprios, os gerais NÃO se aplicam a ela.",
-        cx.slug, cx.comunicados, cx.paragrafos, cx.habilitada) }}
-    <div style="max-width:980px;display:flex;justify-content:flex-end;gap:8px;margin-top:-8px;">
-        <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
-                data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="limparCaixa(this)">
-            Limpar configurações da caixa
+<!-- ===================== Aba: Cadastro de Textos/Parágrafos padrão ===================== -->
+<div class="cfg-panel" data-panel="cadastro">
+    <div class="cfg-subtabs" role="tablist">
+        <button class="cfg-subtab" data-subtab="sub-gerais" onclick="abrirSubTab('sub-gerais')">Gerais</button>
+        {% for cx in caixas %}
+        <button class="cfg-subtab {% if not cx.habilitada %}cfg-tab-off{% endif %}" data-subtab="sub-cx-{{ cx.slug }}"
+                onclick="abrirSubTab('sub-cx-{{ cx.slug }}')"
+                {% if not cx.habilitada %}title="Caixa não sincronizada — configurações em somente leitura"{% endif %}>
+            {{ cx.nome }}{% if not cx.habilitada %} 🔒{% endif %}
         </button>
-        {% if not cx.habilitada %}
-        <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
-                data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="excluirAba(this)">
-            Excluir aba desta caixa
-        </button>
-        {% endif %}
+        {% endfor %}
     </div>
-</div>
-{% endfor %}
 
-<!-- ===================== Aba: Comunicados Gerais ===================== -->
-<div class="cfg-panel" data-panel="gerais">
-    {{ tabela_comunicados(
-        "Mensagens Gerais",
-        "Aplicam-se às caixas que NÃO possuem Comunicados Padrão próprios. Use [colchetes] para variáveis a preencher pelo Claude.",
-        "", comunicados, paragrafos) }}
+    <!-- Subaba: Gerais -->
+    <div class="cfg-subpanel" data-subpanel="sub-gerais">
+        {{ tabela_comunicados(
+            "Gerais",
+            "Aplicam-se às caixas que NÃO possuem textos padrão próprios. Use [colchetes] para variáveis a preencher pelo Claude.",
+            "", comunicados, paragrafos) }}
+    </div>
+
+    <!-- Subabas por caixa -->
+    {% for cx in caixas %}
+    <div class="cfg-subpanel" data-subpanel="sub-cx-{{ cx.slug }}">
+        {% if not cx.habilitada %}
+        <div class="aviso-ro" style="max-width:980px;">
+            <strong>Caixa não sincronizada.</strong> As configurações abaixo estão preservadas, mas em
+            <strong>somente leitura</strong>. Habilite a caixa em "Caixas para Sincronização" para editá-la.
+        </div>
+        {% endif %}
+        {{ tabela_comunicados(
+            "Textos padrão da " ~ cx.nome,
+            "Modelos específicos desta caixa. Use [colchetes] para variáveis que o Claude deve preencher com os dados do caso (ex.: [processo], [chave], [juízo]). Se a caixa tiver textos próprios, os gerais NÃO se aplicam a ela.",
+            cx.slug, cx.comunicados, cx.paragrafos, cx.habilitada) }}
+        <div style="max-width:980px;display:flex;justify-content:flex-end;gap:8px;margin-top:-8px;">
+            <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                    data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="limparCaixa(this)">
+                Limpar configurações da caixa
+            </button>
+            {% if not cx.habilitada %}
+            <button class="btn-subtle" style="color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
+                    data-slug="{{ cx.slug }}" data-nome="{{ cx.nome }}" onclick="excluirAba(this)">
+                Excluir aba desta caixa
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
 </div>
 {% endblock %}
 
@@ -566,6 +633,14 @@
 .cfg-tab-off { color:var(--text-tertiary); }
 .cfg-panel { display:none; }
 .cfg-panel.ativa { display:block; }
+.cfg-subtabs { display:flex; gap:2px; flex-wrap:wrap; border-bottom:1px solid var(--stroke); margin-bottom:20px; }
+.cfg-subtab { padding:7px 13px; border:none; background:transparent; color:var(--text-secondary);
+              font-size:13px; font-weight:600; cursor:pointer; border-bottom:2px solid transparent;
+              margin-bottom:-1px; border-radius:6px 6px 0 0; transition:color .12s, background .12s; }
+.cfg-subtab:hover:not(:disabled) { color:var(--text); background:color-mix(in srgb, var(--text) 5%, transparent); }
+.cfg-subtab.ativa { color:var(--accent); border-bottom-color:var(--accent); }
+.cfg-subpanel { display:none; }
+.cfg-subpanel.ativa { display:block; }
 .prazo-chip { display:inline-flex; align-items:center; gap:6px; font-size:13px; padding:4px 10px; border-radius:999px;
               background:var(--accent-soft); color:var(--accent); border:1px solid var(--stroke-strong); }
 .prazo-chip button { background:none; border:none; color:inherit; cursor:pointer; font-size:12px; line-height:1; padding:0; }
@@ -637,12 +712,33 @@ function abrirTab(id){
     document.querySelectorAll('.cfg-panel').forEach(p => p.classList.toggle('ativa', p.dataset.panel === id));
     try { sessionStorage.setItem('cfg-tab', id); } catch(e){}
 }
+// Sub-abas — escopadas ao painel que as contém (grupos: 'acesso' e 'cadastro').
+function abrirSubTab(id){
+    const tab = document.querySelector('.cfg-subtab[data-subtab="' + id + '"]');
+    if (!tab) return;
+    const grupo = tab.closest('.cfg-panel');
+    grupo.querySelectorAll('.cfg-subtab').forEach(b => b.classList.toggle('ativa', b.dataset.subtab === id));
+    grupo.querySelectorAll('.cfg-subpanel').forEach(p => p.classList.toggle('ativa', p.dataset.subpanel === id));
+    try { sessionStorage.setItem('cfg-subtab-' + grupo.dataset.panel, id); } catch(e){}
+}
 (function(){
-    let id = 'login';
-    try { id = sessionStorage.getItem('cfg-tab') || 'login'; } catch(e){}
+    let id = 'acesso';
+    try { id = sessionStorage.getItem('cfg-tab') || 'acesso'; } catch(e){}
+    // Compatibilidade com abas removidas: login/ia -> 'acesso'; gerais/cx-... -> 'cadastro'.
+    if (id === 'login' || id === 'ia') id = 'acesso';
+    else if (id === 'gerais' || id.indexOf('cx-') === 0) id = 'cadastro';
     const btn = document.querySelector('.cfg-tab[data-tab="' + id + '"]');
-    if (!btn || btn.disabled) id = 'login';   // aba salva sumiu/inativou -> volta ao início
+    if (!btn || btn.disabled) id = 'acesso';   // aba salva sumiu/inativou -> volta ao início
     abrirTab(id);
+    // Restaura a sub-aba ativa de CADA grupo (painel com sub-abas), com fallback na 1ª.
+    document.querySelectorAll('.cfg-panel').forEach(panel => {
+        const subs = panel.querySelectorAll('.cfg-subtab');
+        if (!subs.length) return;
+        let sid = null;
+        try { sid = sessionStorage.getItem('cfg-subtab-' + panel.dataset.panel); } catch(e){}
+        if (!sid || !panel.querySelector('.cfg-subtab[data-subtab="' + sid + '"]')) sid = subs[0].dataset.subtab;
+        abrirSubTab(sid);
+    });
 })();
 async function resetarPainel(total){
     if(total){
@@ -749,6 +845,25 @@ async function definirIaModo(on, btn){
             toast(d.ia_ativa ? 'Modo com IA ativado' : 'Modo Simples ativado');
         } else alert('Falha ao alterar o modo de IA.');
     } catch(e){ alert('Erro: ' + e); }
+}
+async function conectarWhatsapp(){
+    const btn=document.getElementById('btn-wa-login');
+    const res=document.getElementById('wa-login-res');
+    const orig=btn.textContent; btn.disabled=true; btn.textContent='Abrindo…';
+    res.style.display='block'; res.style.color='var(--text-secondary)';
+    res.textContent='Abrindo o WhatsApp Web… aguarde a janela do navegador e escaneie o QR Code.';
+    try{
+        const r=await fetch('/api/whatsapp/login',{method:'POST'});
+        const d=await r.json().catch(()=>({}));
+        if(d.ok){
+            res.style.color='var(--c-zap)';
+            res.textContent='✓ Janela aberta. Escaneie o QR Code no navegador; ao carregar as conversas, o login estará salvo.';
+        } else {
+            res.style.color='var(--c-red)';
+            res.textContent='✗ '+(d.erro||'Não foi possível abrir o WhatsApp Web. Tente pelo atalho WhatsApp-Login.bat.');
+        }
+    }catch(e){ res.style.color='var(--c-red)'; res.textContent='✗ Erro: '+e; }
+    finally{ btn.disabled=false; btn.textContent=orig; }
 }
 async function salvarWaIntervalo(){
     const el=document.getElementById('wa-intervalo');

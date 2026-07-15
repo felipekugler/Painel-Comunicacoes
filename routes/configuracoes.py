@@ -119,6 +119,38 @@ async def set_ia_modo(payload: dict = Body(...)):
     return {"ok": True, "ia_ativa": ativa, "claude_instalado": analise_service.claude_instalado()}
 
 
+@router.post("/api/whatsapp/login", response_class=JSONResponse)
+async def api_whatsapp_login():
+    """Abre, em PROCESSO SEPARADO, a janela do WhatsApp Web para login por QR Code —
+    equivale ao atalho WhatsApp-Login.bat, mas acionado direto do painel. Não bloqueia
+    o servidor (o login roda no seu próprio processo, com janela visível para o QR)."""
+    import subprocess
+    import sys
+    from pathlib import Path
+    base = Path(__file__).resolve().parents[1]  # .../Projeto
+    flags = 0
+    if sys.platform == "win32":
+        flags = subprocess.CREATE_NEW_CONSOLE  # janela mostra o progresso do login
+    try:
+        subprocess.Popen([sys.executable, "-m", "ingestao.whatsapp_client", "login"],
+                         cwd=str(base), creationflags=flags)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+    return {"ok": True}
+
+
+@router.post("/api/ia/testar", response_class=JSONResponse)
+async def api_testar_ia():
+    """Faz uma chamada MÍNIMA real ao Claude para confirmar que a IA está utilizável
+    (instalada, autenticada e com cota). Retorna {ok, status, detalhe}."""
+    from anyio import to_thread
+    try:
+        res = await to_thread.run_sync(analise_service.testar_conexao)
+    except Exception as e:  # noqa: BLE001
+        res = {"ok": False, "status": "erro", "detalhe": str(e)}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
 @router.post("/api/config/abrir-tela-cheia", response_class=JSONResponse)
 async def set_abrir_tela_cheia(payload: dict = Body(...)):
     """Liga/desliga a abertura do painel em TELA CHEIA no lançador (Painel-Comunicacoes.bat).
