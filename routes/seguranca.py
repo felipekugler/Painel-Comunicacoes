@@ -10,6 +10,7 @@ Estas rotas são LIVRES (não passam pelo cadeado) — ver o middleware em app.p
 
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from services import credenciais_service
 
@@ -90,6 +91,44 @@ async def api_reconectar():
     except Exception as e:  # noqa: BLE001
         res = {"ok": False, "status": "erro", "detalhe": str(e)}
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+def _encerrar_servidor() -> None:
+    """Remove o PID file e derruba o processo do servidor. Roda como BackgroundTask,
+    ou seja, DEPOIS que a resposta HTTP já foi enviada ao navegador (que então exibe a
+    tela final de 'painel encerrado'). Usa os._exit para um desligamento imediato e
+    confiável no Windows — a porta é reaproveitada na próxima subida (app.py faz
+    _cleanup_port + espera antes de escutar)."""
+    import contextlib
+    import os
+    import time
+    from pathlib import Path
+
+    pid_file = Path(__file__).resolve().parents[1] / ".server.pid"
+    with contextlib.suppress(Exception):
+        pid_file.unlink(missing_ok=True)
+    time.sleep(0.4)  # garante que a resposta terminou de sair antes de matar o processo
+    os._exit(0)
+
+
+@router.post("/api/encerrar", response_class=JSONResponse)
+async def api_encerrar():
+    """Encerra o painel: fecha o navegador (sessão) do SISDPU e desliga o servidor.
+
+    O desligamento é agendado como BackgroundTask, que só executa APÓS a resposta ser
+    enviada — assim o navegador recebe {ok:true} e mostra a tela final antes do
+    processo cair. As mensagens gravadas ficam em disco (nada é perdido)."""
+    from ingestao import sisdpu_client
+
+    detalhe = "Sessão do SISDPU encerrada."
+    try:
+        await sisdpu_client.fechar()
+    except Exception as e:  # noqa: BLE001 — melhor esforço; desliga mesmo se o fechar falhar
+        detalhe = f"Aviso ao fechar a sessão do SISDPU: {e}"
+    return JSONResponse(
+        {"ok": True, "detalhe": detalhe},
+        background=BackgroundTask(_encerrar_servidor),
+    )
 
 
 @router.get("/api/seguranca/status", response_class=JSONResponse)

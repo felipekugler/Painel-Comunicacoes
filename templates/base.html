@@ -565,6 +565,14 @@
                 Bloquear Painel
             </button>
             {% endif %}
+            <button type="button" id="btn-encerrar-painel" class="btn-subtle" onclick="encerrarPainel()"
+                    title="Encerrar o painel: fecha a sessão do SISDPU e desliga o servidor. As mensagens já gravadas permanecem salvas."
+                    style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;font-size:11.5px;margin-left:auto;color:var(--c-red,#a3282a);">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" style="width:14px;height:14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" />
+                </svg>
+                Encerrar painel
+            </button>
         </div>
 
         <div class="{% block content_class %}px-6 lg:px-10 pt-2 pb-10 w-full{% endblock %} flex-1 min-w-0">
@@ -753,6 +761,40 @@
                 btn.innerHTML = orig; btn.disabled = false;
                 alert('Erro ao bloquear: ' + e);
             }
+        };
+        // Encerrar o painel: fecha a sessão do SISDPU e desliga o servidor. Depois de
+        // encerrar, a página não tem mais servidor — por isso substituímos o conteúdo
+        // por uma tela final de despedida (nada de tentar recarregar).
+        window.encerrarPainel = async function() {
+            if (!confirm('Encerrar o painel?\n\nIsso vai fechar a sessão do SISDPU e desligar o '
+                       + 'servidor. As mensagens já gravadas permanecem salvas.\n\nPara usar de novo, '
+                       + 'abra o Painel de Comunicações pelo atalho.')) return;
+            var btn = document.getElementById('btn-encerrar-painel');
+            if (btn){ btn.disabled = true; btn.innerHTML = 'Encerrando…'; }
+            try {
+                await fetch('/api/encerrar', { method: 'POST' });
+            } catch (e) { /* esperado: o servidor cai durante/logo após a resposta */ }
+            var html = '<!doctype html><html lang="pt-br"><head><meta charset="utf-8">'
+                + '<title>Painel encerrado</title><meta name="viewport" content="width=device-width, initial-scale=1">'
+                + '<style>:root{color-scheme:light dark;}'
+                + 'body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;margin:0;height:100vh;'
+                + 'display:flex;align-items:center;justify-content:center;text-align:center;'
+                + 'background:#f6f9f8;color:#16211f;}'
+                + '@media (prefers-color-scheme: dark){body{background:#0f1513;color:#e6efec;}'
+                + '.sub{color:#9fb3ad !important;}}'
+                + '.card{max-width:440px;padding:32px 28px;}'
+                + '.ico{width:56px;height:56px;margin:0 auto 16px;color:#5b8a7f;}'
+                + 'h1{font-size:21px;margin:0 0 10px;font-weight:600;}'
+                + '.sub{color:#5b6b68;font-size:14px;line-height:1.6;margin:0;}</style></head>'
+                + '<body><div class="card">'
+                + '<svg class="ico" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.6">'
+                + '<path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9"/></svg>'
+                + '<h1>Painel encerrado</h1>'
+                + '<p class="sub">A sessão do SISDPU foi fechada e o servidor foi desligado.<br>'
+                + 'Você já pode fechar esta aba.<br><br>'
+                + 'Para usar novamente, abra o <strong>Painel de Comunicações</strong> pelo atalho de sempre.</p>'
+                + '</div></body></html>';
+            document.open(); document.write(html); document.close();
         };
     </script>
 
