@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Para o servidor DPU-script-SIS (le PID file + limpa porta)."""
+"""Para o servidor do Painel de Comunicacoes (le PID file + limpa a porta 8002)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ import contextlib
 
 ROOT = Path(__file__).resolve().parent
 PID_FILE = ROOT / ".server.pid"
-PORT = 8001
+# Porta do Painel de Comunicacoes (deve casar com PORT em app.py). O Painel SISDPU
+# usa a 8001; este painel roda na 8002 para os dois coexistirem na mesma maquina.
+PORT = 8002
 
 
 def _killp_windows(pid: int) -> None:
