@@ -193,7 +193,7 @@
 
 {#-- Descrição do trâmite com o cabeçalho "[data/hora] - [remetente]" acima do texto.
      Absorve as antigas colunas "Envio" e "Remetente". Para conjunto, um bloco por trâmite. --#}
-{% macro tram_desc(paj, desc_class='desc-tram clamp3') %}
+{% macro tram_desc(paj, desc_class='desc-tram') %}
 {% if paj.tipo == 'conjunto' %}
     {% for dt in paj.descricoes_tramites %}
     <div class="tram-item">
@@ -370,7 +370,7 @@
                 <div class="pjp-tram-card">
                     {{ selo_triagem(paj) }}
                     <div class="card-label">Descrição do trâmite</div>
-                    {{ tram_desc(paj, desc_class='pjp-desc-3 clamp3') }}
+                    {{ tram_desc(paj, desc_class='pjp-desc-3') }}
                 </div>
                 <div class="pjp-nums-card">
                     <div class="card-label">Número(s) de WhatsApp</div>
