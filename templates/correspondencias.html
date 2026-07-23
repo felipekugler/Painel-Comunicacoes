@@ -35,14 +35,14 @@
                 <th>Assistido</th>
                 <th>Ofício</th>
                 <th>Endereço(s)</th>
-                <th style="width:11rem;">Encaminhado em</th>
-                <th class="text-center" style="width:8rem;">Origem</th>
+                <th style="width:10rem;">Encaminhado em</th>
+                <th class="text-center" style="width:6rem;">Mensagem</th>
                 <th style="width:12rem;">Ação</th>
             </tr>
         </thead>
         <tbody>
             {% for it in pendentes %}
-            <tr>
+            <tr class="corr-row">
                 <td>
                     <a href="{{ it.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
                        style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</a>
@@ -54,7 +54,11 @@
                     {{ it.corr_em | data_hora_br }}
                     {% if it.corr_de_ligacao %}<br><span class="text-tertiary">após {{ it.corr_tentativas_ligacao }} ligação(ões)</span>{% endif %}
                 </td>
-                <td class="text-center"><span class="pill" title="{{ it.grupo }}">{{ it.caixa_nome or it.grupo }}</span></td>
+                <td class="text-center">
+                    {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base %}
+                    <button class="mov-badge" onclick="corrMsgToggle(this)" title="Abrir/ocultar Resumo e texto da carta">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
                         <button class="btn-subtle" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;cursor:not-allowed;opacity:.6;"
@@ -65,6 +69,30 @@
                     </div>
                 </td>
             </tr>
+            {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base %}
+            <tr class="corr-msg-row" style="display:none;">
+                <td colspan="7" class="msg-accordion">
+                    <div class="lig-ia-row">
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Resumo IA</div>
+                            {% if it.resumo_ia %}<div class="msg-full">{{ it.resumo_ia }}</div>
+                            {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
+                        </div>
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Sugestão IA — texto da carta (editável)</div>
+                            <textarea class="corr-msg-txt" rows="6"
+                                      data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}"
+                                      data-tramite="{{ it.id_tramite }}" data-tipo="{{ it.corr_tipo }}"
+                                      oninput="sanitizarTexto(this)">{{ it.corr_mensagem_base or it.sugestao_atual }}</textarea>
+                            <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                <button class="btn-accent" style="padding:5px 14px;font-size:12.5px;" onclick="corrSalvarMsg(this)">Salvar texto</button>
+                                <span class="corr-msg-status text-tertiary" style="font-size:12px;"></span>
+                            </div>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
             {% endfor %}
         </tbody>
     </table>
@@ -73,7 +101,50 @@
 {% endblock %}
 
 {% block scripts %}
+<style>
+.mov-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px;
+             border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+             background: var(--accent-soft); color: var(--accent);
+             font-size:11px; font-weight:600; cursor:pointer; transition:background .12s ease; }
+.mov-badge:hover, .mov-badge.ativo { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.msg-accordion { background: var(--layer-alt); padding: 0 !important; }
+.msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); margin-bottom:6px; }
+.msg-full { font-size:13px; color: var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
+.lig-ia-row { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;
+              padding:12px 16px; border-left:3px solid var(--accent); }
+.lig-ia-card { flex:1 1 340px; min-width:0; }
+.corr-msg-txt { width:100%; padding:9px 11px; border:1px solid var(--stroke-strong,#c4d0cc); border-radius:8px;
+                background:var(--layer,#fff); color:var(--text,#16211f); font-size:13px; line-height:1.5; resize:vertical; }
+</style>
 <script>
+// Acordeão da mensagem (linha retrátil abaixo).
+function corrMsgToggle(btn) {
+    const tr = btn.closest('tr');
+    const row = tr && tr.nextElementSibling;
+    if (!row || !row.classList.contains('corr-msg-row')) return;
+    const aberto = row.style.display !== 'none';
+    row.style.display = aberto ? 'none' : '';
+    btn.textContent = aberto ? 'Abrir' : 'Ocultar';
+    btn.classList.toggle('ativo', !aberto);
+}
+// Salva o texto editado da carta (mensagem-base da correspondência).
+async function corrSalvarMsg(btn) {
+    const card = btn.closest('.lig-ia-card');
+    const ta = card.querySelector('.corr-msg-txt');
+    const st = card.querySelector('.corr-msg-status');
+    const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Salvando…';
+    try {
+        const r = await fetch('/api/correspondencia/editar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: ta.dataset.slug, paj_norm: ta.dataset.paj,
+                                   id_tramite: ta.dataset.tramite, tipo: ta.dataset.tipo || 'tramite',
+                                   mensagem: ta.value }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) { if (st) { st.textContent = '✓ salvo'; setTimeout(() => { st.textContent = ''; }, 2500); } }
+        else { alert('Erro: ' + (d.erro || 'falha')); }
+    } catch (e) { alert('Erro: ' + e); }
+    btn.disabled = false; btn.innerHTML = orig;
+}
 async function corrRemover(btn) {
     if (!confirm('Remover este PAJ da fila de correspondências?')) return;
     try {

@@ -257,7 +257,10 @@
 
         <div id="lig-prazo-box">
             <label class="lig-label" style="margin-top:14px;">Prazo de conclusão da tramitação</label>
-            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;margin-bottom:8px;">
+                <input type="checkbox" id="lig-sem-prazo" onchange="ligSemPrazoToggle()"> Tramitar sem prazo de conclusão
+            </label>
+            <div id="lig-prazo-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                 <input type="number" id="lig-prazo" min="0" value="{{ prazo_padrao }}"
                        style="width:64px;padding:7px 9px;border-radius:8px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);font-size:13.5px;">
                 <span class="text-tertiary" style="font-size:12px;">dias</span>
@@ -359,6 +362,13 @@ function ligPrazoBadges() {
     box.dataset.pronto = '1';
 }
 
+// "Sem prazo": desabilita o campo/badges de prazo (tramitação sem data de conclusão).
+function ligSemPrazoToggle() {
+    const sem = document.getElementById('lig-sem-prazo').checked;
+    const row = document.getElementById('lig-prazo-row');
+    if (row) { row.style.opacity = sem ? '0.4' : ''; row.style.pointerEvents = sem ? 'none' : ''; }
+}
+
 // Selos das caixas de grupo FAVORITAS (clicar seleciona no dropdown de tramitação).
 function ligFavsRender() {
     const sel = document.getElementById('lig-tramitar');
@@ -429,6 +439,8 @@ async function ligRegistrarAbrir(btn) {
     // reset tramitação + prazo
     const _tr = document.getElementById('lig-tramitar'); if (_tr) _tr.value = '';
     const _pz = document.getElementById('lig-prazo'); if (_pz) _pz.value = '{{ prazo_padrao }}';
+    const _sp = document.getElementById('lig-sem-prazo'); if (_sp) _sp.checked = false;
+    ligSemPrazoToggle();
     ligPrazoBadges();
     ligResToggle();
     // grupos + favoritos p/ tramitar
@@ -472,7 +484,9 @@ async function ligRegistrarConfirmar() {
                 numeros: numeros, resultado: resultado, registro: registro,
                 tramitar_grupo: (resultado === 'frutifero') ? document.getElementById('lig-tramitar').value : '',
                 concluir: (resultado === 'frutifero') && document.getElementById('lig-concluir').checked,
-                prazo: (resultado === 'frutifero') ? parseInt(document.getElementById('lig-prazo').value, 10) : null,
+                prazo: (resultado === 'frutifero')
+                    ? (document.getElementById('lig-sem-prazo').checked ? 'sem' : parseInt(document.getElementById('lig-prazo').value, 10))
+                    : null,
             }) });
         const d = await r.json().catch(() => ({}));
         if (d.ok) { location.reload(); }

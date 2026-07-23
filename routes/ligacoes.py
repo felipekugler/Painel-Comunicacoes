@@ -87,3 +87,13 @@ async def api_correspondencia_cancelar(payload: dict = Body(...)):
     r = svc.cancelar_correspondencia(p.get("slug", ""), p.get("paj_norm", ""), p.get("id_tramite", ""),
                                      tipo=p.get("tipo", "tramite"))
     return JSONResponse(r, status_code=200 if r.get("ok") else 400)
+
+
+@router.post("/api/correspondencia/editar", response_class=JSONResponse)
+async def api_correspondencia_editar(payload: dict = Body(...)):
+    """Edita o texto-base da carta (mensagem-base) de uma correspondência pendente."""
+    p = payload or {}
+    r = svc.encaminhar_correspondencia(
+        p.get("slug", ""), p.get("paj_norm", ""), p.get("id_tramite", ""),
+        mensagem=p.get("mensagem", ""), tipo=p.get("tipo", "tramite"))
+    return JSONResponse(r, status_code=200 if r.get("ok") else 400)

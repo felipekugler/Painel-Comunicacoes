@@ -2323,11 +2323,14 @@ def _descricao_tramitacao(mov_seq) -> str:
 def _prazo_tramitacao(prazo_envio) -> tuple[str, str, int]:
     """Calcula a data de 'Nova conclusão em' da tramitação a partir do prazo (em
     dias) informado no envio. Decisão do usuário:
-      - prazo > 0  -> hoje + prazo dias
-      - urgente(0) -> hoje + 1 dia
-      - sem prazo  -> hoje + padrão configurável (config_service, 15 dias)
-    Retorna (data 'DD/MM/AAAA', descrição do prazo, dias). A data é sempre relativa
-    ao momento da tramitação (recalculada também no 'refazer')."""
+      - prazo > 0        -> hoje + prazo dias
+      - urgente(0)       -> hoje + 1 dia
+      - 'sem'/'sem_prazo'-> tramita SEM prazo de conclusão (campo em branco no SISDPU)
+      - None/inválido    -> hoje + padrão configurável (config_service, 15 dias)
+    Retorna (data 'DD/MM/AAAA' ou '' p/ sem prazo, descrição do prazo, dias|None). A data é
+    relativa ao momento da tramitação (recalculada também no 'refazer')."""
+    if str(prazo_envio).strip().lower() in ("sem", "sem_prazo"):
+        return "", "Tramitado sem prazo de conclusão.", None
     try:
         p = int(prazo_envio)
     except (TypeError, ValueError):
@@ -2371,8 +2374,9 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     res["tram_detalhe"] = tram.get("detalhe", "")
     if tram.get("ok"):
         res["tram_url"] = f"{sisdpu_client.SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"
+        _prazo_txt = "sem prazo" if prazo_dias is None else f"prazo {prazo_dias}d"
         _passo(log, emit, rotulo, True,
-               f'realizada para a caixa "{tramitar_grupo}" · prazo {prazo_dias}d')
+               f'realizada para a caixa "{tramitar_grupo}" · {_prazo_txt}')
     else:
         _passo(log, emit, rotulo, False,
                f'falhou para a caixa "{tramitar_grupo}": {tram.get("detalhe", "")}')
