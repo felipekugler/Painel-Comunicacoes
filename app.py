@@ -26,6 +26,7 @@ from config import OFICIO_DESCRICAO
 from routes.configuracoes import router as configuracoes_router
 from routes.dashboard import router as dashboard_router
 from routes.historico import router as historico_router
+from routes.ligacoes import router as ligacoes_router
 from routes.seguranca import router as seguranca_router
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -73,6 +74,9 @@ app.state.jinja.globals["total_prontos"] = _ds.contar_prontos_envio
 app.state.jinja.globals["prontos_por_meio"] = _ds.prontos_por_meio
 app.state.jinja.globals["prontos_meios"] = _ds.PRONTOS_MEIOS
 app.state.jinja.globals["cor_caixa"] = _ds.cor_caixa
+# Contadores das centrais de Ligações telefônicas e Correspondências (badges do menu).
+app.state.jinja.globals["contar_ligacoes"] = _ds.contar_ligacoes
+app.state.jinja.globals["contar_correspondencias"] = _ds.contar_correspondencias
 # Modo de IA (Simples × com IA) — globals CALLABLE (sempre atuais).
 from services import analise_service as _analise  # noqa: E402
 from services import config_service as _cs  # noqa: E402
@@ -132,6 +136,7 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="stat
 app.include_router(dashboard_router)
 app.include_router(configuracoes_router)
 app.include_router(historico_router)
+app.include_router(ligacoes_router)
 app.include_router(seguranca_router)
 # Sem cadeado de navegação: o painel abre livremente. A senha-mestra só é pedida
 # (via modal no front-end) quando o usuário aciona uma função que usa o SISDPU e a

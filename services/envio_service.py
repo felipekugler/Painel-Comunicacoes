@@ -38,8 +38,17 @@ MEIOS_ATIVOS: tuple[str, ...] = ("app_sisdpu", "whatsapp")
 
 
 def meios_disponiveis() -> list[dict]:
-    """Meios que o usuário pode ESCOLHER (só os implementados: App e WhatsApp)."""
-    return [{"key": k, "label": MEIOS[k]} for k in MEIOS_ATIVOS]
+    """Meios que o usuário pode ESCOLHER ao gravar, em ordem de exibição. `tipo`:
+    - 'mensagem'       → envia a mensagem por esse meio (App/WhatsApp), com prazo de resposta.
+    - 'encaminhamento' → roteia o PAJ para uma central (Ligação/Carta), SEM prazo; a mensagem
+                         é a base do registro da ligação / do texto da carta.
+    Aparecem na MESMA lista de meios, em qualquer layout (dashboard, inline, prontos)."""
+    return [
+        {"key": "app_sisdpu", "label": "Aplicativo SISDPU", "tipo": "mensagem"},
+        {"key": "whatsapp", "label": "WhatsApp", "tipo": "mensagem"},
+        {"key": "telefone", "label": "Ligação telefônica", "tipo": "encaminhamento"},
+        {"key": "carta", "label": "Carta", "tipo": "encaminhamento"},
+    ]
 
 
 def meios_labels() -> dict:

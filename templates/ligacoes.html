@@ -1,0 +1,544 @@
+{% extends "base.html" %}
+{% block title %}Ligações telefônicas{% endblock %}
+
+{% macro lig_pajlink(it) %}
+<a href="{{ it.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+   style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</a>
+{% endmacro %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="font-display" style="font-size:28px;margin:0;display:flex;align-items:center;gap:10px;">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" style="width:26px;height:26px;color:var(--c-tel);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+        </svg>
+        Ligações telefônicas
+        <span class="pill-quad" style="font-size:14px;" title="Ligações aguardando contato (pendentes + em andamento)">{{ total_aguardando }}</span>
+        <span class="badge-modo {{ 'badge-modo-real' if modo == 'real' else '' }}"
+              title="Modo das ligações (ajuste em Configurações → Modo de envio). Em REAL, a movimentação é feita de verdade no SISDPU.">{{ 'Modo real' if modo == 'real' else 'Modo simulado' }}</span>
+    </h1>
+    <div class="text-secondary mt-1" style="font-size:13px;line-height:1.6;">
+        Controle da rotina de contato por telefone.<br>
+        Cada ligação gera uma movimentação no PAJ.
+        <ul style="margin:6px 0 0;padding-left:20px;">
+            <li>Contato frutífero &rarr; registra movimentação &rarr; conclui tramitação &rarr; tramita para outra caixa (opcional)</li>
+            <li>Contato infrutífero &rarr; registra movimentação &rarr; mantém na tabela para nova ligação</li>
+        </ul>
+        <div style="margin-top:6px;">Padrão: <strong>{{ max_tentativas }}</strong> tentativas infrutíferas antes de encaminhar para envio de correspondência.</div>
+    </div>
+</div>
+
+{# ===================== LIGAÇÕES PENDENTES ===================== #}
+<div class="mb-3" style="display:flex;align-items:center;gap:8px;">
+    <h2 class="font-display" style="font-size:17px;margin:0;">Ligações Pendentes</h2>
+    <span class="pill">{{ pendentes|length }}</span>
+    <span class="text-tertiary" style="font-size:12px;">Sem nenhuma ligação feita ainda.</span>
+</div>
+{% if not pendentes %}
+<div class="fluent-card text-tertiary" style="padding:24px;text-align:center;font-size:13.5px;">Nenhuma ligação pendente.</div>
+{% else %}
+<div class="fluent-card mb-8" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width:8rem;">PAJ</th>
+                <th>Assistido</th>
+                <th>Ofício</th>
+                <th>Telefone(s)</th>
+                <th class="text-center" style="width:7rem;">Análise IA</th>
+                <th style="width:16rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for it in pendentes %}
+            <tr class="lig-row">
+                <td>{{ lig_pajlink(it) }}</td>
+                <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ it.oficio or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;white-space:pre-wrap;">{{ it.telefones_txt or "—" }}</td>
+                <td class="text-center">
+                    {% if it.resumo_ia or it.sugestao_atual %}
+                    <button class="mov-badge" onclick="msgLigToggle(this)" title="Abrir/ocultar o Resumo e a Sugestão da IA">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn-accent" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-pajnum="{{ it.paj }}"
+                                data-tramite="{{ it.id_tramite }}" data-assistido="{{ it.assistido }}"
+                                data-telefones='{{ it.telefones|tojson }}' data-n="{{ it.lig_n }}"
+                                data-msgbase="{{ it.lig_mensagem_base }}" data-tipo="{{ it.lig_tipo }}"
+                                onclick="ligRegistrarAbrir(this)">Registrar ligação</button>
+                        <button class="btn-subtle" style="padding:4px 10px;font-size:12.5px;white-space:nowrap;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                data-tipo="{{ it.lig_tipo }}" onclick="ligCancelar(this)">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% if it.resumo_ia or it.sugestao_atual %}
+            <tr class="lig-msg-row" style="display:none;">
+                <td colspan="6" class="msg-accordion">
+                    <div class="lig-ia-row">
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Resumo IA</div>
+                            {% if it.resumo_ia %}
+                            <div class="msg-full">{{ it.resumo_ia }}</div>
+                            {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
+                            {% if it.movimentacoes %}
+                            <button class="mov-badge" style="margin-top:10px;" onclick="movLigAbrir(this)"
+                                    data-pajnum="{{ it.paj }}" data-movs='{{ it.movimentacoes|tojson }}'
+                                    title="Ver a íntegra das movimentações do PAJ">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                                </svg>
+                                {{ it.movimentacoes|length }} últimas movimentações
+                            </button>
+                            {% endif %}
+                        </div>
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Sugestão IA{% if it.sugestao_alerta %} — <span style="color:var(--c-red);">conferência manual</span>{% endif %}</div>
+                            {% if it.sugestao_atual %}
+                            {% if not it.sugestao_alerta and it.sugestao_tipo %}<div style="margin-bottom:6px;"><span class="lig-chip">{{ it.sugestao_tipo }}</span></div>{% endif %}
+                            <div class="msg-full {% if it.sugestao_alerta %}sug-alerta{% endif %}">{{ it.sugestao_atual }}</div>
+                            {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ===================== LIGAÇÕES FEITAS ===================== #}
+<div class="mb-3" style="display:flex;align-items:center;gap:8px;">
+    <h2 class="font-display" style="font-size:17px;margin:0;">Ligações Feitas</h2>
+    <span class="pill">{{ feitas|length }}</span>
+    <span class="text-tertiary" style="font-size:12px;">Já tiveram ao menos uma tentativa (em andamento).</span>
+</div>
+{% if not feitas %}
+<div class="fluent-card text-tertiary" style="padding:24px;text-align:center;font-size:13.5px;">Nenhuma ligação em andamento.</div>
+{% else %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width:7rem;">PAJ</th>
+                <th>Assistido</th>
+                <th class="text-center" style="width:8rem;">1ª ligação</th>
+                <th class="text-center" style="width:8rem;">2ª ligação</th>
+                <th class="text-center" style="width:8rem;">3ª ligação</th>
+                <th style="width:9rem;">Situação</th>
+                <th class="text-center" style="width:6rem;">Análise IA</th>
+                <th style="width:18rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for it in feitas %}
+            <tr class="lig-row">
+                <td>{{ lig_pajlink(it) }}</td>
+                <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
+                {% for i in range(3) %}
+                <td class="text-center text-secondary" style="font-size:11.5px;">
+                    {% if (it.lig_tentativas|length) > i %}{% set t = it.lig_tentativas[i] %}
+                    {{ t.em | data_hora_br }}<br>
+                    <span class="text-tertiary">nº {{ t.numero or "—" }}</span><br>
+                    {% if t.resultado == 'frutifero' %}<span style="color:var(--c-ok,#2f8f5b);font-weight:700;">frutífero</span>
+                    {% else %}<span style="color:var(--c-red);font-weight:700;">infrutífero</span>{% endif %}
+                    {% if t.mov_seq %}<br>
+                        {% if t.mov_url %}<a class="lig-mov" href="{{ t.mov_url }}" target="_blank" rel="noopener" title="Movimentação nº {{ t.mov_seq }} registrada no PAJ — abrir detalhamento">Mov {{ t.mov_seq }}</a>
+                        {% else %}<span class="lig-mov" title="Movimentação nº {{ t.mov_seq }} registrada no PAJ">Mov {{ t.mov_seq }}</span>{% endif %}
+                    {% elif t.mov_status == 'simulado' %}<br><span class="lig-mov lig-mov-sim" title="Modo simulado — sem movimentação real">simulado</span>
+                    {% endif %}
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                {% endfor %}
+                <td>
+                    {% if it.lig_esgotado %}
+                        <span class="lig-chip lig-chip-red">3 tentativas — sem êxito</span>
+                    {% else %}
+                        <span class="lig-chip">Em andamento</span>
+                    {% endif %}
+                </td>
+                <td class="text-center">
+                    {% if it.resumo_ia or it.sugestao_atual %}
+                    <button class="mov-badge" onclick="msgLigToggle(this)" title="Abrir/ocultar o Resumo e a Sugestão da IA">Abrir</button>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                </td>
+                <td>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        {% if it.lig_esgotado %}
+                        <button class="btn-amarelo" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;width:auto;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                data-pajnum="{{ it.paj }}" data-tipo="{{ it.lig_tipo }}" onclick="ligCorrespondencia(this)">Enviar correspondência</button>
+                        {% endif %}
+                        <button class="btn-accent" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-pajnum="{{ it.paj }}"
+                                data-tramite="{{ it.id_tramite }}" data-assistido="{{ it.assistido }}"
+                                data-telefones='{{ it.telefones|tojson }}' data-n="{{ it.lig_n }}"
+                                data-msgbase="{{ it.lig_mensagem_base }}" data-tipo="{{ it.lig_tipo }}"
+                                onclick="ligRegistrarAbrir(this)">Registrar {% if not it.lig_esgotado %}nova {% endif %}ligação</button>
+                    </div>
+                </td>
+            </tr>
+            {% if it.resumo_ia or it.sugestao_atual %}
+            <tr class="lig-msg-row" style="display:none;">
+                <td colspan="8" class="msg-accordion">
+                    <div class="lig-ia-row">
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Resumo IA</div>
+                            {% if it.resumo_ia %}
+                            <div class="msg-full">{{ it.resumo_ia }}</div>
+                            {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
+                            {% if it.movimentacoes %}
+                            <button class="mov-badge" style="margin-top:10px;" onclick="movLigAbrir(this)"
+                                    data-pajnum="{{ it.paj }}" data-movs='{{ it.movimentacoes|tojson }}'
+                                    title="Ver a íntegra das movimentações do PAJ">
+                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" style="width:12px;height:12px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                                </svg>
+                                {{ it.movimentacoes|length }} últimas movimentações
+                            </button>
+                            {% endif %}
+                        </div>
+                        <div class="lig-ia-card">
+                            <div class="msg-accordion-lbl">Sugestão IA{% if it.sugestao_alerta %} — <span style="color:var(--c-red);">conferência manual</span>{% endif %}</div>
+                            {% if it.sugestao_atual %}
+                            {% if not it.sugestao_alerta and it.sugestao_tipo %}<div style="margin-bottom:6px;"><span class="lig-chip">{{ it.sugestao_tipo }}</span></div>{% endif %}
+                            <div class="msg-full {% if it.sugestao_alerta %}sug-alerta{% endif %}">{{ it.sugestao_atual }}</div>
+                            {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
+                        </div>
+                    </div>
+                </td>
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+
+{# ===================== MODAL: registrar ligação ===================== #}
+<div id="lig-modal" class="wa-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;"
+     onclick="if(event.target===this)ligFechar()">
+  <div class="fluent-card" style="width:100%;max-width:680px;max-height:90vh;overflow:auto;padding:26px 28px;">
+    <h3 class="font-display" style="font-size:19px;margin:0 0 4px;">Registrar ligação</h3>
+    <p class="text-tertiary" style="font-size:12.5px;margin:0 0 16px;">PAJ <span id="lig-pajnum" style="font-family:'Cascadia Code','Consolas',monospace;"></span> · <span id="lig-assistido"></span></p>
+
+    <label class="lig-label">Número(s) para o(s) qual(is) você ligou</label>
+    <div id="lig-numeros" style="display:flex;flex-direction:column;gap:2px;"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+        <input type="text" id="lig-numero-novo" class="lig-input" style="flex:1;"
+               placeholder="Cadastrar outro número — separe vários por vírgula"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();ligAddNumero();}">
+        <button type="button" class="btn-subtle" style="white-space:nowrap;padding:8px 14px;" onclick="ligAddNumero()">Adicionar</button>
+    </div>
+    <div class="text-tertiary" style="font-size:11.5px;margin-top:4px;">Marque um ou mais números ligados. Para vários novos, separe por vírgula.</div>
+
+    <label class="lig-label" style="margin-top:14px;">Resultado da ligação</label>
+    <div style="display:flex;gap:16px;margin-top:4px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
+            <input type="radio" name="lig-res" value="frutifero" onchange="ligResToggle()"> Contato frutífero
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13.5px;cursor:pointer;">
+            <input type="radio" name="lig-res" value="infrutifero" checked onchange="ligResToggle()"> Tentativa infrutífera
+        </label>
+    </div>
+
+    <div id="lig-frut-box" style="display:none;">
+        <label class="lig-label" style="margin-top:14px;">Registro do contato (vai como descrição da movimentação — fase "Atendimento de retorno")</label>
+        <textarea id="lig-registro" class="lig-input" rows="4" placeholder="Descreva o que foi tratado na ligação com o assistido."></textarea>
+
+        <label class="lig-label" style="margin-top:14px;">Tramitar o PAJ para (opcional)</label>
+        <select id="lig-tramitar" class="lig-input"><option value="">— Não tramitar —</option></select>
+        <div id="lig-tramitar-favs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+
+        <div id="lig-prazo-box">
+            <label class="lig-label" style="margin-top:14px;">Prazo de conclusão da tramitação</label>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <input type="number" id="lig-prazo" min="0" value="{{ prazo_padrao }}"
+                       style="width:64px;padding:7px 9px;border-radius:8px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);font-size:13.5px;">
+                <span class="text-tertiary" style="font-size:12px;">dias</span>
+                <div id="lig-prazo-badges" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+            </div>
+        </div>
+
+        <label style="display:flex;align-items:center;gap:8px;font-size:13.5px;cursor:pointer;margin-top:14px;">
+            <input type="checkbox" id="lig-concluir"> Concluir o trâmite originário após a movimentação
+        </label>
+    </div>
+
+    <div id="lig-infrut-hint" class="text-tertiary" style="font-size:12px;margin-top:12px;line-height:1.5;">
+        Será registrada uma movimentação na fase <strong>"Tentativa infrutífera de contato com o assistido"</strong>, com o número ligado.
+    </div>
+
+    <div id="lig-erro" style="display:none;color:var(--c-red);font-size:12.5px;margin-top:12px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px;">
+        <button type="button" class="btn-subtle" onclick="ligFechar()">Cancelar</button>
+        <button type="button" class="btn-accent" id="lig-ok" onclick="ligRegistrarConfirmar()">Registrar ligação</button>
+    </div>
+  </div>
+</div>
+
+{# ===================== MODAL: histórico de movimentações (só leitura) ===================== #}
+<div id="movlig-modal" class="wa-overlay" style="display:none;position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;"
+     onclick="if(event.target===this)movLigFechar()">
+  <div class="fluent-card" style="width:100%;max-width:680px;max-height:85vh;overflow:auto;">
+    <h3 class="font-display" style="font-size:18px;margin:0 0 10px;">
+        Movimentações — PAJ <span id="movlig-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
+    </h3>
+    <div id="movlig-lista" style="max-height:60vh;overflow-y:auto;"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:14px;">
+        <button type="button" class="btn-subtle" onclick="movLigFechar()">Fechar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.lig-label { display:block; font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:5px; }
+.lig-num-opt { display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:8px; cursor:pointer; font-size:13.5px; }
+.lig-num-opt:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.lig-num-x { padding:2px 7px; color:#dc2626; margin-left:auto; }
+.lig-mov { display:inline-block; margin-top:3px; padding:1px 7px; border-radius:999px; font-size:10.5px; font-weight:700;
+           text-decoration:none; border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+           background:var(--accent-soft); color:var(--accent); }
+a.lig-mov:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.lig-mov-sim { background:color-mix(in srgb, #a06d00 14%, transparent); color:#a06d00; border-color:color-mix(in srgb,#a06d00 35%,transparent); }
+.lig-input { width:100%; padding:8px 10px; border:1px solid var(--stroke-strong,#c4d0cc); border-radius:8px;
+             background:var(--layer-alt,#f6f9f8); color:var(--text,#16211f); font-size:13.5px; }
+.lig-chip { display:inline-flex; align-items:center; font-size:11.5px; font-weight:600; padding:3px 10px;
+            border-radius:999px; background:color-mix(in srgb, var(--text) 8%, transparent); color:var(--text-secondary); white-space:nowrap; }
+.lig-chip-red { background:color-mix(in srgb, var(--c-red) 16%, transparent); color:var(--c-red); }
+.pill-red { background:color-mix(in srgb, var(--c-red) 16%, transparent); color:var(--c-red); }
+/* Badge (Abrir mensagem / ver movimentações) — mesmo estilo do dashboard/prontos */
+.mov-badge { display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px;
+             border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+             background: var(--accent-soft); color: var(--accent);
+             font-size:11px; font-weight:600; cursor:pointer; transition:background .12s ease; }
+.mov-badge:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.mov-badge.ativo { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+/* Acordeão da mensagem (linha retrátil), igual ao de "Prontos para Envio" */
+.msg-accordion { background: var(--layer-alt); padding: 0 !important; }
+.msg-accordion-in { padding: 12px 16px; border-left: 3px solid var(--accent); }
+.msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); margin-bottom:6px; }
+.msg-full { font-size:13px; color: var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
+/* Cards Resumo IA + Sugestão IA lado a lado dentro do acordeão (como no dashboard) */
+.lig-ia-row { display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;
+              padding:12px 16px; border-left:3px solid var(--accent); }
+.lig-ia-card { flex:1 1 340px; min-width:0; }
+.sug-alerta { color:var(--c-red); font-weight:600; }
+/* Modal de movimentações (só leitura) */
+.mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
+.mov-item:first-child { border-top:none; }
+.mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
+.mov-desc { font-size:13px; color:var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
+</style>
+<script>
+let _ligCtx = {};
+const LIG_PRAZOS = {{ prazos_predefinidos|tojson }};   // prazos (dias) pré-definidos; 0 = sem prazo
+let _LIG_FAVS = null;                                   // caixas favoritas (carregadas de /api/grupos-unidade)
+
+// Selos de prazos pré-definidos + "Urgente" (setam o input #lig-prazo).
+function ligPrazoBadges() {
+    const box = document.getElementById('lig-prazo-badges');
+    if (!box || box.dataset.pronto) return;
+    (LIG_PRAZOS || []).forEach(v => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge'; b.textContent = v + ' dias';
+        b.onclick = () => { document.getElementById('lig-prazo').value = v; };
+        box.appendChild(b);
+    });
+    const urg = document.createElement('button');
+    urg.type = 'button'; urg.className = 'prazo-badge urgente'; urg.textContent = '⚡ Urgente';
+    urg.title = 'Conclusão em 1 dia'; urg.onclick = () => { document.getElementById('lig-prazo').value = 0; };
+    box.appendChild(urg);
+    box.dataset.pronto = '1';
+}
+
+// Selos das caixas de grupo FAVORITAS (clicar seleciona no dropdown de tramitação).
+function ligFavsRender() {
+    const sel = document.getElementById('lig-tramitar');
+    const box = document.getElementById('lig-tramitar-favs');
+    if (!sel || !box) return;
+    box.innerHTML = '';
+    (_LIG_FAVS || []).forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge' + (sel.value === g ? ' ativo' : '');
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; ligFavsRender(); };
+        box.appendChild(b);
+    });
+    sel.onchange = () => ligFavsRender();
+}
+
+function ligResToggle() {
+    const frut = document.querySelector('input[name="lig-res"]:checked').value === 'frutifero';
+    document.getElementById('lig-frut-box').style.display = frut ? 'block' : 'none';
+    document.getElementById('lig-infrut-hint').style.display = frut ? 'none' : 'block';
+}
+function _ligEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+// Item de número: checkbox + rótulo (obs). `manual`=true adiciona um X para remover.
+function _ligNumItem(numero, obs, checked, manual) {
+    return '<label class="lig-num-opt">' +
+        '<input type="checkbox" class="lig-num-chk" value="' + _ligEsc(numero) + '"' + (checked ? ' checked' : '') + '>' +
+        '<span style="font-family:monospace;">' + _ligEsc(numero) + '</span>' +
+        (obs ? ' <span class="text-tertiary" style="font-size:12px;">— ' + _ligEsc(obs) + '</span>' : '') +
+        (manual ? '<button type="button" class="btn-subtle lig-num-x" title="Remover" onclick="event.preventDefault();event.stopPropagation();this.closest(\'.lig-num-opt\').remove();">✕</button>' : '') +
+        '</label>';
+}
+function ligAddNumero() {
+    const inp = document.getElementById('lig-numero-novo');
+    const brutos = (inp.value || '').split(/[,;\n]+/).map(s => s.trim()).filter(Boolean);
+    if (!brutos.length) { inp.focus(); return; }
+    const lista = document.getElementById('lig-numeros');
+    const existentes = new Set(Array.from(lista.querySelectorAll('.lig-num-chk')).map(c => c.value.trim()));
+    brutos.forEach(n => { if (existentes.has(n)) return; existentes.add(n); lista.insertAdjacentHTML('beforeend', _ligNumItem(n, '', true, true)); });
+    inp.value = ''; inp.focus();
+}
+function ligColetaNumeros() {
+    const nums = [];
+    document.querySelectorAll('#lig-numeros .lig-num-chk:checked').forEach(c => nums.push(c.value.trim()));
+    (document.getElementById('lig-numero-novo').value || '').split(/[,;\n]+/).forEach(v => { const s = v.trim(); if (s) nums.push(s); });
+    return [...new Set(nums.filter(Boolean))];
+}
+
+async function ligRegistrarAbrir(btn) {
+    _ligCtx = { slug: btn.dataset.slug, paj: btn.dataset.paj, pajnum: btn.dataset.pajnum,
+                tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite' };
+    document.getElementById('lig-pajnum').textContent = btn.dataset.pajnum || '';
+    document.getElementById('lig-assistido').textContent = btn.dataset.assistido || '';
+    // números cadastrados → checkboxes (marque um ou vários)
+    let tels = [];
+    try { tels = JSON.parse(btn.dataset.telefones || '[]'); } catch(e) {}
+    const lista = document.getElementById('lig-numeros');
+    lista.innerHTML = tels.length ? '' : '<div class="text-tertiary" style="font-size:13px;padding:4px 0;">Nenhum telefone no cadastro — use "Cadastrar outro número".</div>';
+    tels.forEach(t => { const n = (t.numero || '').trim(); if (n) lista.insertAdjacentHTML('beforeend', _ligNumItem(n, t.obs, false, false)); });
+    document.getElementById('lig-numero-novo').value = '';
+    // reset resultado
+    document.querySelector('input[name="lig-res"][value="infrutifero"]').checked = true;
+    document.getElementById('lig-registro').value = btn.dataset.msgbase || '';
+    document.getElementById('lig-concluir').checked = false;
+    document.getElementById('lig-erro').style.display = 'none';
+    // reset tramitação + prazo
+    const _tr = document.getElementById('lig-tramitar'); if (_tr) _tr.value = '';
+    const _pz = document.getElementById('lig-prazo'); if (_pz) _pz.value = '{{ prazo_padrao }}';
+    ligPrazoBadges();
+    ligResToggle();
+    // grupos + favoritos p/ tramitar
+    ligCarregarGrupos();
+    document.getElementById('lig-modal').style.display = 'flex';
+}
+function ligFechar() { document.getElementById('lig-modal').style.display = 'none'; }
+
+async function ligCarregarGrupos() {
+    const sel = document.getElementById('lig-tramitar');
+    if (!sel.dataset.carregado) {
+        try {
+            const r = await fetch('/api/grupos-unidade'); const d = await r.json();
+            (d.grupos || []).forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o); });
+            _LIG_FAVS = (d && d.favoritos) ? d.favoritos : [];
+            sel.dataset.carregado = '1';
+        } catch (e) { _LIG_FAVS = _LIG_FAVS || []; }
+    }
+    ligFavsRender();
+}
+
+async function ligRegistrarConfirmar() {
+    const erro = document.getElementById('lig-erro');
+    erro.style.display = 'none';
+    const numeros = ligColetaNumeros();
+    if (!numeros.length) { erro.textContent = 'Marque (ou cadastre) ao menos um número ligado.'; erro.style.display = 'block'; return; }
+    const resultado = document.querySelector('input[name="lig-res"]:checked').value;
+    const registro = document.getElementById('lig-registro').value.trim();
+    if (resultado === 'frutifero' && !registro) {
+        erro.textContent = 'Registre o conteúdo do contato (vai como descrição da movimentação).'; erro.style.display = 'block'; return;
+    }
+    // a movimentação usa o SISDPU → garante sessão
+    if (!(await window.garantirSisdpu())) return;
+    const btn = document.getElementById('lig-ok'); const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = 'Registrando… (movimentando o PAJ)';
+    try {
+        const r = await fetch('/api/ligacao/registrar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                slug: _ligCtx.slug, paj_norm: _ligCtx.paj, id_tramite: _ligCtx.tramite, tipo: _ligCtx.tipo,
+                numeros: numeros, resultado: resultado, registro: registro,
+                tramitar_grupo: (resultado === 'frutifero') ? document.getElementById('lig-tramitar').value : '',
+                concluir: (resultado === 'frutifero') && document.getElementById('lig-concluir').checked,
+                prazo: (resultado === 'frutifero') ? parseInt(document.getElementById('lig-prazo').value, 10) : null,
+            }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) { location.reload(); }
+        else {
+            erro.textContent = 'Não foi possível registrar: ' + (d.erro || d.detalhe || 'erro');
+            erro.style.display = 'block'; btn.disabled = false; btn.innerHTML = orig;
+        }
+    } catch (e) { erro.textContent = 'Erro: ' + e; erro.style.display = 'block'; btn.disabled = false; btn.innerHTML = orig; }
+}
+
+async function ligCancelar(btn) {
+    if (!confirm('Remover este PAJ da fila de ligações? Ele volta a aparecer como pendente na caixa de origem.')) return;
+    try {
+        const r = await fetch('/api/ligacao/cancelar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: btn.dataset.slug, paj_norm: btn.dataset.paj, id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite' }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) location.reload(); else alert('Erro: ' + (d.erro || 'falha'));
+    } catch (e) { alert('Erro: ' + e); }
+}
+
+async function ligCorrespondencia(btn) {
+    if (!confirm('Encaminhar o PAJ ' + (btn.dataset.pajnum || '') + ' para CORRESPONDÊNCIAS?\n\n'
+               + 'Ele sai das Ligações e entra na fila de Correspondências (expedição de carta).')) return;
+    try {
+        const r = await fetch('/api/ligacao/correspondencia', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: btn.dataset.slug, paj_norm: btn.dataset.paj, id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite' }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) location.reload(); else alert('Erro: ' + (d.erro || 'falha'));
+    } catch (e) { alert('Erro: ' + e); }
+}
+
+// ---------- Mensagem: acordeão (abre/fecha a linha retrátil abaixo) ----------
+function msgLigToggle(btn) {
+    const tr = btn.closest('tr');
+    const msgRow = tr && tr.nextElementSibling;
+    if (!msgRow || !msgRow.classList.contains('lig-msg-row')) return;
+    const aberto = msgRow.style.display !== 'none';
+    msgRow.style.display = aberto ? 'none' : '';
+    btn.textContent = aberto ? 'Abrir' : 'Ocultar';
+    btn.classList.toggle('ativo', !aberto);
+}
+
+// ---------- Histórico de movimentações (badge → modal, só leitura) ----------
+function waEsc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+function movLigAbrir(btn) {
+    document.getElementById('movlig-paj').textContent = btn.dataset.pajnum || '';
+    let movs = [];
+    try { movs = JSON.parse(btn.dataset.movs || '[]'); } catch (e) {}
+    const lista = document.getElementById('movlig-lista');
+    if (!movs.length) {
+        lista.innerHTML = '<div class="text-tertiary" style="font-size:13px;padding:12px 0;">Sem movimentações.</div>';
+    } else {
+        lista.innerHTML = movs.map(m => {
+            const cab = '[' + (m.seq != null ? m.seq : '') + '] ' + waEsc(m.data || '')
+                + (m.tipo ? ' · ' + waEsc(m.tipo) : '') + (m.fases ? ' · ' + waEsc(m.fases) : '');
+            return '<div class="mov-item"><div class="mov-cab">' + cab + '</div>'
+                 + '<div class="mov-desc">' + waEsc(m.descricao || '(sem descrição)') + '</div></div>';
+        }).join('');
+    }
+    document.getElementById('movlig-modal').style.display = 'flex';
+}
+function movLigFechar() { document.getElementById('movlig-modal').style.display = 'none'; }
+</script>
+{% endblock %}

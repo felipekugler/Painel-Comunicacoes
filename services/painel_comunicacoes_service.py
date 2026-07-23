@@ -256,6 +256,10 @@ def _solic_de_item(item: dict, anterior: dict | None = None) -> dict:
         # estado de envio POR TRÂMITE
         "envio": a.get("envio", {}) or {},
         "enviados": a.get("enviados", []) or [],
+        # estado do fluxo de LIGAÇÕES TELEFÔNICAS e de CORRESPONDÊNCIA (por trâmite) —
+        # preservados entre sincronizações para não perder a rotina em andamento.
+        "ligacao": a.get("ligacao", {}) or {},
+        "correspondencia": a.get("correspondencia", {}) or {},
     }
 
 
@@ -353,25 +357,37 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
     `prazos` (dict por meio {app_sisdpu, whatsapp, email}): prazo de resposta em
     dias de cada meio (>=1, padrão 5); armazenados como prazo_app/whatsapp/email.
     `tramitar_grupo`: se informado, o PAJ é tramitado p/ essa caixa de grupo APÓS
-    envio + movimentação bem-sucedidos ('' ou None = não tramitar)."""
+    envio + movimentação bem-sucedidos ('' ou None = não tramitar).
+
+    `meios` é CUMULATIVO e pode incluir, além dos meios de mensagem (app_sisdpu/whatsapp),
+    os canais 'telefone' e 'carta' — que NÃO enviam mensagem: encaminham o PAJ para as
+    centrais de Ligações / Correspondências (levando a mensagem como base do registro/carta)."""
     from services import envio_service
-    box = _ler_box(slug, paj_norm)
+    todos = meios or []
+    # 1) Canais de ENCAMINHAMENTO (cumulativos) — cada um grava no próprio trilho.
+    if "telefone" in todos:
+        enfileirar_ligacao(slug, paj_norm, id_tramite, mensagem=mensagem)
+    if "carta" in todos:
+        encaminhar_correspondencia(slug, paj_norm, id_tramite, mensagem=mensagem)
+    # 2) Meios de MENSAGEM (app/whatsapp/email) — fila de "Prontos para Envio".
+    msg_meios = [m for m in todos if m in envio_service.MEIOS]
+    box = _ler_box(slug, paj_norm)  # re-lê após os encaminhamentos p/ preservar ligacao/correspondencia
     if not box:
         return {}
     s = _achar_solic(box, id_tramite)
     if not s:
         return {}
-    meios = [m for m in (meios or []) if m in envio_service.MEIOS]
-    s["envio"] = {
-        "status": "gravado",
-        "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
-        "meios": meios,
-        "somente_leitura": bool(somente_leitura),
-        "tramitar_grupo": (tramitar_grupo or "").strip(),
-        **_prazos_envio(prazos),
-        "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
-    }
-    _gravar_box(slug, box)
+    if msg_meios:
+        s["envio"] = {
+            "status": "gravado",
+            "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
+            "meios": msg_meios,
+            "somente_leitura": bool(somente_leitura),
+            "tramitar_grupo": (tramitar_grupo or "").strip(),
+            **_prazos_envio(prazos),
+            "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        }
+        _gravar_box(slug, box)
     return box
 
 
@@ -885,7 +901,15 @@ def menu_caixas() -> list[dict]:
 
 # ==================== triagem / tratamento conjunto ====================
 def _sol_pendente(s: dict) -> bool:
-    return (s.get("envio") or {}).get("status") != "gravado" and not s.get("enviados")
+    # Gravado para envio, já enviado, OU dentro do fluxo de ligações/correspondência
+    # → não é mais "pendente" na caixa (passou a viver na central correspondente).
+    if (s.get("envio") or {}).get("status") == "gravado" or s.get("enviados"):
+        return False
+    if (s.get("ligacao") or {}).get("status"):
+        return False
+    if (s.get("correspondencia") or {}).get("status"):
+        return False
+    return True
 
 
 def _sols_pendentes(box: dict) -> list[dict]:
@@ -1062,11 +1086,16 @@ def montar_dashboard(slug: str) -> dict:
                 conj = box.get("conjunto") or {}
                 if decisao == "conjunto" and sorted(conj.get("tramite_ids", [])) == pend_ids:
                     item = _enriquecer_conjunto(box, cont)
+                    # conjunto encaminhado p/ ligação/correspondência (sem envio de mensagem)
+                    # vive nas centrais — não reaparece em pendentes.
+                    _conj_em_central = (bool((conj.get("ligacao") or {}).get("status")
+                                             and not _lig_terminal((conj.get("ligacao") or {}).get("status", "")))
+                                        or (conj.get("correspondencia") or {}).get("status") == "pendente")
                     if item["envio_status"] == "gravado":
                         fila.append(item)
-                    elif not item["contato_enviado"]:
+                    elif not item["contato_enviado"] and not _conj_em_central:
                         pendentes.append(item)
-                    # else: conjunto já enviado → não exibe (fica só no Histórico)
+                    # else: conjunto já enviado/encaminhado → não exibe (fica só no Histórico/centrais)
                 elif decisao == "separado":
                     for s in pend:
                         pendentes.append({**_enriquecer_tramite(box, s, cont),
@@ -1200,20 +1229,29 @@ def desfazer_triagem(slug: str, paj_norm: str) -> dict:
 def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
                     somente_leitura: bool = False, prazos: dict | None = None,
                     tramitar_grupo: str | None = None) -> dict:
-    """Grava o CONJUNTO de um PAJ na fila de envio."""
+    """Grava o CONJUNTO de um PAJ na fila de envio. `meios` é cumulativo: além dos meios de
+    mensagem (app/whatsapp), pode incluir 'telefone'/'carta', que encaminham o CONJUNTO para
+    as centrais de Ligações / Correspondências (uma ligação/carta cobre todos os trâmites)."""
     from services import envio_service
-    box = _ler_box(slug, paj_norm)
+    todos = meios or []
+    # Encaminhamentos cumulativos do CONJUNTO.
+    if "telefone" in todos:
+        enfileirar_ligacao(slug, paj_norm, "", mensagem=mensagem, tipo="conjunto")
+    if "carta" in todos:
+        encaminhar_correspondencia(slug, paj_norm, "", mensagem=mensagem, tipo="conjunto")
+    msg_meios = [m for m in todos if m in envio_service.MEIOS]
+    box = _ler_box(slug, paj_norm)  # re-lê após encaminhamentos
     if not box or not box.get("conjunto"):
-        return {}
-    meios = [m for m in (meios or []) if m in envio_service.MEIOS]
-    box["conjunto"]["envio"] = {
-        "status": "gravado", "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
-        "meios": meios, "somente_leitura": bool(somente_leitura),
-        "tramitar_grupo": (tramitar_grupo or "").strip(),
-        **_prazos_envio(prazos),
-        "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
-    }
-    _gravar_box(slug, box)
+        return box or {}
+    if msg_meios:
+        box["conjunto"]["envio"] = {
+            "status": "gravado", "mensagem": colapsar_paragrafos(remover_emojis(mensagem)),  # só texto — sem emojis
+            "meios": msg_meios, "somente_leitura": bool(somente_leitura),
+            "tramitar_grupo": (tramitar_grupo or "").strip(),
+            **_prazos_envio(prazos),
+            "gravado_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        }
+        _gravar_box(slug, box)
     return box
 
 
@@ -2544,6 +2582,427 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
         res["concluido_detalhe"] = "não realizada (tramitação não teve êxito)"
         _passo(log, emit, "Conclusão do trâmite originário", None, res["concluido_detalhe"])
     return res
+
+
+# ==================== LIGAÇÕES TELEFÔNICAS ====================
+# Fluxo paralelo ao envio de mensagem: o servidor liga para o assistido (até 3
+# tentativas). Cada tentativa gera uma movimentação no SISDPU:
+#   - contato frutífero    -> fase "Atendimento de retorno" (descrição = texto do
+#                             servidor + número), depois pergunta se tramita/conclui;
+#   - tentativa infrutífera -> fase "Tentativa infrutífera de contato com o assistido".
+# Todos os contatos registram o número ligado; cada ligação vira 1 registro no
+# histórico (meio "telefone"). Após 3 infrutíferas, o PAJ pode ser encaminhado para
+# CORRESPONDÊNCIA (expedição pelos Correios — fluxo futuro).
+_FASE_ATENDIMENTO_RETORNO = "Atendimento de retorno"
+_FASE_TENTATIVA_INFRUTIFERA = "Tentativa infrutífera de contato com o assistido"
+LIGACOES_MAX_TENTATIVAS = 3
+
+
+def _lig_terminal(status: str) -> bool:
+    """Status que RETIRAM o trâmite da central de ligações (resolvido/encaminhado/cancelado)."""
+    return status in ("resolvido_frutifero", "encaminhado_correspondencia", "cancelado")
+
+
+def _tentativas_infrutiferas(lig: dict) -> int:
+    return sum(1 for t in (lig.get("tentativas") or []) if t.get("resultado") == "infrutifero")
+
+
+def _caixas_com_dados() -> list[dict]:
+    """Todas as caixas que TÊM pasta de dados (habilitadas OU não). O fluxo de
+    ligações/correspondências persiste mesmo se a caixa sair da sincronização.
+    Meta (nome/grupo) via get_caixa; fallback = o próprio slug."""
+    out: list[dict] = []
+    if not DADOS_DIR.is_dir():
+        return out
+    for d in sorted(DADOS_DIR.iterdir()):
+        if not d.is_dir() or d.name.startswith("_"):
+            continue
+        cx = config_service.get_caixa(d.name) or {}
+        out.append({"slug": d.name, "nome": cx.get("nome") or d.name,
+                    "grupo": cx.get("grupo") or d.name})
+    return out
+
+
+def _alvo_contato(box: dict, id_tramite: str, tipo: str = "tramite"):
+    """Resolve o ALVO de ligação/correspondência — a solicitação individual OU o conjunto —
+    de forma unificada. Retorna (alvo|None, id_proc, originarios[list], paj_disp, sugestao)."""
+    if tipo == "conjunto":
+        conj = box.get("conjunto")
+        if not conj:
+            return None, "", [], "", ""
+        ids = [str(i).strip() for i in (conj.get("tramite_ids") or []) if str(i).strip()]
+        sols = [s for s in box.get("solicitacoes", []) if s.get("id_tramite") in set(ids)]
+        prim = sols[0] if sols else {}
+        return (conj, prim.get("id", ""), ids, box.get("paj", ""),
+                conj.get("sugestao_editada") or conj.get("sugestao_ia") or "")
+    s = _achar_solic(box, id_tramite)
+    if not s:
+        return None, "", [], "", ""
+    return (s, s.get("id", ""), [id_tramite], box.get("paj", ""),
+            s.get("sugestao_editada") or s.get("sugestao_ia") or "")
+
+
+def enfileirar_ligacao(slug: str, paj_norm: str, id_tramite: str, mensagem: str = "",
+                       tipo: str = "tramite") -> dict:
+    """Marca um trâmite (ou CONJUNTO) para CONTATO TELEFÔNICO: entra em 'Ligações Pendentes'.
+    `mensagem` = base do contato (registro pré-preenchido da movimentação). Idempotente —
+    se já ativo, só atualiza a mensagem-base. NÃO mexe em correspondência (cumulativos)."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado na caixa."}
+    alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    msg = colapsar_paragrafos(remover_emojis(mensagem or ""))
+    lig = alvo.get("ligacao") or {}
+    if lig.get("status") and not _lig_terminal(lig.get("status")):
+        if msg:
+            lig["mensagem_base"] = msg
+            alvo["ligacao"] = lig
+            _gravar_box(slug, box)
+        return {"ok": True, "ja": True}
+    alvo["ligacao"] = {
+        "status": "pendente",
+        "enfileirado_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "tramitar_grupo": "",
+        "mensagem_base": msg,
+        "tipo": tipo,
+        "tentativas": [],
+    }
+    _gravar_box(slug, box)
+    return {"ok": True}
+
+
+def cancelar_ligacao(slug: str, paj_norm: str, id_tramite: str, tipo: str = "tramite") -> dict:
+    """Remove a marcação de ligação — o trâmite/conjunto volta a ser 'pendente' na caixa."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    alvo["ligacao"] = {}
+    _gravar_box(slug, box)
+    return {"ok": True}
+
+
+def _enriquecer_ligacao(box: dict, alvo: dict, cont: dict, caixa_meta: dict, tipo: str = "tramite") -> dict:
+    d = _enriquecer_conjunto(box, cont) if tipo == "conjunto" else _enriquecer_tramite(box, alvo, cont)
+    d["lig_tipo"] = tipo
+    lig = alvo.get("ligacao") or {}
+    d["caixa_slug"] = caixa_meta["slug"]
+    d["caixa_nome"] = caixa_meta["nome"]
+    d["grupo"] = caixa_meta["grupo"]
+    d["lig_status"] = lig.get("status", "")
+    tent = lig.get("tentativas") or []
+    d["lig_tentativas"] = tent
+    d["lig_n"] = len(tent)
+    d["lig_n_infrutiferas"] = _tentativas_infrutiferas(lig)
+    d["lig_tramitar_grupo"] = lig.get("tramitar_grupo", "")
+    d["lig_mensagem_base"] = lig.get("mensagem_base", "")
+    d["lig_enfileirado_em"] = lig.get("enfileirado_em", "")
+    ult = tent[-1] if tent else {}
+    d["lig_ultima_em"] = ult.get("em", "")
+    d["lig_ultimo_numero"] = ult.get("numero", "")
+    d["lig_ultimo_resultado"] = ult.get("resultado", "")
+    d["lig_max"] = LIGACOES_MAX_TENTATIVAS
+    d["lig_esgotado"] = d["lig_n_infrutiferas"] >= LIGACOES_MAX_TENTATIVAS
+    return d
+
+
+def listar_ligacoes() -> dict:
+    """Central de Ligações (todas as caixas): {"pendentes":[...], "feitas":[...]}.
+    Pendentes = sem nenhuma tentativa; Feitas = >=1 tentativa, ainda em aberto."""
+    pend, feitas = [], []
+    for c in _caixas_com_dados():
+        bdir = _box_dir(c["slug"])
+        if not bdir.is_dir():
+            continue
+        for f in bdir.glob("PAJ-*.json"):
+            with contextlib.suppress(Exception):
+                box = json.loads(f.read_text(encoding="utf-8"))
+                cont = ler_contato(box.get("paj_norm", ""))
+                for s in box.get("solicitacoes", []):
+                    st = (s.get("ligacao") or {}).get("status", "")
+                    if not st or _lig_terminal(st):
+                        continue
+                    item = _enriquecer_ligacao(box, s, cont, c, "tramite")
+                    (pend if item["lig_n"] == 0 else feitas).append(item)
+                conj = box.get("conjunto") or {}
+                st_c = (conj.get("ligacao") or {}).get("status", "")
+                if st_c and not _lig_terminal(st_c):
+                    item = _enriquecer_ligacao(box, conj, cont, c, "conjunto")
+                    (pend if item["lig_n"] == 0 else feitas).append(item)
+    pend.sort(key=lambda d: d.get("lig_enfileirado_em", ""))
+    feitas.sort(key=lambda d: d.get("lig_ultima_em", ""), reverse=True)
+    return {"pendentes": pend, "feitas": feitas}
+
+
+def contar_ligacoes() -> dict:
+    """Contadores da central de Ligações + modo de envio do meio 'telefone'.
+    `aguardando` = ligações que ainda precisam de um contato: pendentes (0 tentativas)
+    + feitas em andamento (com tentativas, mas ainda não esgotadas). Não conta as
+    esgotadas (3 tentativas — já aguardam decisão de correspondência)."""
+    db = listar_ligacoes()
+    em_andamento = sum(1 for it in db["feitas"] if not it.get("lig_esgotado"))
+    return {"pendentes": len(db["pendentes"]), "feitas": len(db["feitas"]),
+            "aguardando": len(db["pendentes"]) + em_andamento,
+            "total": len(db["pendentes"]) + len(db["feitas"]),
+            "modo": config_service.get_envio_modo_meio("telefone")}
+
+
+async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
+                            resultado: str, registro: str = "", tramitar_grupo: str = "",
+                            concluir: bool = False, prazo=None, tipo: str = "tramite", emit=None) -> dict:
+    """Registra UMA tentativa de ligação (trâmite ou CONJUNTO) e roda o pipeline no SISDPU:
+      - frutífero:   movimenta (fase 'Atendimento de retorno', descrição = texto do
+                     servidor + número) e, se pedido, tramita e/ou conclui;
+      - infrutífero: movimenta (fase 'Tentativa infrutífera de contato com o assistido').
+    `numeros` = lista dos números ligados nesta tentativa (aceita 1 ou vários). No conjunto,
+    a conclusão abrange TODOS os trâmites originários. Grava a tentativa no alvo e 1 registro
+    no histórico (meio 'telefone')."""
+    from services import historico_service
+    if isinstance(numeros, str):
+        numeros = [numeros]
+    numeros = [str(n).strip() for n in (numeros or []) if str(n).strip()]
+    num_txt = ", ".join(numeros)
+    resultado = (resultado or "").strip().lower()
+    if resultado not in ("frutifero", "infrutifero"):
+        return {"ok": False, "erro": "Resultado inválido."}
+    if not numeros:
+        return {"ok": False, "erro": "Informe ao menos um número para o qual foi ligado."}
+    caixa = config_service.get_caixa(slug)
+    box = _ler_box(slug, paj_norm)
+    if not box or not caixa:
+        return {"ok": False, "erro": "PAJ/caixa não encontrado."}
+    alvo, id_proc, originarios, paj_disp, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    lig = alvo.get("ligacao") or {}
+    if not lig.get("status"):
+        return {"ok": False, "erro": "Este item não está na fila de ligações."}
+    cont = ler_contato(paj_norm)
+    d = _enriquecer_conjunto(box, cont) if tipo == "conjunto" else _enriquecer_tramite(box, alvo, cont)
+    n_atual = len(lig.get("tentativas") or []) + 1
+    frutifero = resultado == "frutifero"
+    log: list = []
+    _rot_num = "número" if len(numeros) == 1 else "números"
+    _log_passo(log, "Ligação telefônica", True,
+               f"Tentativa {n_atual} · {_rot_num} {num_txt} · "
+               + ("contato frutífero" if frutifero else "tentativa infrutífera"))
+    if frutifero:
+        fase = _FASE_ATENDIMENTO_RETORNO
+        texto = (registro or "").strip() or "Contato telefônico frutífero com o assistido."
+        descricao = f"{texto}\n\nContato telefônico realizado para o(s) {_rot_num}: {num_txt}."
+    else:
+        fase = _FASE_TENTATIVA_INFRUTIFERA
+        descricao = (f"[Painel de Comunicações] Tentativa {n_atual} de {LIGACOES_MAX_TENTATIVAS} "
+                     f"de contato telefônico sem êxito.\n{_rot_num.capitalize()} ligado(s): {num_txt}.")
+    # Modo de envio do meio "telefone" (Configurações). Em SIMULADO nada é feito no
+    # SISDPU — a ligação é registrada só para testar o fluxo (transições/histórico).
+    simulado = config_service.get_envio_modo_meio("telefone") == "simulado"
+    tram_res = {"tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": "",
+                "tram_url": "", "tram_descricao": ""}
+    conc_res = {"concluido_status": "nao_realizada", "concluido_detalhe": ""}
+    mov_seq = None
+    mov_url = ""
+    if simulado:
+        # 1s) MOVIMENTAÇÃO simulada — não toca no SISDPU.
+        _passo(log, emit, f"Movimentação (fase '{fase}')", None,
+               "modo simulado — nenhuma movimentação real no SISDPU")
+        mov_status_val = "simulado"
+        hist_status = "simulado"
+        if frutifero:
+            if tramitar_grupo:
+                tram_res.update({"tram_caixa": tramitar_grupo, "tram_status": "simulado"})
+                _passo(log, emit, "Tramitação do PAJ", None,
+                       f"modo simulado — não tramitado (destino: {tramitar_grupo})")
+            else:
+                _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
+            if concluir:
+                conc_res = {"concluido_status": "simulado", "concluido_detalhe": "modo simulado — não concluído"}
+                _passo(log, emit, "Conclusão do trâmite originário", None, "modo simulado — não concluído")
+            else:
+                _passo(log, emit, "Conclusão do trâmite originário", None, "não solicitada")
+    else:
+        # 1) MOVIMENTAÇÃO real (fase específica; texto do servidor como descrição no frutífero)
+        if emit is not None:
+            emit({"level": "muted", "msg": "     movimentando o PAJ…"})
+        mov = {"ok": False, "detalhe": "PAJ sem id de processo.", "mov_seq": None}
+        if id_proc:
+            try:
+                mov = await sisdpu_client.movimentar_paj(
+                    [{"id": id_proc, "numero": paj_disp}], descricao, fase=fase)
+            except Exception as e:  # noqa: BLE001
+                mov = {"ok": False, "detalhe": f"exceção: {e}", "mov_seq": None}
+        mov_ok = bool(mov.get("ok"))
+        mov_seq = mov.get("mov_seq")
+        _passo(log, emit, f"Movimentação (fase '{fase}')", mov_ok,
+               (f'registrada · "mov. {mov_seq}"' if mov_ok else mov.get("detalhe", "")))
+        if not mov_ok:
+            # Movimentação real falhou → NÃO conta a tentativa (o usuário corrige e refaz).
+            return {"ok": False, "erro": mov.get("detalhe", "Falha na movimentação.")}
+        mov_url = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}" if id_proc else ""
+        mov_status_val = "movimentado"
+        hist_status = "enviado"
+        # 2) frutífero: tramitação/conclusão opcionais
+        if frutifero:
+            if tramitar_grupo:
+                tram_res = await _tramitar_referenciando_mov(
+                    id_proc, paj_disp, tramitar_grupo, mov_seq, prazo, log, emit=emit)
+            else:
+                _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
+            tram_ok = (not tramitar_grupo) or (tram_res["tram_status"] == "tramitado")
+            if concluir and tram_ok:
+                conc_res = await _concluir_originarios(originarios, log, emit)
+            elif concluir:
+                conc_res = {"concluido_status": "nao_realizada",
+                            "concluido_detalhe": "não concluída (tramitação não teve êxito)"}
+                _passo(log, emit, "Conclusão do trâmite originário", None, conc_res["concluido_detalhe"])
+            else:
+                _passo(log, emit, "Conclusão do trâmite originário", None, "não solicitada")
+    # 3) grava a tentativa no trâmite + atualiza o status da ligação
+    tentativa = {
+        "em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "numero": num_txt, "numeros": numeros, "resultado": resultado, "registro": (registro or "").strip(),
+        "mov_seq": mov_seq, "mov_status": mov_status_val, "mov_url": mov_url,
+        "tram_caixa": tram_res["tram_caixa"], "tram_status": tram_res["tram_status"],
+        "concluido_status": conc_res["concluido_status"], "usuario": _usuario_sisdpu(),
+        "simulado": simulado,
+    }
+    lig.setdefault("tentativas", []).append(tentativa)
+    if tramitar_grupo:
+        lig["tramitar_grupo"] = tramitar_grupo
+    if frutifero:
+        lig["status"] = "resolvido_frutifero"
+    elif _tentativas_infrutiferas(lig) >= LIGACOES_MAX_TENTATIVAS:
+        lig["status"] = "esgotado"
+    else:
+        lig["status"] = "em_andamento"
+    alvo["ligacao"] = lig
+    _gravar_box(slug, box)
+    # 4) registro no HISTÓRICO (meio "telefone")
+    historico_service.registrar({
+        "paj_norm": paj_norm, "paj": paj_disp,
+        "assistido": d.get("assistido", ""), "oficio": d.get("oficio", ""),
+        "id_tramite": (originarios[0] if len(originarios) == 1 else ""),
+        "tramite_ids": originarios, "conjunto": (tipo == "conjunto"),
+        "tramite_data": d.get("data_envio", ""),
+        "caixa_slug": slug, "caixa_nome": caixa.get("nome", ""), "grupo": caixa.get("grupo", ""),
+        "mensagem": (tentativa["registro"] if frutifero else
+                     f"Tentativa {n_atual}/{LIGACOES_MAX_TENTATIVAS} de contato telefônico — sem êxito."),
+        "meio": "telefone", "meios": ["telefone"],
+        "url_detalhe": d.get("url_detalhe", ""), "id_processo": id_proc,
+        "ligacao_numero": num_txt, "ligacao_numeros": numeros, "ligacao_resultado": resultado, "ligacao_tentativa": n_atual,
+        "mov_seq": mov_seq, "mov_status": mov_status_val, "mov_url": mov_url,
+        "mov_descricao": descricao,
+        "tram_grupo": tramitar_grupo or "", "tram_caixa": tram_res["tram_caixa"],
+        "tram_status": tram_res["tram_status"], "tram_detalhe": tram_res["tram_detalhe"],
+        "tram_url": tram_res["tram_url"], "tram_descricao": tram_res["tram_descricao"],
+        "concluido_status": conc_res["concluido_status"], "concluido_detalhe": conc_res["concluido_detalhe"],
+        "status": hist_status,
+        "detalhe": ("Ligação registrada (modo simulado)." if simulado else "Ligação registrada."),
+        "log": log,
+        "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+    })
+    return {"ok": True, "resultado": resultado, "tentativa": n_atual, "simulado": simulado,
+            "status_ligacao": lig["status"], "mov_seq": mov_seq,
+            "esgotado": lig["status"] == "esgotado", "detalhe": ""}
+
+
+# ==================== CORRESPONDÊNCIAS ====================
+def encaminhar_correspondencia(slug: str, paj_norm: str, id_tramite: str, motivo: str = "",
+                               mensagem: str = "", encerrar_ligacao: bool = False,
+                               tipo: str = "tramite") -> dict:
+    """Encaminha um trâmite (ou CONJUNTO) para a fila de CORRESPONDÊNCIAS. `mensagem` = base do
+    texto da carta (Correios, fluxo futuro). `encerrar_ligacao` = True apenas quando vem do
+    botão 'Enviar correspondência' da central de Ligações; do modal 'Gravar para envio' é False
+    (cumulativo). Idempotente — se já pendente, atualiza a mensagem-base."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    msg = colapsar_paragrafos(remover_emojis(mensagem or ""))
+    lig = alvo.get("ligacao") or {}
+    corr = alvo.get("correspondencia") or {}
+    if corr.get("status") == "pendente":
+        if msg:
+            corr["mensagem_base"] = msg
+            alvo["correspondencia"] = corr
+            _gravar_box(slug, box)
+        return {"ok": True, "ja": True}
+    alvo["correspondencia"] = {
+        "status": "pendente",
+        "em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "de_ligacao": bool(lig.get("tentativas")),
+        "tentativas_ligacao": len(lig.get("tentativas") or []),
+        "motivo": (motivo or "").strip(),
+        "mensagem_base": msg,
+        "tipo": tipo,
+    }
+    if encerrar_ligacao and lig.get("status"):
+        lig["status"] = "encaminhado_correspondencia"
+        alvo["ligacao"] = lig
+    _gravar_box(slug, box)
+    return {"ok": True}
+
+
+def cancelar_correspondencia(slug: str, paj_norm: str, id_tramite: str, tipo: str = "tramite") -> dict:
+    """Remove o trâmite/conjunto da fila de correspondências (não revive a ligação encerrada)."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    alvo["correspondencia"] = {}
+    _gravar_box(slug, box)
+    return {"ok": True}
+
+
+def _enriquecer_correspondencia(box: dict, alvo: dict, cont: dict, caixa_meta: dict, tipo: str = "tramite") -> dict:
+    d = _enriquecer_conjunto(box, cont) if tipo == "conjunto" else _enriquecer_tramite(box, alvo, cont)
+    d["corr_tipo"] = tipo
+    corr = alvo.get("correspondencia") or {}
+    d["caixa_slug"] = caixa_meta["slug"]
+    d["caixa_nome"] = caixa_meta["nome"]
+    d["grupo"] = caixa_meta["grupo"]
+    d["corr_status"] = corr.get("status", "")
+    d["corr_em"] = corr.get("em", "")
+    d["corr_de_ligacao"] = corr.get("de_ligacao", False)
+    d["corr_tentativas_ligacao"] = corr.get("tentativas_ligacao", 0)
+    d["corr_motivo"] = corr.get("motivo", "")
+    d["corr_mensagem_base"] = corr.get("mensagem_base", "")
+    return d
+
+
+def listar_correspondencias() -> dict:
+    """Central de Correspondências (todas as caixas): {"pendentes":[...]}."""
+    pend = []
+    for c in _caixas_com_dados():
+        bdir = _box_dir(c["slug"])
+        if not bdir.is_dir():
+            continue
+        for f in bdir.glob("PAJ-*.json"):
+            with contextlib.suppress(Exception):
+                box = json.loads(f.read_text(encoding="utf-8"))
+                cont = ler_contato(box.get("paj_norm", ""))
+                for s in box.get("solicitacoes", []):
+                    if (s.get("correspondencia") or {}).get("status") == "pendente":
+                        pend.append(_enriquecer_correspondencia(box, s, cont, c, "tramite"))
+                conj = box.get("conjunto") or {}
+                if (conj.get("correspondencia") or {}).get("status") == "pendente":
+                    pend.append(_enriquecer_correspondencia(box, conj, cont, c, "conjunto"))
+    pend.sort(key=lambda d: d.get("corr_em", ""))
+    return {"pendentes": pend}
+
+
+def contar_correspondencias() -> dict:
+    db = listar_correspondencias()
+    return {"pendentes": len(db["pendentes"]), "total": len(db["pendentes"]),
+            "modo": config_service.get_envio_modo_meio("correspondencia")}
 
 
 async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,

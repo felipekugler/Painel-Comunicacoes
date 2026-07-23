@@ -26,8 +26,9 @@
             {%- elif tipo == 'email' -%}
                 <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
             {%- elif tipo == 'endereco' -%}
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
                 <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5v4.5h-7.5z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 8.25 3.75 2.4 3.75-2.4" />
             {%- endif -%}
         </svg>
     </span>
@@ -357,10 +358,10 @@
                             <td class="text-secondary" style="font-size:12.5px;"><div class="col-oficio">{{ paj.oficio or "—" }}</div></td>
                             <td><div class="col-assistido" title="{{ paj.assistido }}">{{ paj.assistido or "—" }}</div></td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
-                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', paj.contatos.telefone, paj.telefones_txt, copiavel=true) }}</td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
                             <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
-                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
+                            <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', paj.contatos.endereco, paj.enderecos_txt, copiavel=true) }}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -474,10 +475,10 @@
                     <div class="pjp-tram-card">{{ selo_triagem(paj) }}{{ tram_desc(paj) }}</div>
                 </td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('app_sisdpu', c.app_sisdpu) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', c.telefone, paj.telefones_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('telefone', paj.contatos.telefone, paj.telefones_txt, copiavel=true) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ whatsapp_cell(paj) }}</td>
                 <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('email', c.email, paj.emails_txt, copiavel=true) }}</td>
-                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', c.endereco, paj.enderecos_txt, copiavel=true) }}</td>
+                <td style="width:2.6rem;text-align:center;padding-left:2px;padding-right:2px;">{{ contato_icon('endereco', paj.contatos.endereco, paj.enderecos_txt, copiavel=true) }}</td>
             </tr>
             <tr class="pj-cards pj-collapse {{ _par }}">
                 <td colspan="10">
@@ -902,7 +903,7 @@
     </div>
     <hr class="grava-sep">
     <div>
-        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de envio da Mensagem</div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Meios de contato</div>
         <div id="grava-meios" style="display:flex;flex-direction:column;gap:0;"></div>
     </div>
     <hr class="grava-sep">
@@ -1269,13 +1270,28 @@ function gravarAbrir(btn) {
     const box = document.getElementById('grava-meios');
     box.innerHTML = '';
     MEIOS_ENVIO.forEach(m => {
+        // Encaminhamentos (Ligação/Carta): checkbox simples, sem prazo/somente-leitura.
+        if (m.tipo === 'encaminhamento') {
+            const rowE = document.createElement('div');
+            rowE.style.cssText = 'display:flex;align-items:center;gap:6px;min-height:34px;';
+            const labE = document.createElement('label');
+            labE.className = 'wa-opt';
+            labE.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '">' +
+                '<span style="font-size:14px;"></span>' +
+                '<span class="text-tertiary" style="font-size:11.5px;"></span>';
+            labE.querySelectorAll('span')[0].textContent = m.label;
+            labE.querySelectorAll('span')[1].textContent = (m.key === 'telefone') ? '→ central de Ligações' : '→ central de Correspondências';
+            rowE.appendChild(labE);
+            box.appendChild(rowE);
+            return;
+        }
         const habil = disp[m.key];
         // Nunca pré-marca por disponibilidade. Só ao EDITAR um gravado é que
         // restaura os meios que já haviam sido escolhidos; no resto, desmarcado.
         const marcado = habil && edicao && jaMeios.includes(m.key);
         const lab = document.createElement('label');
         lab.className = 'wa-opt' + (habil ? '' : ' opt-off');
-        lab.innerHTML = '<input type="checkbox" value="' + m.key + '"' +
+        lab.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '"' +
             (marcado ? ' checked' : '') + (habil ? '' : ' disabled') + '>' +
             '<span style="font-size:14px;"></span>' +
             '<span class="text-tertiary" style="font-size:11.5px;"></span>';
@@ -1344,7 +1360,7 @@ function gravarFechar() {
 }
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
-    const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    const meios = Array.from(document.querySelectorAll('#grava-meios input.meio-cb:checked')).map(c => c.value);
     const slCb = document.getElementById('grava-sl');
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo
@@ -1373,6 +1389,20 @@ function construirMeiosInline(box) {
                     email: 'sem e-mail cadastrado' };
     box.innerHTML = '';
     MEIOS_ENVIO.forEach(m => {
+        // Encaminhamentos (Ligação/Carta): checkbox simples, sem prazo/somente-leitura.
+        if (m.tipo === 'encaminhamento') {
+            const rowE = document.createElement('div');
+            rowE.className = 'mi-row';
+            const labE = document.createElement('label');
+            labE.className = 'wa-opt';
+            labE.innerHTML = '<input type="checkbox" class="mi-meio" value="' + m.key + '">' +
+                '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
+            labE.querySelectorAll('span')[0].textContent = m.label;
+            labE.querySelectorAll('span')[1].textContent = (m.key === 'telefone') ? '→ central de Ligações' : '→ central de Correspondências';
+            rowE.appendChild(labE);
+            box.appendChild(rowE);
+            return;
+        }
         const habil = disp[m.key];
         const row = document.createElement('div');
         row.className = 'mi-row';

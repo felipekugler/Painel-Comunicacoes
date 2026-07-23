@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Correspondências{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <h1 class="font-display" style="font-size:28px;margin:0;display:flex;align-items:center;gap:10px;">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" style="width:26px;height:26px;color:var(--c-addr,#8a6d3b);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5v4.5h-7.5z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 8.25 3.75 2.4 3.75-2.4" />
+        </svg>
+        Correspondências
+        <span class="pill-quad" style="font-size:14px;" title="Correspondências na fila">{{ pendentes|length }}</span>
+        <span class="badge-modo {{ 'badge-modo-real' if modo == 'real' else '' }}"
+              title="Modo da expedição de correspondência (ajuste em Configurações → Modo de envio). Em REAL, a carta é expedida de verdade pelos Correios.">{{ 'Modo real' if modo == 'real' else 'Modo simulado' }}</span>
+    </h1>
+    <p class="text-secondary mt-1" style="font-size:13px;">
+        PAJs encaminhados para expedição de correspondência.
+    </p>
+</div>
+
+<div class="mb-3" style="display:flex;align-items:center;gap:8px;">
+    <h2 class="font-display" style="font-size:17px;margin:0;">Correspondências Pendentes</h2>
+    <span class="pill">{{ pendentes|length }}</span>
+</div>
+
+{% if not pendentes %}
+<div class="fluent-card text-tertiary" style="padding:24px;text-align:center;font-size:13.5px;">Nenhuma correspondência pendente.</div>
+{% else %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table">
+        <thead>
+            <tr>
+                <th style="width:8rem;">PAJ</th>
+                <th>Assistido</th>
+                <th>Ofício</th>
+                <th>Endereço(s)</th>
+                <th style="width:11rem;">Encaminhado em</th>
+                <th class="text-center" style="width:8rem;">Origem</th>
+                <th style="width:12rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for it in pendentes %}
+            <tr>
+                <td>
+                    <a href="{{ it.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+                       style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</a>
+                </td>
+                <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ it.oficio or "—" }}</td>
+                <td class="text-secondary" style="font-size:12px;white-space:pre-wrap;">{{ it.enderecos_txt or "—" }}</td>
+                <td class="text-secondary" style="font-size:12px;">
+                    {{ it.corr_em | data_hora_br }}
+                    {% if it.corr_de_ligacao %}<br><span class="text-tertiary">após {{ it.corr_tentativas_ligacao }} ligação(ões)</span>{% endif %}
+                </td>
+                <td class="text-center"><span class="pill" title="{{ it.grupo }}">{{ it.caixa_nome or it.grupo }}</span></td>
+                <td>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                        <button class="btn-subtle" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;cursor:not-allowed;opacity:.6;"
+                                disabled title="A expedição pelos Correios será implementada em seguida.">Expedir carta (em breve)</button>
+                        <button class="btn-subtle" style="padding:4px 10px;font-size:12.5px;white-space:nowrap;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                data-tipo="{{ it.corr_tipo }}" onclick="corrRemover(this)">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function corrRemover(btn) {
+    if (!confirm('Remover este PAJ da fila de correspondências?')) return;
+    try {
+        const r = await fetch('/api/correspondencia/cancelar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: btn.dataset.slug, paj_norm: btn.dataset.paj, id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite' }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) location.reload(); else alert('Erro: ' + (d.erro || 'falha'));
+    } catch (e) { alert('Erro: ' + e); }
+}
+</script>
+{% endblock %}

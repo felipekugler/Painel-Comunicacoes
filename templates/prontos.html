@@ -709,11 +709,25 @@ function gravarAbrir(btn) {
     const box = document.getElementById('grava-meios');
     box.innerHTML = '';
     MEIOS_ENVIO.forEach(m => {
+        // Encaminhamentos (Ligação/Carta): checkbox simples, sem prazo/somente-leitura.
+        if (m.tipo === 'encaminhamento') {
+            const rowE = document.createElement('div');
+            rowE.style.cssText = 'display:flex;align-items:center;gap:6px;min-height:34px;';
+            const labE = document.createElement('label');
+            labE.className = 'wa-opt';
+            labE.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '">' +
+                '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
+            labE.querySelectorAll('span')[0].textContent = m.label;
+            labE.querySelectorAll('span')[1].textContent = (m.key === 'telefone') ? '→ central de Ligações' : '→ central de Correspondências';
+            rowE.appendChild(labE);
+            box.appendChild(rowE);
+            return;
+        }
         const habil = disp[m.key];
         const marcado = habil && jaMeios.includes(m.key);
         const lab = document.createElement('label');
         lab.className = 'wa-opt' + (habil ? '' : ' opt-off');
-        lab.innerHTML = '<input type="checkbox" value="' + m.key + '"' + (marcado ? ' checked' : '') + (habil ? '' : ' disabled') + '>' +
+        lab.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '"' + (marcado ? ' checked' : '') + (habil ? '' : ' disabled') + '>' +
             '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
         lab.querySelectorAll('span')[0].textContent = m.label;
         if (!habil) lab.querySelectorAll('span')[1].textContent = '— ' + AVISO[m.key];
@@ -780,7 +794,7 @@ function gravarFechar() {
 }
 async function gravarSalvar() {
     const mensagem = document.getElementById('grava-texto').value.trim();
-    const meios = Array.from(document.querySelectorAll('#grava-meios input:checked')).map(c => c.value);
+    const meios = Array.from(document.querySelectorAll('#grava-meios input.meio-cb:checked')).map(c => c.value);
     const slCb = document.getElementById('grava-sl');
     const somente_leitura = !!(slCb && slCb.checked && meios.includes('app_sisdpu'));
     const prazoDe = (k) => { const el = document.getElementById('grava-prazo-' + k); let n = el ? parseInt(el.value, 10) : 5; if (isNaN(n)) n = 5; return n < 0 ? 0 : n; };  // 0 = sem prazo

@@ -104,7 +104,8 @@ def _default() -> dict:
         "comunicados_rev": 1,
         "comunicados": [{"id": uuid.uuid4().hex[:8], **c} for c in _COMUNICADOS_SEED],
         "paragrafos": [{"id": uuid.uuid4().hex[:8], **p} for p in _PARAGRAFOS_SEED],
-        "envio_modos": {"app_sisdpu": "simulado", "whatsapp": "simulado", "email": "simulado"},
+        "envio_modos": {"app_sisdpu": "simulado", "whatsapp": "simulado",
+                        "email": "simulado", "telefone": "simulado", "correspondencia": "simulado"},
         "prazos_predefinidos": list(PRAZOS_PREDEF_PADRAO),
         "caixas_disponiveis": [],
         "caixas": {},
@@ -265,8 +266,10 @@ def comunicados_rev() -> int:
 # registra "[simulado]" — para validar o fluxo antes de configurar cada meio.
 # "real": usa os handlers de envio_service (meios sem handler ficam pendentes).
 # Modo de envio POR MEIO (permite ligar 1 meio em real e manter os outros simulados).
-_MEIOS_ENVIO = ("app_sisdpu", "whatsapp")  # E-mail não implementado por ora (fica de fora)
-_MEIO_LABELS = {"app_sisdpu": "Aplicativo SISDPU", "whatsapp": "WhatsApp", "email": "E-mail"}
+_MEIOS_ENVIO = ("app_sisdpu", "whatsapp", "telefone", "correspondencia")  # E-mail não implementado por ora (fica de fora)
+_MEIO_LABELS = {"app_sisdpu": "Aplicativo SISDPU", "whatsapp": "WhatsApp",
+                "email": "E-mail", "telefone": "Ligações telefônicas",
+                "correspondencia": "Correspondências"}
 
 
 def _norm_modo(v) -> str:
