@@ -388,13 +388,34 @@
         .modo-badge.modo-ia .dot { background:var(--accent); }
         .modo-badge.modo-simples { color:var(--text-secondary); background:var(--layer-alt); }
         .modo-badge.modo-simples .dot { background:var(--text-tertiary); }
-        /* Selo de status do SISDPU (conectado/desconectado + usuário) */
-        .modo-badge.sisdpu-on { color:var(--c-zap); background:color-mix(in srgb, var(--c-zap) 14%, transparent); border-color:transparent; }
-        .modo-badge.sisdpu-on .dot { background:var(--c-zap); }
-        .modo-badge.sisdpu-off { color:var(--text-secondary); background:var(--layer-alt); }
-        .modo-badge.sisdpu-off .dot { background:var(--text-tertiary); }
-        .modo-badge.sisdpu-warn { color:#8a5a00; background:color-mix(in srgb, #c98a00 16%, transparent); border-color:#d9a441; }
-        .modo-badge.sisdpu-warn .dot { background:#d9a441; }
+        /* Selo de status de sistema (mesmo componente do PAINEL SISDPU) */
+        .sys-selo {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 3px 6px 3px 11px; border-radius: 999px;
+            font-size: 11.5px; font-weight: 600; white-space: nowrap;
+            border: 1px solid transparent; margin-left: 12px;
+        }
+        .sys-selo .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+        .sys-selo .txt { line-height: 1; }
+        .sys-selo.sys-on   { color: #1a7f4b; background: rgba(31,157,85,0.14); }
+        .sys-selo.sys-on   .dot { background: #1f9d55; }
+        .sys-selo.sys-off  { color: var(--text-secondary, #6b7280); background: rgba(120,120,120,0.12); }
+        .sys-selo.sys-off  .dot { background: var(--text-tertiary, #9ca3af); }
+        .sys-selo.sys-warn { color: #8a5a00; background: rgba(201,138,0,0.16); border-color: #d9a441; }
+        .sys-selo.sys-warn .dot { background: #d9a441; }
+        :root[data-theme="dark"] .sys-selo.sys-on   { color: #4ade80; }
+        :root[data-theme="dark"] .sys-selo.sys-warn { color: #e8b75a; }
+        .sys-recon {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 20px; height: 20px; border-radius: 999px;
+            border: none; background: transparent; color: inherit; cursor: pointer;
+            opacity: 0.7; transition: background 0.12s ease, opacity 0.12s ease;
+        }
+        .sys-recon:hover { opacity: 1; background: rgba(0,0,0,0.08); }
+        :root[data-theme="dark"] .sys-recon:hover { background: rgba(255,255,255,0.14); }
+        .sys-recon svg { width: 13px; height: 13px; }
+        .sys-recon.girando svg { animation: sys-spin 0.8s linear infinite; }
+        @keyframes sys-spin { to { transform: rotate(360deg); } }
         @media (max-width: 768px) {
             .sidebar { width: 100%; min-height: auto; position: relative; transform: none !important; }
             .sidebar.hidden { transform: none !important; }
@@ -452,6 +473,16 @@
                 {% if cx.qtd is defined %}<span class="text-tertiary" style="font-size:12px;">({{ cx.qtd }})</span>{% endif %}
             </a>
             {% endfor %}
+            {# ===== Ligações telefônicas (central da rotina de contato por ligação) —
+                    SEMPRE visível, acima de "Prontos para Envio" ===== #}
+            {% set _lig = contar_ligacoes() %}
+            <a href="/ligacoes" class="nav-item {% if request.url.path == '/ligacoes' %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" style="color:var(--c-tel);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+                </svg>
+                <span style="flex:1;min-width:0;">Ligações telefônicas</span>
+                {% if _lig.aguardando %}<span class="text-tertiary" style="font-size:12.5px;">({{ _lig.aguardando }})</span>{% endif %}
+            </a>
             {% set _pc = prontos_por_meio() %}
             <a href="/prontos" class="nav-item {% if request.url.path.startswith('/prontos') or request.url.path == '/correspondencias' %}active{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
@@ -467,11 +498,15 @@
                 'telefone': 'M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z',
                 'carta': 'M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0H4.875',
             } %}
+            {# Cor identificadora de cada meio (mesmo padrão das telas de envio). #}
+            {% set _subcores = {'app': '--c-app', 'whatsapp': '--c-zap', 'email': '--c-mail', 'telefone': '--c-tel', 'carta': '--c-addr'} %}
             {% for slug, key, lab in prontos_meios %}
-            {# Submenu do meio aparece SÓ se houver itens gravados para ele #}
-            {% if _pc[slug] %}
+            {# Submenus de envio por MENSAGEM (App/WhatsApp) — SEMPRE visíveis, mesmo
+               vazios, para dar acesso ao "Log dos últimos envios". E-mail está inativo;
+               Telefone/Carta têm itens próprios (Ligações/Correspondências). #}
+            {% if slug in ['app', 'whatsapp'] %}
             <a href="/prontos/{{ slug }}" class="nav-item nav-sub {% if request.url.path == '/prontos/' ~ slug %}active{% endif %}">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" style="color:var({{ _subcores[slug] }});">
                     <path stroke-linecap="round" stroke-linejoin="round" d="{{ _subicons[slug] }}" />
                 </svg>
                 <span style="flex:1;min-width:0;">{{ lab }}</span>
@@ -479,36 +514,22 @@
             </a>
             {% endif %}
             {% endfor %}
-            {# ===== Correspondências: subitem de "Prontos para Envio" — só aparece com itens (como App/WhatsApp) ===== #}
+            {# ===== Correspondências: subitem de "Prontos para Envio" — SEMPRE visível ===== #}
             {% set _corr = contar_correspondencias() %}
-            {% if _corr.total %}
             <a href="/correspondencias" class="nav-item nav-sub {% if request.url.path == '/correspondencias' %}active{% endif %}">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" style="color:var(--c-addr);">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5v4.5h-7.5z" />
                     <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 8.25 3.75 2.4 3.75-2.4" />
                 </svg>
                 <span style="flex:1;min-width:0;">Correspondências</span>
-                <span class="text-tertiary" style="font-size:12px;">({{ _corr.total }})</span>
+                {% if _corr.total %}<span class="text-tertiary" style="font-size:12px;">({{ _corr.total }})</span>{% endif %}
             </a>
-            {% endif %}
-            {# ===== Ligações telefônicas (central da rotina de contato por ligação) —
-                    só aparece quando há itens nas tabelas (pendentes + feitas) ===== #}
-            {% set _lig = contar_ligacoes() %}
-            {% if _lig.total %}
-            <a href="/ligacoes" class="nav-item {% if request.url.path == '/ligacoes' %}active{% endif %}">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-                </svg>
-                <span style="flex:1;min-width:0;">Ligações telefônicas</span>
-                {% if _lig.aguardando %}<span class="text-tertiary" style="font-size:12.5px;">({{ _lig.aguardando }})</span>{% endif %}
-            </a>
-            {% endif %}
             <a href="/historico" class="nav-item {% if request.url.path == '/historico' %}active{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
-                Histórico de mensagens
+                Histórico de contatos
             </a>
         </nav>
 
@@ -573,17 +594,16 @@
             {% endif %}
             {% set _sconflito = (sisdpu_destrancado() and sisdpu_conflito()) %}
             {% set _sconect = (sisdpu_destrancado() or sisdpu_env()) %}
-            <span id="sisdpu-badge" class="modo-badge {{ 'sisdpu-warn' if _sconflito else ('sisdpu-on' if _sconect else 'sisdpu-off') }}"
-                  title="{% if _sconflito %}Conflito de sessão do SISDPU (login em outra estação) — clique em Reconectar.{% elif _sconect %}Conectado ao SISDPU{% if sisdpu_usuario() %} — usuário {{ sisdpu_usuario() }}{% endif %}. Pronto para sincronizar e enviar.{% else %}Desconectado — a senha-mestra será pedida ao acionar uma função do SISDPU.{% endif %}">
-                <span class="dot"></span>{% if _sconflito %}SISDPU · conflito de sessão{% elif _sconect %}SISDPU{% if sisdpu_usuario() %} · {{ sisdpu_usuario() }}{% endif %}{% else %}SISDPU desconectado{% endif %}</span>
-            <button type="button" id="btn-reconectar-sisdpu" class="btn-subtle" onclick="reconectarSisdpu()"
-                    title="Reconectar a sessão do SISDPU (use em caso de conflito de sessão)"
-                    style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;font-size:11.5px;margin-left:8px;">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9" style="width:14px;height:14px;">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
-                </svg>
-                Reconectar
-            </button>
+            <span id="sisdpu-badge" class="sys-selo {{ 'sys-warn' if _sconflito else ('sys-on' if _sconect else 'sys-off') }}"
+                  title="{% if _sconflito %}Conflito de sessão do SISDPU (login em outra estação) — clique em reconectar.{% elif _sconect %}Conectado ao SISDPU{% if sisdpu_usuario() %} — usuário {{ sisdpu_usuario() }}{% endif %}. Pronto para sincronizar e enviar.{% else %}Desconectado — a senha-mestra será pedida ao acionar uma função do SISDPU.{% endif %}">
+                <span class="dot"></span><span class="txt">{% if _sconflito %}SISDPU · conflito{% elif _sconect %}SISDPU{% if sisdpu_usuario() %} · {{ sisdpu_usuario() }}{% endif %}{% else %}SISDPU desconectado{% endif %}</span>
+                <button type="button" class="sys-recon" onclick="reconectarSisdpu()"
+                        title="Reconectar a sessão do SISDPU (recupera de conflito / sessão derrubada por outro login).">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                </button>
+            </span>
             {% if sisdpu_destrancado() %}
             <button type="button" id="btn-bloquear-sisdpu" class="btn-subtle" onclick="bloquearPainel()"
                     title="Bloquear o painel: esquece as credenciais do SISDPU da memória (a senha-mestra será pedida novamente ao usar uma função do SISDPU)"
@@ -702,26 +722,28 @@
         // Atualiza o selo de status do SISDPU no cabeçalho (após desbloquear, sem recarregar).
         window.atualizarBadgeSisdpu = function(){
             const el = document.getElementById('sisdpu-badge'); if(!el) return;
+            // Atualiza classe/texto/título SEM apagar o botão-ícone de reconexão embutido.
+            const setSelo = (estado, texto, dica) => {
+                el.classList.remove('sys-on','sys-off','sys-warn');
+                el.classList.add('sys-' + estado);
+                const txt = el.querySelector('.txt'); if(txt) txt.textContent = texto;
+                el.title = dica;
+            };
             fetch('/api/seguranca/status').then(r => r.json()).then(st => {
                 if(!st || !st.ok) return;
                 const conflito = st.destrancado && st.conflito;
                 const conectado = st.destrancado || st.env_legado;
                 if(conflito){
-                    el.className = 'modo-badge sisdpu-warn';
-                    el.innerHTML = '<span class="dot"></span>SISDPU · conflito de sessão';
-                    el.title = st.conflito_detalhe
-                        || 'Conflito de sessão do SISDPU (login em outra estação) — clique em Reconectar.';
+                    setSelo('warn', 'SISDPU · conflito',
+                        st.conflito_detalhe || 'Conflito de sessão do SISDPU (login em outra estação) — clique em reconectar.');
                 } else if(conectado){
-                    el.className = 'modo-badge sisdpu-on';
-                    el.innerHTML = '<span class="dot"></span>SISDPU' + (st.usuario ? (' · ' + st.usuario) : '');
-                    el.title = 'Conectado ao SISDPU' + (st.usuario ? (' — usuário ' + st.usuario) : '')
-                             + '. Pronto para sincronizar e enviar.';
+                    setSelo('on', 'SISDPU' + (st.usuario ? (' · ' + st.usuario) : ''),
+                        'Conectado ao SISDPU' + (st.usuario ? (' — usuário ' + st.usuario) : '')
+                        + '. Pronto para sincronizar e enviar.');
                 } else {
-                    el.className = 'modo-badge sisdpu-off';
-                    el.innerHTML = '<span class="dot"></span>SISDPU desconectado';
-                    el.title = st.configurado
+                    setSelo('off', 'SISDPU desconectado', st.configurado
                         ? 'Desconectado — a senha-mestra será pedida ao acionar uma função do SISDPU.'
-                        : 'Sem credenciais — serão pedidas ao acionar uma função do SISDPU.';
+                        : 'Sem credenciais — serão pedidas ao acionar uma função do SISDPU.');
                 }
             }).catch(() => {});
         };
@@ -751,24 +773,24 @@
         };
         document.addEventListener('DOMContentLoaded', window.marcarLinksSisdpu);
         // Reconectar a sessão do SISDPU (recupera de conflito de sessão / sessão derrubada).
-        window.reconectarSisdpu = async function() {
+        window.reconectarSisdpu = async function(ev) {
             if (!(await window.garantirSisdpu())) return;
-            var btn = document.getElementById('btn-reconectar-sisdpu'); if (!btn) return;
-            var orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Reconectando…';
+            // Ícone de reconexão embutido no selo — gira durante a operação.
+            var icone = document.querySelector('#sisdpu-badge .sys-recon');
+            if (icone) icone.classList.add('girando');
             try {
                 var r = await fetch('/api/seguranca/reconectar', { method: 'POST' });
                 var d = await r.json().catch(function(){ return {}; });
                 if (d.ok) {
-                    btn.innerHTML = '✓ Reconectado';
-                    setTimeout(function(){ btn.innerHTML = orig; btn.disabled = false; }, 2500);
-                    if (window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
+                    if (typeof showToast === 'function') showToast('SISDPU reconectado.', 'success');
                 } else {
-                    btn.innerHTML = orig; btn.disabled = false;
                     alert('Não foi possível reconectar: ' + (d.detalhe || 'erro'));
                 }
             } catch (e) {
-                btn.innerHTML = orig; btn.disabled = false;
                 alert('Erro ao reconectar: ' + e);
+            } finally {
+                if (icone) icone.classList.remove('girando');
+                if (window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
             }
         };
         // Bloquear o painel: esquece as credenciais do SISDPU da memória (exige a
