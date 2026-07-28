@@ -37,6 +37,20 @@ WA_URL = "https://web.whatsapp.com"
 WA_CHANNEL = "chrome"
 
 
+def sessao_salva() -> bool:
+    """Readiness LEVE do WhatsApp, SEM abrir o navegador (o perfil persistente é
+    travado por 1 processo, então não dá para "pingar" a sessão a cada polling).
+    True se o perfil já foi usado/logado alguma vez — o WhatsApp Web mantém a sessão
+    salva no user_data_dir. Não garante que a sessão siga válida; para reconectar,
+    use o login por QR."""
+    try:
+        if not WA_PROFILE_DIR.exists():
+            return False
+        return any((WA_PROFILE_DIR / m).exists() for m in ("Default", "Local State"))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 async def abrir_contexto(p, headless: bool = True):
     """Abre o contexto persistente do WhatsApp (perfil dedicado + Chrome instalado).
     headless=False p/ o QR e produção (na máquina do servidor); headless=True p/ o

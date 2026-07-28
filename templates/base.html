@@ -494,9 +494,9 @@
             {% set _subicons = {
                 'app': 'M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-3 18.75h3',
                 'whatsapp': 'M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z',
-                'email': 'M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75',
+                'email': 'M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm0 0c0 1.657 1.007 3 2.25 3S21 13.657 21 12a9 9 0 1 0-2.636 6.364M16.5 12V8.25',
                 'telefone': 'M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z',
-                'carta': 'M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0H4.875',
+                'carta': 'M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75',
             } %}
             {# Cor identificadora de cada meio (mesmo padrão das telas de envio). #}
             {% set _subcores = {'app': '--c-app', 'whatsapp': '--c-zap', 'email': '--c-mail', 'telefone': '--c-tel', 'carta': '--c-addr'} %}
@@ -518,20 +518,22 @@
             {% set _corr = contar_correspondencias() %}
             <a href="/correspondencias" class="nav-item nav-sub {% if request.url.path == '/correspondencias' %}active{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.7" style="color:var(--c-addr);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5v4.5h-7.5z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 8.25 3.75 2.4 3.75-2.4" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
                 </svg>
                 <span style="flex:1;min-width:0;">Correspondências</span>
                 {% if _corr.total %}<span class="text-tertiary" style="font-size:12px;">({{ _corr.total }})</span>{% endif %}
             </a>
+        </nav>
+
+        <!-- Histórico de contatos (rodapé, logo acima de "Configurações") -->
+        <div class="px-3 pb-1">
             <a href="/historico" class="nav-item {% if request.url.path == '/historico' %}active{% endif %}">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
                 </svg>
                 Histórico de contatos
             </a>
-        </nav>
+        </div>
 
         <!-- Configurações (base do menu, logo acima de "Selecionar Caixas") -->
         <div class="px-3 pb-1">
@@ -585,13 +587,6 @@
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16" />
                 </svg>
             </button>
-            {% if ia_disponivel() %}
-            <span class="modo-badge modo-ia" title="Modo com IA: o Claude gera resumo, classificação e sugestão de mensagem na sincronização.">
-                <span class="dot"></span>Modo IA</span>
-            {% else %}
-            <span class="modo-badge modo-simples" title="Modo Simples: sem IA — as mensagens são escritas e os textos padrão aplicados manualmente.">
-                <span class="dot"></span>Modo Simples</span>
-            {% endif %}
             {% set _sconflito = (sisdpu_destrancado() and sisdpu_conflito()) %}
             {% set _sconect = (sisdpu_destrancado() or sisdpu_env()) %}
             <span id="sisdpu-badge" class="sys-selo {{ 'sys-warn' if _sconflito else ('sys-on' if _sconect else 'sys-off') }}"
@@ -599,6 +594,40 @@
                 <span class="dot"></span><span class="txt">{% if _sconflito %}SISDPU · conflito{% elif _sconect %}SISDPU{% if sisdpu_usuario() %} · {{ sisdpu_usuario() }}{% endif %}{% else %}SISDPU desconectado{% endif %}</span>
                 <button type="button" class="sys-recon" onclick="reconectarSisdpu()"
                         title="Reconectar a sessão do SISDPU (recupera de conflito / sessão derrubada por outro login).">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                </button>
+            </span>
+
+            {# Claude (IA) — on = Modo IA ativo; off = Modo Simples / indisponível #}
+            <span id="selo-claude" class="sys-selo {{ 'sys-on' if ia_disponivel() else 'sys-off' }}"
+                  title="{% if ia_disponivel() %}Claude conectado — Modo IA ativo (gera resumo, classificação e sugestão na sincronização).{% else %}Claude indisponível ou Modo Simples. Clique para testar a conexão.{% endif %}">
+                <span class="dot"></span><span class="txt">Claude</span>
+                <button type="button" class="sys-recon" onclick="reconectarSistema('claude', event)"
+                        title="Testar a conexão com o Claude (IA).">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                </button>
+            </span>
+
+            {# WhatsApp — status LEVE (sessão salva no perfil); reconectar abre o QR Code #}
+            <span id="selo-whatsapp" class="sys-selo sys-off" title="Verificando sessão do WhatsApp…">
+                <span class="dot"></span><span class="txt">WhatsApp</span>
+                <button type="button" class="sys-recon" onclick="reconectarSistema('whatsapp', event)"
+                        title="Abrir a janela do WhatsApp Web para ler o QR Code / reconectar.">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                    </svg>
+                </button>
+            </span>
+
+            {# Correios — status LEVE (credenciais no cofre); reconectar testa o login no CAS #}
+            <span id="selo-correios" class="sys-selo sys-off" title="Verificando acesso ao Correios…">
+                <span class="dot"></span><span class="txt">Correios</span>
+                <button type="button" class="sys-recon" onclick="reconectarSistema('correios', event)"
+                        title="Testar o acesso ao Correios (login no CAS).">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.9">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
                     </svg>
@@ -633,7 +662,7 @@
     <div class="toast-container" id="toast-container"></div>
 
     <!-- Modal global: desbloqueio/configuração do SISDPU (pedido só ao acionar função que usa o SISDPU) -->
-    <div id="sisdpu-modal" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;">
+    <div id="sisdpu-modal" style="display:none;position:fixed;inset:0;z-index:4000;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;">
       <div style="width:100%;max-width:400px;background:var(--layer,#fff);border:1px solid var(--stroke-strong,#c4d0cc);border-radius:14px;padding:24px;">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
           <span style="width:38px;height:38px;border-radius:50%;background:var(--accent-soft,#e8f0fd);color:var(--accent,#2f6feb);display:inline-flex;align-items:center;justify-content:center;flex:none;">
@@ -747,6 +776,93 @@
                 }
             }).catch(() => {});
         };
+        // ── Selos dos demais sistemas (Claude · WhatsApp · Correios) ──────────
+        // Atualizam classe/texto/título SEM apagar o botão-ícone de reconexão embutido.
+        function _setSeloSys(id, estado, texto, dica){
+            var el = document.getElementById(id); if(!el) return;
+            el.classList.remove('sys-on','sys-off','sys-warn');
+            el.classList.add('sys-' + estado);
+            var txt = el.querySelector('.txt'); if(txt) txt.textContent = texto;
+            el.title = dica || '';
+        }
+        window.atualizarSelosSistemas = function(){
+            // Claude (IA) — leve, não chama o Claude.
+            fetch('/api/ia/status').then(r => r.json()).then(st => {
+                if(!st || !st.ok) return;
+                if(st.disponivel) _setSeloSys('selo-claude','on','Claude',
+                    'Claude conectado — Modo IA ativo (resumo, classificação e sugestão na sincronização).');
+                else _setSeloSys('selo-claude','off','Claude · off', st.instalado
+                    ? 'Modo Simples (IA desligada nas Configurações). Clique para testar a conexão.'
+                    : 'Claude não detectado nesta máquina. Clique para testar a conexão.');
+            }).catch(() => {});
+            // WhatsApp — leve (sessão salva no perfil; não abre o navegador).
+            fetch('/api/whatsapp/status').then(r => r.json()).then(st => {
+                if(!st || !st.ok) return;
+                if(st.sessao) _setSeloSys('selo-whatsapp','on','WhatsApp',
+                    'Sessão do WhatsApp salva no perfil. Se cair, clique para reler o QR Code.');
+                else _setSeloSys('selo-whatsapp','off','WhatsApp desconectado',
+                    'Sem sessão salva. Clique para abrir o WhatsApp Web e ler o QR Code.');
+            }).catch(() => {});
+            // Correios — leve (credenciais no cofre; não abre o navegador).
+            fetch('/api/correios/status').then(r => r.json()).then(st => {
+                if(!st || !st.ok) return;
+                if(st.configurado && st.destrancado) _setSeloSys('selo-correios','on',
+                    'Correios' + (st.usuario ? (' · ' + st.usuario) : ''),
+                    'Credenciais do Correios prontas. Clique para testar o login no CAS.');
+                else if(st.cofre_existe && !st.destrancado) _setSeloSys('selo-correios','warn','Correios · trancado',
+                    'Cofre trancado — as credenciais não estão carregadas nesta sessão. Destranque com a senha-mestra (Reconectar) para conectar ao Correios.');
+                else _setSeloSys('selo-correios','off','Correios · sem credenciais',
+                    'Cadastre as credenciais do Correios em Configurações → Acesso.');
+            }).catch(() => {});
+        };
+        // Reconexão/ação por sistema (Claude/WhatsApp/Correios). SISDPU tem reconectarSisdpu().
+        window.reconectarSistema = async function(sys, ev){
+            var btn = ev && ev.currentTarget ? ev.currentTarget : null;
+            if(btn) btn.classList.add('girando');
+            try {
+                if(sys === 'claude'){
+                    var r = await fetch('/api/ia/testar', { method: 'POST' });
+                    var d = await r.json().catch(() => ({}));
+                    showToast(d.ok ? 'Claude conectado.' : ('Claude: ' + (d.detalhe || 'indisponível')),
+                              d.ok ? 'success' : 'error');
+                } else if(sys === 'whatsapp'){
+                    var r2 = await fetch('/api/whatsapp/login', { method: 'POST' });
+                    var d2 = await r2.json().catch(() => ({}));
+                    showToast(d2.ok ? 'Abrindo o WhatsApp Web — leia o QR Code na janela que abrir.'
+                                    : ('WhatsApp: ' + (d2.erro || 'falha ao abrir')), d2.ok ? 'info' : 'error');
+                } else if(sys === 'correios'){
+                    if(!(await window.garantirSisdpu())) return;   // desbloqueia o cofre compartilhado
+                    var r3 = await fetch('/api/seguranca/testar-correios', { method: 'POST' });
+                    var d3 = await r3.json().catch(() => ({}));
+                    showToast(d3.ok ? 'Correios: acesso confirmado.'
+                                    : ('Correios: ' + (d3.detalhe || 'falha no login')), d3.ok ? 'success' : 'error');
+                }
+            } catch(e){ showToast('Erro: ' + e, 'error'); }
+            finally { if(btn) btn.classList.remove('girando'); window.atualizarSelosSistemas(); }
+        };
+        // Toast leve (só define se ainda não houver um global).
+        if(typeof window.showToast !== 'function'){
+            window.showToast = function(msg, tipo){
+                var t = document.createElement('div');
+                t.textContent = msg;
+                t.style.cssText = 'position:fixed;z-index:6000;left:50%;bottom:26px;transform:translateX(-50%);'
+                    + 'padding:10px 16px;border-radius:10px;font-size:13px;font-weight:600;max-width:80vw;text-align:center;'
+                    + 'box-shadow:0 6px 24px rgba(0,0,0,.18);color:#fff;background:'
+                    + (tipo === 'error' ? '#c0392b' : (tipo === 'success' ? '#1f9d55' : '#2563eb')) + ';';
+                document.body.appendChild(t);
+                setTimeout(function(){ t.style.transition = 'opacity .4s'; t.style.opacity = '0';
+                    setTimeout(function(){ t.remove(); }, 400); }, 3200);
+            };
+        }
+        // Atualiza todos os selos ao carregar e periodicamente (status LEVE, sem abrir navegador).
+        document.addEventListener('DOMContentLoaded', function(){
+            if(window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
+            if(window.atualizarSelosSistemas) window.atualizarSelosSistemas();
+            setInterval(function(){
+                if(window.atualizarBadgeSisdpu) window.atualizarBadgeSisdpu();
+                if(window.atualizarSelosSistemas) window.atualizarSelosSistemas();
+            }, 20000);
+        });
         // Botão "Sincronizar todas" da sidebar: se a página tiver a função (dashboard),
         // executa direto; caso contrário (ex: Configurações), vai para a 1ª caixa e
         // dispara automaticamente via ?sync=todas.
@@ -850,7 +966,7 @@
     </script>
 
     <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->
-    <div id="anx-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)anxFechar()">
+    <div id="anx-modal" class="wa-overlay" style="display:none;">
       <div class="fluent-card" style="width:50vw;max-height:86vh;overflow:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
             <h3 class="font-display" style="font-size:18px;margin:0;">
@@ -887,6 +1003,37 @@
             el.value = v;
             try { el.setSelectionRange(Math.max(0, p - 1), Math.max(0, p - 1)); } catch (e) {}
         }
+    };
+
+    // ---------- Parágrafos padrão: inserção NO CURSOR (compartilhado) ----------
+    // Rastreia a última posição do cursor do textarea (persiste mesmo após o foco sair
+    // para o checkbox do parágrafo). Chamar uma vez por textarea editável de mensagem.
+    window.rastrearCursor = (ta) => {
+        if (!ta || ta._cursorHook) return;
+        ta._cursorHook = true;
+        const upd = () => { ta.dataset.cursor = ta.selectionStart; };
+        ['keyup', 'click', 'select', 'input', 'focus', 'blur'].forEach(ev => ta.addEventListener(ev, upd));
+    };
+    // Insere `texto` na posição do cursor rastreado (fallback: fim), com uma linha em branco
+    // de separação antes/depois quando necessário. Reposiciona o cursor após o trecho inserido.
+    window.inserirNoCursor = (ta, texto) => {
+        if (!ta || !texto) return;
+        let pos = (ta.dataset.cursor !== undefined && ta.dataset.cursor !== '')
+                  ? parseInt(ta.dataset.cursor, 10) : ta.selectionStart;
+        if (isNaN(pos) || pos < 0 || pos > ta.value.length) pos = ta.value.length;
+        const antes = ta.value.slice(0, pos), depois = ta.value.slice(pos);
+        const sepA = (antes && !/\n\s*$/.test(antes)) ? '\n\n' : '';
+        const sepD = (depois && !/^\s*\n/.test(depois)) ? '\n\n' : '';
+        const bloco = sepA + texto + sepD;
+        ta.value = antes + bloco + depois;
+        const cur = (antes + bloco).length;
+        ta.dataset.cursor = cur;
+        try { ta.focus(); ta.setSelectionRange(cur, cur); } catch (e) {}
+    };
+    // Remove o `texto` de um parágrafo do textarea (usado ao desmarcar), limpando espaços extras.
+    window.removerTexto = (ta, texto) => {
+        if (!ta || !texto) return;
+        ta.value = ta.value.split(texto).join('').replace(/\n{3,}/g, '\n\n').trim();
     };
 
     // ---------- Anexos (componente compartilhado) ----------

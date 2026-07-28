@@ -32,7 +32,10 @@ CRED_FILE = DADOS_DIR / "_credenciais.enc"
 _ITERACOES = 240_000  # custo do PBKDF2 (dificulta força bruta da senha-mestra)
 
 # Estado em MEMÓRIA da sessão atual (nunca persistido).
-_estado: dict = {"destrancado": False, "usuario": "", "senha": ""}
+# Guarda as credenciais do SISDPU e, opcionalmente, as do Correios/CAS (mesmo cofre,
+# mesma senha-mestra) — usadas pelo correios_client no login headless da expedição.
+_estado: dict = {"destrancado": False, "usuario": "", "senha": "",
+                 "correios_usuario": "", "correios_senha": ""}
 
 # Estado da CONEXÃO com o SISDPU (saúde da sessão do painel), atualizado pelas
 # operações do sisdpu_client: 'conflito' fica True quando é detectado conflito de
@@ -78,21 +81,62 @@ def destrancado() -> bool:
     return bool(_estado["destrancado"])
 
 
+def _gravar_vault(dados: dict, senha_mestra: str) -> None:
+    """Cifra o dict de credenciais (SISDPU + Correios) com a senha-mestra e grava."""
+    DADOS_DIR.mkdir(parents=True, exist_ok=True)
+    salt = os.urandom(16)
+    token = Fernet(_derivar_chave(senha_mestra, salt)).encrypt(
+        json.dumps(dados).encode("utf-8"))
+    CRED_FILE.write_text(
+        json.dumps({"v": 2, "salt": base64.b64encode(salt).decode(), "token": token.decode()}),
+        encoding="utf-8")
+
+
 def salvar(usuario: str, senha: str, senha_mestra: str) -> None:
-    """Cifra usuario+senha do SISDPU com a senha-mestra e grava em disco.
-    Também deixa a sessão já DESTRANCADA (as credenciais entram na memória)."""
+    """Cifra usuario+senha do SISDPU com a senha-mestra e grava em disco (preservando
+    as credenciais do Correios já em memória, se houver). Deixa a sessão DESTRANCADA."""
     usuario = (usuario or "").strip()
     senha = senha or ""
     if not usuario or not senha or not (senha_mestra or ""):
         raise ValueError("Usuário, senha do SISDPU e senha-mestra são obrigatórios.")
-    DADOS_DIR.mkdir(parents=True, exist_ok=True)
-    salt = os.urandom(16)
-    token = Fernet(_derivar_chave(senha_mestra, salt)).encrypt(
-        json.dumps({"usuario": usuario, "senha": senha}).encode("utf-8"))
-    CRED_FILE.write_text(
-        json.dumps({"v": 1, "salt": base64.b64encode(salt).decode(), "token": token.decode()}),
-        encoding="utf-8")
+    _gravar_vault({"usuario": usuario, "senha": senha,
+                   "correios_usuario": _estado.get("correios_usuario", ""),
+                   "correios_senha": _estado.get("correios_senha", "")}, senha_mestra)
     _estado.update(destrancado=True, usuario=usuario, senha=senha)
+
+
+def salvar_correios(usuario: str, senha: str, senha_mestra: str) -> None:
+    """Grava as credenciais do Correios/CAS no MESMO cofre (recifra tudo com a
+    senha-mestra). Exige o painel já DESTRANCADO (credenciais do SISDPU em memória,
+    para não perdê-las) e a senha-mestra correta."""
+    usuario = (usuario or "").strip()
+    senha = senha or ""
+    if not usuario or not senha or not (senha_mestra or ""):
+        raise ValueError("Usuário, senha do Correios e senha-mestra são obrigatórios.")
+    # As credenciais do SISDPU precisam estar em memória (cofre único). Se o painel
+    # estiver BLOQUEADO, a própria senha-mestra do formulário desbloqueia agora.
+    if not destrancado():
+        if not destrancar(senha_mestra):
+            raise ValueError("Senha-mestra incorreta — ou o acesso ao SISDPU ainda não foi "
+                             "configurado. Configure o SISDPU primeiro (aba 'Acesso ao SISDPU').")
+    elif configurado() and not _senha_mestra_confere(senha_mestra):
+        raise ValueError("Senha-mestra incorreta.")
+    _gravar_vault({"usuario": _estado.get("usuario", ""), "senha": _estado.get("senha", ""),
+                   "correios_usuario": usuario, "correios_senha": senha}, senha_mestra)
+    _estado.update(correios_usuario=usuario, correios_senha=senha)
+
+
+def _senha_mestra_confere(senha_mestra: str) -> bool:
+    """True se a senha-mestra decifra o cofre atual (sem alterar o estado em memória)."""
+    if not CRED_FILE.exists():
+        return True  # ainda não há cofre — qualquer senha-mestra inicia um novo
+    try:
+        d = json.loads(CRED_FILE.read_text(encoding="utf-8"))
+        salt = base64.b64decode(d["salt"])
+        Fernet(_derivar_chave(senha_mestra or "", salt)).decrypt(d["token"].encode("utf-8"))
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def destrancar(senha_mestra: str) -> bool:
@@ -109,7 +153,9 @@ def destrancar(senha_mestra: str) -> bool:
         return False
     except Exception:  # noqa: BLE001 — qualquer falha = senha errada / arquivo corrompido
         return False
-    _estado.update(destrancado=True, usuario=dados.get("usuario", ""), senha=dados.get("senha", ""))
+    _estado.update(destrancado=True, usuario=dados.get("usuario", ""), senha=dados.get("senha", ""),
+                   correios_usuario=dados.get("correios_usuario", ""),
+                   correios_senha=dados.get("correios_senha", ""))
     return True
 
 
@@ -120,14 +166,32 @@ def get_credenciais() -> tuple[str, str] | None:
     return None
 
 
+def get_credenciais_correios() -> tuple[str, str] | None:
+    """(usuario, senha) do Correios/CAS se destrancado e cadastrado; None caso contrário."""
+    if _estado["destrancado"] and _estado["correios_usuario"] and _estado["correios_senha"]:
+        return _estado["correios_usuario"], _estado["correios_senha"]
+    return None
+
+
+def correios_configurado() -> bool:
+    """True se, nesta sessão destrancada, há credenciais do Correios cadastradas.
+    (Só é conhecível quando destrancado — o cofre em disco é opaco.)"""
+    return bool(_estado["destrancado"] and _estado["correios_usuario"])
+
+
 def get_usuario() -> str:
     """Usuário do SISDPU carregado (só quando destrancado) — para exibição."""
     return _estado["usuario"] if _estado["destrancado"] else ""
 
 
+def get_correios_usuario() -> str:
+    """Usuário do Correios carregado (só quando destrancado) — para exibição."""
+    return _estado["correios_usuario"] if _estado["destrancado"] else ""
+
+
 def bloquear() -> None:
     """Esquece as credenciais da memória (tranca de novo). O cofre em disco fica."""
-    _estado.update(destrancado=False, usuario="", senha="")
+    _estado.update(destrancado=False, usuario="", senha="", correios_usuario="", correios_senha="")
     _conexao.update(conflito=False, detalhe="")  # trancado = sem sessão/conexão
 
 

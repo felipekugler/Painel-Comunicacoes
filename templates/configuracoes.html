@@ -88,6 +88,7 @@
         <button class="cfg-subtab" data-subtab="acc-sisdpu" onclick="abrirSubTab('acc-sisdpu')">SISDPU</button>
         <button class="cfg-subtab" data-subtab="acc-claude" onclick="abrirSubTab('acc-claude')">Claude</button>
         <button class="cfg-subtab" data-subtab="acc-whatsapp" onclick="abrirSubTab('acc-whatsapp')">WhatsApp</button>
+        <button class="cfg-subtab" data-subtab="acc-correios" onclick="abrirSubTab('acc-correios')">Correios</button>
     </div>
 
     <!-- Subaba: SISDPU -->
@@ -155,6 +156,76 @@
         </script>
     </div>
     </div><!-- /acc-sisdpu -->
+
+    <!-- Subaba: Correios -->
+    <div class="cfg-subpanel" data-subpanel="acc-correios">
+    <div class="fluent-card" style="padding:22px;max-width:720px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Acesso ao Correios (e-Carta)</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Credenciais do <strong>SMT dos Correios</strong> (login do CAS) usadas para expedir cartas.
+            Ficam <strong>cifradas no mesmo cofre</strong>, protegidas pela sua <strong>senha-mestra</strong>.
+        </p>
+        <div style="font-size:13.5px;margin-bottom:14px;">
+            Situação:
+            {% if not seg_destrancado %}
+                <strong style="color:#a06500;">painel bloqueado</strong> — desbloqueie com a senha-mestra para cadastrar/ver.
+            {% elif seg_correios_configurado %}
+                <strong style="color:var(--c-zap);">cadastrado</strong> — usuário <span style="font-family:'Cascadia Code',monospace;">{{ seg_correios_usuario }}</span>.
+            {% else %}
+                <strong>sem credenciais do Correios</strong> — cadastre abaixo.
+            {% endif %}
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr;gap:10px;max-width:420px;">
+            <label style="font-size:13px;">Usuário do Correios
+                <input type="text" id="corr-usuario" class="wa-input" style="width:100%;margin-top:3px;"
+                       value="{{ seg_correios_usuario }}" autocomplete="off"></label>
+            <label style="font-size:13px;">Senha do Correios
+                <input type="password" id="corr-senha" class="wa-input" style="width:100%;margin-top:3px;" autocomplete="new-password"></label>
+            <label style="font-size:13px;">Senha-mestra (para gravar no cofre)
+                <input type="password" id="corr-mestra" class="wa-input" style="width:100%;margin-top:3px;" autocomplete="off"></label>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px;">
+            <button type="button" class="btn-accent" onclick="salvarCredCorreios()">Salvar credenciais do Correios</button>
+            <button type="button" id="btn-testar-correios" class="btn-subtle" onclick="testarCorreios()">Testar acesso ao Correios</button>
+        </div>
+        <div id="corr-cred-status" style="margin-top:12px;font-size:13px;line-height:1.5;display:none;"></div>
+        <p class="text-tertiary" style="font-size:11.5px;margin:8px 0 0;">O teste faz um login real (headless) no CAS/Correios com as credenciais salvas.</p>
+        <script>
+        async function salvarCredCorreios(){
+            const st=document.getElementById('corr-cred-status');
+            const u=document.getElementById('corr-usuario').value.trim();
+            const s=document.getElementById('corr-senha').value;
+            const m=document.getElementById('corr-mestra').value;
+            st.style.display='block'; st.style.color='var(--text-secondary)';
+            if(!u||!s||!m){ st.style.color='var(--c-red)'; st.textContent='Preencha usuário, senha do Correios e a senha-mestra.'; return; }
+            st.textContent='Salvando…';
+            try{
+                const r=await fetch('/api/credenciais-correios',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usuario:u,senha:s,senha_mestra:m})});
+                const d=await r.json().catch(()=>({}));
+                if(d.ok){ document.getElementById('corr-senha').value=''; document.getElementById('corr-mestra').value='';
+                    st.style.color='var(--c-zap)'; st.textContent='✓ Credenciais do Correios salvas.'; setTimeout(()=>location.reload(),900); }
+                else { st.style.color='var(--c-red)'; st.textContent='✗ '+(d.erro||'Falha ao salvar.'); }
+            }catch(e){ st.style.color='var(--c-red)'; st.textContent='✗ Erro: '+e; }
+        }
+        async function testarCorreios(){
+            const btn=document.getElementById('btn-testar-correios'), st=document.getElementById('corr-cred-status');
+            const orig=btn.textContent; btn.disabled=true; btn.textContent='Testando…';
+            st.style.display='block'; st.style.color='var(--text-secondary)';
+            st.textContent='Fazendo login no CAS/Correios… (pode levar alguns segundos)';
+            try{
+                const r=await fetch('/api/seguranca/testar-correios',{method:'POST'});
+                const d=await r.json().catch(()=>({}));
+                if(d.ok){ st.style.color='var(--c-zap)'; st.textContent='✓ '+(d.detalhe||'Acesso ao Correios confirmado.'); }
+                else if(d.status==='credenciais'){ st.style.color='var(--c-red)'; st.textContent='✗ '+(d.detalhe||'Usuário/senha do Correios recusados.'); }
+                else if(d.status==='indisponivel'){ st.style.color='#a06500'; st.textContent='⚠ '+(d.detalhe||'Cadastre as credenciais e desbloqueie o painel.'); }
+                else { st.style.color='#a06500'; st.textContent='⚠ '+(d.detalhe||'Não foi possível testar agora.'); }
+            }catch(e){ st.style.color='var(--c-red)'; st.textContent='✗ Erro ao testar: '+e; }
+            finally{ btn.disabled=false; btn.textContent=orig; }
+        }
+        </script>
+    </div>
+    </div><!-- /acc-correios -->
 
     <!-- Subaba: Claude -->
     <div class="cfg-subpanel" data-subpanel="acc-claude">
@@ -435,6 +506,62 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Correspondências / Carta (Correios)</h2>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Padrões usados na expedição de <strong>e-Carta</strong> pelos Correios. O <strong>corpo</strong> da carta é
+            gerado pela IA (adaptação da Sugestão IA para linguagem simples e direta); aqui você define o
+            <strong>cabeçalho</strong> e o <strong>rodapé</strong> fixos, o prazo de aguardo e a caixa de tramitação.
+        </p>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Cabeçalho da carta</h3>
+        <textarea id="carta-cabecalho" class="wa-input" rows="2" style="width:100%;max-width:640px;resize:vertical;">{{ carta_cabecalho }}</textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px;">
+            <button class="btn-accent" onclick="saveCartaCabecalho()">Salvar cabeçalho</button>
+            <span id="carta-cabecalho-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+
+        <div class="grava-sep" style="margin:14px 0;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Rodapé da carta</h3>
+        <textarea id="carta-rodape" class="wa-input" rows="2" style="width:100%;max-width:640px;resize:vertical;">{{ carta_rodape }}</textarea>
+        <div style="display:flex;align-items:center;gap:10px;margin:8px 0 4px;">
+            <button class="btn-accent" onclick="saveCartaRodape()">Salvar rodapé</button>
+            <span id="carta-rodape-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+
+        <div class="grava-sep" style="margin:14px 0;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Prazo de aguardo após a entrega</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 10px;">
+            Após expedir a carta, o PAJ é tramitado aguardando retorno. O prazo de conclusão = <strong>previsão de entrega + N dias</strong>.
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+            <label for="carta-prazo-pos" style="font-size:14px;">Dias após a previsão:</label>
+            <input type="number" id="carta-prazo-pos" class="wa-input" style="width:90px;" min="0" max="365" value="{{ carta_prazo_pos_entrega }}">
+            <button class="btn-accent" onclick="saveCartaPrazoPos()">Salvar</button>
+            <span id="carta-prazo-pos-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+
+        <div class="grava-sep" style="margin:14px 0;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Caixa de tramitação (aguardo de retorno)</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 10px;">
+            Para onde o PAJ é tramitado após a expedição bem-sucedida da carta.
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <select id="carta-caixa" class="grava-tramitar-sel">
+                <option value="{{ carta_caixa_tramitacao }}" selected>{{ carta_caixa_tramitacao }}</option>
+                {% for g in grupos_unidade %}{% if g != carta_caixa_tramitacao %}<option value="{{ g }}">{{ g }}</option>{% endif %}{% endfor %}
+            </select>
+            <button class="btn-accent" onclick="saveCartaCaixa()">Salvar</button>
+            <span id="carta-caixa-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        {% if not grupos_unidade %}
+        <p class="text-tertiary" style="font-size:12px;margin:10px 0 0;">Lista de caixas ainda não carregada — abra "Gravar para envio" uma vez (ou sincronize) para o painel buscar as caixas do SISDPU. A caixa padrão continua válida.</p>
+        {% endif %}
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Modo de envio (por meio)</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             <strong>Simulado</strong>: valida o fluxo sem disparar nada. <strong>Real</strong>: dispara de verdade ao
@@ -456,7 +583,7 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
-        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Backups do histórico de mensagens</h2>
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Backups do histórico de contatos</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             Cópias de segurança do histórico geradas automaticamente (antes de cada limpeza e a cada gravação).
             Restaurar substitui o histórico atual pelo backup escolhido — o estado atual é salvo antes, então dá para desfazer.
@@ -655,7 +782,7 @@
             color:var(--text-secondary); font-size:13px; border-radius:8px; padding:12px 16px; margin-bottom:18px; }
 </style>
 
-<div id="com-modal" class="cfg-overlay" onclick="if(event.target===this)comFechar()">
+<div id="com-modal" class="cfg-overlay">
   <div class="fluent-card cfg-dialog">
     <h3 class="font-display" id="com-modal-titulo" style="font-size:18px;margin:0 0 16px;">Novo comunicado</h3>
     <input type="hidden" id="com-id"><input type="hidden" id="com-slug">
@@ -680,7 +807,7 @@
   </div>
 </div>
 
-<div id="par-modal" class="cfg-overlay" onclick="if(event.target===this)parFechar()">
+<div id="par-modal" class="cfg-overlay">
   <div class="fluent-card cfg-dialog">
     <h3 class="font-display" id="par-modal-titulo" style="font-size:18px;margin:0 0 16px;">Novo parágrafo</h3>
     <input type="hidden" id="par-id"><input type="hidden" id="par-slug">
@@ -757,7 +884,7 @@ async function resetarPainel(total){
 }
 async function restaurarBackup(btn){
     const nome=btn.dataset.nome, n=btn.dataset.registros||'?', quando=btn.dataset.quando||'';
-    if(!confirm('Restaurar o histórico de mensagens com este backup'+(quando?(' de '+quando):'')+'?\n\n'+
+    if(!confirm('Restaurar o histórico de contatos com este backup'+(quando?(' de '+quando):'')+'?\n\n'+
         'Ele passará a ter '+n+' mensagem(ns), substituindo o histórico atual. O estado atual é salvo antes (dá para desfazer).')) return;
     try{
         const r=await fetch('/api/historico/restaurar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome})});
@@ -914,6 +1041,28 @@ async function savePrazoTramPadrao(){
     const d=await r.json();
     if(d.ok){ el.value=d.dias; st.textContent=''; toast('Prazo padrão salvo ('+d.dias+' dias)'); }
     else { st.textContent='Falha ao salvar.'; }
+}
+async function _saveCartaTexto(url, elId, stId, rotulo){
+    const el=document.getElementById(elId), st=document.getElementById(stId);
+    const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({texto:el.value})});
+    const d=await r.json();
+    if(d.ok){ st.textContent=''; toast(rotulo+' salvo'); } else { st.textContent='Falha ao salvar.'; }
+}
+async function saveCartaCabecalho(){ await _saveCartaTexto('/api/config/carta-cabecalho','carta-cabecalho','carta-cabecalho-status','Cabeçalho'); }
+async function saveCartaRodape(){ await _saveCartaTexto('/api/config/carta-rodape','carta-rodape','carta-rodape-status','Rodapé'); }
+async function saveCartaPrazoPos(){
+    const el=document.getElementById('carta-prazo-pos'), st=document.getElementById('carta-prazo-pos-status');
+    const dias=parseInt(el.value,10);
+    if(!Number.isInteger(dias) || dias<0 || dias>365){ st.textContent='Informe de 0 a 365 dias.'; return; }
+    const r=await fetch('/api/config/carta-prazo-pos-entrega',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dias})});
+    const d=await r.json();
+    if(d.ok){ el.value=d.dias; st.textContent=''; toast('Prazo salvo ('+d.dias+' dias após a entrega)'); } else { st.textContent='Falha ao salvar.'; }
+}
+async function saveCartaCaixa(){
+    const el=document.getElementById('carta-caixa'), st=document.getElementById('carta-caixa-status');
+    const r=await fetch('/api/config/carta-caixa-tramitacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({caixa:el.value})});
+    const d=await r.json();
+    if(d.ok){ st.textContent=''; toast('Caixa de tramitação salva'); } else { st.textContent='Falha ao salvar.'; }
 }
 async function addGrupoFav(){
     const el=document.getElementById('novo-grupo-fav'); const g=el.value;

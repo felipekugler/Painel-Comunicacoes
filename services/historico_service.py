@@ -2,7 +2,7 @@
 
 Registro append-only em dados/_historico/mensagens.jsonl (uma linha JSON por
 mensagem enviada). Independe da caixa: reúne tudo o que foi disparado pelo
-painel, para consulta/pesquisa na página "Histórico de mensagens".
+painel, para consulta/pesquisa na página "Histórico de contatos".
 
 Cada registro é POR MEIO (uma linha por meio disparado), para permitir filtro,
 acompanhamento e baixa por canal:

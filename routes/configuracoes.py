@@ -48,6 +48,10 @@ async def configuracoes(request: Request):
         layout_pendentes=config_service.get_layout_pendentes(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         prazo_tramitacao_padrao=config_service.get_prazo_tramitacao_padrao(),
+        carta_cabecalho=config_service.get_carta_cabecalho(),
+        carta_rodape=config_service.get_carta_rodape(),
+        carta_prazo_pos_entrega=config_service.get_carta_prazo_pos_entrega(),
+        carta_caixa_tramitacao=config_service.get_carta_caixa_tramitacao(),
         grupos_favoritos=config_service.get_grupos_favoritos(),
         grupos_unidade=config_service.get_grupos_unidade(),
         grupos_favoritos_max=config_service.GRUPOS_FAVORITOS_MAX,
@@ -65,6 +69,8 @@ async def configuracoes(request: Request):
         seg_destrancado=credenciais_service.destrancado(),
         seg_env_legado=credenciais_service.env_tem_credenciais(),
         seg_usuario=credenciais_service.get_usuario(),
+        seg_correios_configurado=credenciais_service.correios_configurado(),
+        seg_correios_usuario=credenciais_service.get_correios_usuario(),
     ))
 
 
@@ -151,6 +157,22 @@ async def api_testar_ia():
     return JSONResponse(res, status_code=200 if res.get("ok") else 400)
 
 
+@router.get("/api/ia/status", response_class=JSONResponse)
+async def api_ia_status():
+    """Status LEVE do Claude/IA para o selo do cabeçalho (NÃO chama o Claude):
+    reflete o modo efetivo (config + instalação). O teste REAL é POST /api/ia/testar."""
+    return {"ok": True, "disponivel": analise_service.disponivel(),
+            "instalado": analise_service.claude_instalado()}
+
+
+@router.get("/api/whatsapp/status", response_class=JSONResponse)
+async def api_whatsapp_status():
+    """Status LEVE do WhatsApp para o selo (SEM abrir o navegador — o perfil é travado
+    por 1 processo). Reflete se há sessão salva no perfil persistente."""
+    from ingestao import whatsapp_client
+    return {"ok": True, "sessao": whatsapp_client.sessao_salva()}
+
+
 @router.post("/api/config/abrir-tela-cheia", response_class=JSONResponse)
 async def set_abrir_tela_cheia(payload: dict = Body(...)):
     """Liga/desliga a abertura do painel em TELA CHEIA no lançador (Painel-Comunicacoes.bat).
@@ -181,6 +203,34 @@ async def set_prazo_tramitacao_padrao(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "dias": config_service.set_prazo_tramitacao_padrao(n)}
+
+
+@router.post("/api/config/carta-cabecalho", response_class=JSONResponse)
+async def set_carta_cabecalho(payload: dict = Body(...)):
+    """Cabeçalho padrão da carta (e-Carta/Correios)."""
+    return {"ok": True, "texto": config_service.set_carta_cabecalho((payload or {}).get("texto", ""))}
+
+
+@router.post("/api/config/carta-rodape", response_class=JSONResponse)
+async def set_carta_rodape(payload: dict = Body(...)):
+    """Rodapé padrão da carta (e-Carta/Correios)."""
+    return {"ok": True, "texto": config_service.set_carta_rodape((payload or {}).get("texto", ""))}
+
+
+@router.post("/api/config/carta-prazo-pos-entrega", response_class=JSONResponse)
+async def set_carta_prazo_pos_entrega(payload: dict = Body(...)):
+    """Dias somados à previsão de entrega para o prazo da tramitação de aguardo (0–365)."""
+    try:
+        n = int((payload or {}).get("dias"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
+    return {"ok": True, "dias": config_service.set_carta_prazo_pos_entrega(n)}
+
+
+@router.post("/api/config/carta-caixa-tramitacao", response_class=JSONResponse)
+async def set_carta_caixa_tramitacao(payload: dict = Body(...)):
+    """Caixa de grupo p/ tramitação após expedir a carta (aguardo de retorno)."""
+    return {"ok": True, "caixa": config_service.set_carta_caixa_tramitacao((payload or {}).get("caixa", ""))}
 
 
 @router.post("/api/config/grupos-favoritos", response_class=JSONResponse)

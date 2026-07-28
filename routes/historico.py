@@ -1,4 +1,4 @@
-"""Página "Histórico de mensagens" — todas as mensagens enviadas pelo painel,
+"""Página "Histórico de contatos" — todas as mensagens enviadas pelo painel,
 de qualquer caixa. Tabela pesquisável e classificável (client-side)."""
 
 from fastapi import APIRouter, Body, Request

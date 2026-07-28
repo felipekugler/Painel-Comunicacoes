@@ -31,6 +31,11 @@ MEIOS: dict[str, str] = {
     "email": "E-mail",
 }
 
+# Rótulos de TODOS os meios (mensagem + encaminhamento: telefone/carta), só para EXIBIÇÃO
+# (tooltip/legenda no histórico). ⚠️ NÃO usar `MEIOS` p/ isso — vários fluxos filtram
+# `m in MEIOS` para pegar SÓ meios de mensagem (telefone/carta são tratados à parte).
+MEIOS_ROTULOS: dict[str, str] = {**MEIOS, "telefone": "Ligação telefônica", "carta": "Carta"}
+
 # Meios SELECIONÁVEIS ao gravar/configurar. E-mail ainda NÃO implementado (depende de
 # configuração externa) → fica de fora POR ORA. O rótulo continua em MEIOS para exibir
 # corretamente eventuais itens/registros antigos gravados por e-mail.
@@ -52,9 +57,10 @@ def meios_disponiveis() -> list[dict]:
 
 
 def meios_labels() -> dict:
-    """Mapa key→rótulo de TODOS os meios (inclui os não-selecionáveis), para rotular
-    itens/registros antigos corretamente onde só se precisa do nome."""
-    return dict(MEIOS)
+    """Mapa key→rótulo de TODOS os meios (inclui os não-selecionáveis e os de
+    encaminhamento telefone/carta), para rotular itens/registros corretamente onde só
+    se precisa do NOME (tooltip/legenda). Não confundir com os meios SELECIONÁVEIS."""
+    return dict(MEIOS_ROTULOS)
 
 
 def label_meio(meio: str) -> str:

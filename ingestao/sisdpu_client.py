@@ -1780,6 +1780,127 @@ async def listar_grupos_unidade(id_processo: str | None = None) -> list[str]:
     return grupos or []
 
 
+_UF_NOME = {"AC": "ACRE", "AL": "ALAGOAS", "AP": "AMAPA", "AM": "AMAZONAS", "BA": "BAHIA",
+            "CE": "CEARA", "DF": "DISTRITO FEDERAL", "ES": "ESPIRITO SANTO", "GO": "GOIAS",
+            "MA": "MARANHAO", "MT": "MATO GROSSO", "MS": "MATO GROSSO DO SUL", "MG": "MINAS GERAIS",
+            "PA": "PARA", "PB": "PARAIBA", "PR": "PARANA", "PE": "PERNAMBUCO", "PI": "PIAUI",
+            "RJ": "RIO DE JANEIRO", "RN": "RIO GRANDE DO NORTE", "RS": "RIO GRANDE DO SUL",
+            "RO": "RONDONIA", "RR": "RORAIMA", "SC": "SANTA CATARINA", "SP": "SAO PAULO",
+            "SE": "SERGIPE", "TO": "TOCANTINS"}
+
+_JS_SELECT_MUNICIPIO = r"""
+(nome) => {
+  const s = document.querySelector('[name$="enderecoMunicipio"]'); if (!s) return false;
+  const norm = x => (x||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/\(.*\)/,'').trim();
+  const alvo = norm(nome);
+  const opt = [...s.options].find(o => norm(o.text) === alvo) || [...s.options].find(o => norm(o.text).startsWith(alvo));
+  if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); return true; }
+  return false;
+}
+"""
+
+# Seleciona a UF por texto NORMALIZADO (sem acento) — robusto quer o SISDPU liste a UF com
+# ou sem acento ("PARANA"/"PARANÁ"). Recebe o NOME por extenso (de _UF_NOME). Dispara 'change'
+# (é o gatilho da cascata que recarrega os municípios).
+_JS_SELECT_UF = r"""
+(nome) => {
+  const s = document.querySelector('[name$="enderecoUF"]'); if (!s) return false;
+  const norm = x => (x||'').normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().trim();
+  const alvo = norm(nome);
+  const opt = [...s.options].find(o => norm(o.text) === alvo);
+  if (opt) { s.value = opt.value; s.dispatchEvent(new Event('change', {bubbles:true})); return true; }
+  return false;
+}
+"""
+
+
+async def atualizar_endereco_assistido(id_processo: str, endereco: dict, dry_run: bool = False) -> dict:
+    """Atualiza o endereço do 1º assistido PF do PAJ no cadastro do SISDPU e salva
+    (botão 'Alterar'). `endereco` = {cep,logradouro,numero,complemento,bairro,municipio,uf}.
+    Edita o 1º endereço do assistido. Retorna {ok, status, detalhe, avisos}. status:
+    'salvo' | 'dry_run' | 'falha'. Cobre TODOS os campos, inclusive a cascata UF→Município
+    (setar a UF dispara o AJAX do JSF que recarrega a lista de municípios; aguardamos a lista
+    repovoar antes de selecionar o município por texto normalizado). Se o município não for
+    encontrado na lista da UF, a gravação prossegue e o fato é reportado em `avisos`."""
+    await _ensure_logged_in()
+    page = await _get_page()
+    # 1) idPessoa do 1º assistido PF (via detalhamento).
+    await page.goto(f"{SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_processo}",
+                    wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(500)
+    idp = await page.evaluate(r"""() => { const m=document.body.innerHTML.match(/idPessoa=(\d+)/); return m?m[1]:""; }""")
+    if not idp:
+        return {"ok": False, "status": "falha", "detalhe": "Assistido (idPessoa) não localizado no PAJ."}
+    # 2) Cadastro do assistido (campos de endereço editáveis já no load).
+    await page.goto(f"{SISDPU_URL}/pages/atendimento/cadastroAssistidoPessoaFisicaCombotoes.xhtml"
+                    f"?idProcesso={id_processo}&idPessoa={idp}",
+                    wait_until="domcontentloaded", timeout=30000)
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(600)
+    if not await page.query_selector('[name$="pessoaEnderecoLogradouro"]'):
+        return {"ok": False, "status": "falha", "detalhe": "Endereço não encontrado no cadastro do assistido."}
+
+    async def _set(suf: str, val: str) -> None:
+        el = await page.query_selector(f'[name$="{suf}"]')
+        if el is not None:
+            await el.fill(str(val or ""))
+
+    await _set("pessoaEnderecoCep", endereco.get("cep", ""))
+    await _set("pessoaEnderecoLogradouro", endereco.get("logradouro", ""))
+    await _set("pessoaEnderecoNumero", endereco.get("numero", ""))
+    await _set("pessoaEnderecoComplemento", endereco.get("complemento", ""))
+    await _set("pessoaEnderecoBairro", endereco.get("bairro", ""))
+    # UF/Município (SELECTs em cascata): setar a UF dispara AJAX que RECARREGA a lista de
+    # municípios; só então o município pode ser selecionado. Cobre correção que muda a cidade.
+    avisos: list[str] = []
+    uf = (endereco.get("uf") or "").strip().upper()
+    mun = (endereco.get("municipio") or "").strip()
+    if uf:
+        # ViaCEP entrega a UF em SIGLA (ex.: "PR"); o SISDPU exige o NOME por extenso
+        # (ex.: "PARANA") — convertido por _UF_NOME. A seleção compara texto normalizado
+        # (sem acento), então funciona mesmo se o SISDPU listar "PARANÁ" com acento.
+        uf_nome = _UF_NOME.get(uf, uf)
+        _n = lambda x: unicodedata.normalize("NFD", (x or "")).encode("ascii", "ignore").decode().strip().upper()  # noqa: E731
+        try:
+            atual = await page.eval_on_selector(
+                '[name$="enderecoUF"]',
+                "s => s.options[s.selectedIndex] ? s.options[s.selectedIndex].text : ''")
+            if _n(atual) != _n(uf_nome):   # só troca (e dispara a cascata) se for outra UF
+                if not await page.evaluate(_JS_SELECT_UF, uf_nome):
+                    avisos.append(f"UF '{uf}' não encontrada na lista")
+                else:
+                    await _wait_pf_ajax(page)
+                    for _ in range(30):   # aguarda a cascata popular os municípios
+                        n = await page.eval_on_selector('[name$="enderecoMunicipio"]', "s => s.options.length")
+                        if (n or 0) > 2:
+                            break
+                        await page.wait_for_timeout(200)
+        except Exception as e:  # noqa: BLE001
+            avisos.append(f"UF não aplicada ({e})")
+    if mun:
+        try:
+            if not await page.evaluate(_JS_SELECT_MUNICIPIO, mun):
+                avisos.append(f"município '{mun}' não encontrado na lista da UF")
+        except Exception as e:  # noqa: BLE001
+            avisos.append(f"município não aplicado ({e})")
+    if dry_run:
+        return {"ok": True, "status": "dry_run", "detalhe": "Endereço preenchido (não salvo).",
+                "avisos": avisos}
+    # 3) Salvar (botão 'Alterar' submete o cadastro).
+    await page.evaluate(
+        r"""() => { const b=[...document.querySelectorAll('input[type=submit],input[type=button],button')]
+            .find(e => (e.value||e.textContent||'').trim()==='Alterar' && e.getBoundingClientRect().width>0);
+            if (b) b.click(); }""")
+    await _wait_pf_ajax(page)
+    await page.wait_for_timeout(1000)
+    ok = await page.evaluate(r"""() => /gravado com sucesso/i.test(document.body.innerText||'')""")
+    det = "Endereço atualizado no SISDPU." if ok else "O SISDPU não confirmou a gravação."
+    if avisos:
+        det += " Atenção: " + "; ".join(avisos) + "."
+    return {"ok": bool(ok), "status": "salvo" if ok else "falha", "detalhe": det, "avisos": avisos}
+
+
 async def fechar() -> None:
     """Fecha o navegador headless."""
     global _playwright, _browser, _page

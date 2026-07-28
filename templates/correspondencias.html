@@ -2,12 +2,53 @@
 {% block title %}Correspondências{% endblock %}
 
 {% block content %}
+<style>
+.carta-preview { border:1px solid var(--stroke); border-radius:10px; overflow:hidden; background:var(--card); }
+.carta-fixo { padding:8px 12px; font-size:12.5px; color:var(--text-secondary); white-space:pre-wrap;
+              background:var(--layer-alt); }
+.carta-preview .carta-fixo:first-child { border-bottom:1px solid var(--stroke); }
+.carta-preview .carta-fixo:last-child { border-top:1px solid var(--stroke); }
+.carta-corpo-lbl { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em;
+                   color:var(--text-tertiary); padding:8px 12px 2px; }
+.carta-preview .corr-msg-txt { border:none; border-radius:0; width:100%; resize:vertical; }
+/* Badges de checagem do CEP na coluna Endereços */
+.cep-badge { display:inline-block; margin-top:5px; font-size:10.5px; font-weight:700; padding:2px 9px;
+             border-radius:999px; white-space:normal; line-height:1.35; border:1px solid transparent; }
+.cep-neutro { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+.cep-ok     { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border-color:color-mix(in srgb,#16a34a 45%,transparent); }
+.cep-div    { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+.cep-loc    { color:var(--c-addr); background:color-mix(in srgb,var(--c-addr) 14%,transparent); border-color:color-mix(in srgb,var(--c-addr) 50%,transparent); }
+.cep-erro   { color:#a06500; background:color-mix(in srgb,#f59e0b 12%,transparent); border-color:color-mix(in srgb,#f59e0b 45%,transparent); }
+/* Selos da coluna Endereço (cadastrado no PAJ = cinza; envio = amarelo) */
+.end-bloco { margin-bottom:8px; }
+.end-selo { display:inline-block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+            padding:2px 8px; border-radius:999px; border:1px solid transparent; margin-bottom:3px; }
+.end-selo-cad { color:var(--text-secondary); background:color-mix(in srgb,var(--text-tertiary) 14%,transparent); border-color:var(--stroke-strong,#c4d0cc); }
+.end-selo-env { color:#8a6a00; background:color-mix(in srgb,var(--c-addr) 16%,transparent); border-color:color-mix(in srgb,var(--c-addr) 55%,transparent); }
+.end-txt { white-space:pre-wrap; }
+/* Modal de conferência de endereço */
+.endr-overlay { position:fixed; inset:0; z-index:3200; background:rgba(0,0,0,.45);
+                display:flex; align-items:center; justify-content:center; padding:20px; }
+.endr-dialog { width:100%; max-width:50vw; min-width:min(560px, 94vw); padding:22px; max-height:88vh; overflow:auto; }
+.endr-cmp { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.endr-col { min-width:0; }
+.endr-lbl { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-tertiary); margin-bottom:4px; }
+.endr-ref { font-size:12.5px; color:var(--text-secondary); background:var(--layer-alt); border:1px solid var(--stroke);
+            border-radius:8px; padding:8px 10px; white-space:pre-wrap; min-height:38px; }
+/* Cadastro (PAJ) = amarelo; consulta do CEP = vermelho; endereço correto = verde */
+.endr-amarelo  { color:#8a6a00; background:color-mix(in srgb,var(--c-addr) 16%,transparent); border-color:color-mix(in srgb,var(--c-addr) 60%,transparent); }
+.endr-vermelho { color:#b42318; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+.endr-verde { border:1px solid color-mix(in srgb,#16a34a 50%,transparent); background:color-mix(in srgb,#16a34a 8%,transparent);
+              border-radius:10px; padding:12px 14px; margin-top:12px; }
+.endr-verde .endr-lbl { color:#15803d; margin-top:0; }
+.endr-form { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:6px; }
+.endr-form label { font-size:11px; font-weight:600; color:var(--text-tertiary); display:flex; flex-direction:column; gap:3px; }
+.endr-form .busca-input { width:100%; }
+</style>
 <div class="mb-6">
     <h1 class="font-display" style="font-size:28px;margin:0;display:flex;align-items:center;gap:10px;">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" style="width:26px;height:26px;color:var(--c-addr,#8a6d3b);">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1 1 15 0Z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 8.25h7.5v4.5h-7.5z" />
-            <path stroke-linecap="round" stroke-linejoin="round" d="m8.25 8.25 3.75 2.4 3.75-2.4" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
         </svg>
         Correspondências
         <span class="pill-quad" style="font-size:14px;" title="Correspondências na fila">{{ pendentes|length }}</span>
@@ -34,7 +75,7 @@
                 <th style="width:8rem;">PAJ</th>
                 <th>Assistido</th>
                 <th>Ofício</th>
-                <th>Endereço(s)</th>
+                <th>Endereço de envio</th>
                 <th style="width:10rem;">Encaminhado em</th>
                 <th class="text-center" style="width:6rem;">Mensagem</th>
                 <th style="width:12rem;">Ação</th>
@@ -49,27 +90,52 @@
                 </td>
                 <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
                 <td class="text-secondary" style="font-size:12.5px;">{{ it.oficio or "—" }}</td>
-                <td class="text-secondary" style="font-size:12px;white-space:pre-wrap;">{{ it.enderecos_txt or "—" }}</td>
+                <td class="text-secondary" style="font-size:12px;text-align:left;vertical-align:top;">
+                    <div class="end-bloco">
+                        <span class="end-selo end-selo-cad">Endereço cadastrado no PAJ</span>
+                        <div class="end-txt">{{ it.corr_endereco_cadastro or it.enderecos_txt or "—" }}</div>
+                    </div>
+                    <div class="end-bloco">
+                        <span class="end-selo end-selo-env">Endereço de Envio</span>
+                        <div class="end-txt end-txt-envio">{% if it.corr_endereco_envio %}{{ it.corr_endereco_envio }}{% else %}<span class="text-tertiary">— (defina validando o endereço)</span>{% endif %}</div>
+                    </div>
+                    {% if it.corr_val_badge %}
+                    <div><span class="cep-badge {{ it.corr_val_badge.cls }}">{{ it.corr_val_badge.txt }}</span></div>
+                    {% else %}
+                    <div><span class="cep-badge cep-neutro">endereço não validado</span></div>
+                    {% endif %}
+                </td>
                 <td class="text-secondary" style="font-size:12px;">
                     {{ it.corr_em | data_hora_br }}
                     {% if it.corr_de_ligacao %}<br><span class="text-tertiary">após {{ it.corr_tentativas_ligacao }} ligação(ões)</span>{% endif %}
                 </td>
                 <td class="text-center">
-                    {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base %}
+                    {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base or it.corr_carta_corpo %}
                     <button class="mov-badge" onclick="corrMsgToggle(this)" title="Abrir/ocultar Resumo e texto da carta">Abrir</button>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
                 </td>
                 <td>
-                    <div style="display:flex;gap:6px;flex-wrap:wrap;">
-                        <button class="btn-subtle" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;cursor:not-allowed;opacity:.6;"
-                                disabled title="A expedição pelos Correios será implementada em seguida.">Expedir carta (em breve)</button>
+                    <div style="display:flex;flex-direction:column;gap:6px;align-items:stretch;">
+                        <button class="btn-subtle btn-validar" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
+                                data-paj="{{ it.paj_norm }}" data-revalidar="{{ '1' if it.corr_val_badge else '0' }}"
+                                onclick="validarEndereco(this)">{{ 'Revalidar endereço' if it.corr_val_badge else 'Validar endereço' }}</button>
+                        <button class="btn-subtle btn-gerar-carta" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                data-tipo="{{ it.corr_tipo }}" onclick="gerarCarta(this)"
+                                title="Gera o corpo da carta pela IA (só neste PAJ).">Gerar carta</button>
+                        <button class="btn-accent btn-expedir" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;{% if not it.corr_validado %}opacity:.55;cursor:not-allowed;{% endif %}"
+                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                data-tipo="{{ it.corr_tipo }}" data-modo="{{ modo }}" data-pajnum="{{ it.paj }}"
+                                data-validado="{{ '1' if it.corr_validado else '0' }}" data-divergente="{{ it.corr_val_divergente }}"
+                                {% if not it.corr_validado %}disabled{% endif %}
+                                title="{{ 'Expedir a carta pelos Correios.' if it.corr_validado else 'Valide o endereço antes de expedir.' }}" onclick="expedirCarta(this)">Expedir carta</button>
                         <button class="btn-subtle" style="padding:4px 10px;font-size:12.5px;white-space:nowrap;"
                                 data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
                                 data-tipo="{{ it.corr_tipo }}" onclick="corrRemover(this)">Remover</button>
                     </div>
                 </td>
             </tr>
-            {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base %}
+            {% if it.resumo_ia or it.sugestao_atual or it.corr_mensagem_base or it.corr_carta_corpo %}
             <tr class="corr-msg-row" style="display:none;">
                 <td colspan="7" class="msg-accordion">
                     <div class="lig-ia-row">
@@ -79,12 +145,19 @@
                             {% else %}<div class="text-tertiary" style="font-size:12.5px;">—</div>{% endif %}
                         </div>
                         <div class="lig-ia-card">
-                            <div class="msg-accordion-lbl">Sugestão IA — texto da carta (editável)</div>
-                            <textarea class="corr-msg-txt" rows="6"
-                                      data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}"
-                                      data-tramite="{{ it.id_tramite }}" data-tipo="{{ it.corr_tipo }}"
-                                      oninput="sanitizarTexto(this)">{{ it.corr_mensagem_base or it.sugestao_atual }}</textarea>
+                            <div class="msg-accordion-lbl">Texto da carta (para conferência)</div>
+                            <div class="carta-preview">
+                                <div class="carta-fixo" title="Cabeçalho padrão (edite em Configurações)">{{ carta_cabecalho }}</div>
+                                <div class="carta-corpo-lbl">Corpo (clique em "Gerar carta" para adaptar pela IA; confira e edite):</div>
+                                <textarea class="corr-msg-txt" rows="7"
+                                          data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}"
+                                          data-tramite="{{ it.id_tramite }}" data-tipo="{{ it.corr_tipo }}"
+                                          oninput="sanitizarTexto(this)">{{ it.corr_carta_corpo }}</textarea>
+                                <div class="carta-fixo" title="Rodapé padrão (edite em Configurações)">{{ carta_rodape }}</div>
+                            </div>
                             <div style="display:flex;align-items:center;gap:10px;margin-top:8px;">
+                                <button class="btn-subtle" style="padding:5px 14px;font-size:12.5px;" onclick="cartaEditarAbrir(this)"
+                                        title="Editar o corpo com textos e parágrafos padrão">Editar</button>
                                 <button class="btn-accent" style="padding:5px 14px;font-size:12.5px;" onclick="corrSalvarMsg(this)">Salvar texto</button>
                                 <span class="corr-msg-status text-tertiary" style="font-size:12px;"></span>
                             </div>
@@ -98,6 +171,94 @@
     </table>
 </div>
 {% endif %}
+
+{# ===== Modal de conferência de endereço (divergência CEP × cadastro) ===== #}
+<div id="endr-modal" class="endr-overlay" style="display:none;">
+  <div class="fluent-card endr-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Conferência de endereço</h3>
+    <p class="text-secondary" style="font-size:12.5px;margin:6px 0 12px;">
+        O CEP indica um endereço (logradouro, cidade ou UF) diferente do cadastro. Confira os endereços
+        abaixo, edite o endereço correto e clique em <strong>Validar</strong>. Depois use <strong>Salvar
+        endereço para envio</strong> para prosseguir com a carta. Atualizar no <strong>SISDPU</strong> é opcional.
+    </p>
+    <div class="endr-cmp">
+        <div class="endr-col">
+            <div class="endr-lbl">Endereço do cadastro (PAJ)</div>
+            <div id="endr-cadastro" class="endr-ref endr-amarelo"></div>
+        </div>
+        <div class="endr-col">
+            <div class="endr-lbl">Endereço pela consulta do CEP
+                <a href="#" class="accent-link" style="font-size:11px;font-weight:600;margin-left:6px;" onclick="endrCopiarDoCep();return false;">usar este</a>
+            </div>
+            <div id="endr-resolvido" class="endr-ref endr-vermelho"></div>
+        </div>
+    </div>
+    <div class="endr-verde">
+        <div class="endr-lbl">Endereço correto (edite e valide):</div>
+        <div class="endr-form" oninput="endrEdited()">
+            <label>CEP<input type="text" id="endr-cep" class="busca-input"></label>
+            <label>Número<input type="text" id="endr-numero" class="busca-input"></label>
+            <label style="grid-column:1 / -1;">Logradouro<input type="text" id="endr-logradouro" class="busca-input"></label>
+            <label style="grid-column:1 / -1;">Complemento<input type="text" id="endr-complemento" class="busca-input"></label>
+            <label>Bairro<input type="text" id="endr-bairro" class="busca-input"></label>
+            <label>Cidade<input type="text" id="endr-municipio" class="busca-input"></label>
+            <label>UF<input type="text" id="endr-uf" class="busca-input" maxlength="2" style="text-transform:uppercase;"></label>
+        </div>
+        <div style="margin-top:10px;">
+            <button class="btn-subtle" id="endr-validar" onclick="endrValidarEditado()"
+                    style="background:#16a34a;border-color:#16a34a;color:#fff;">Validar</button>
+        </div>
+    </div>
+    <div id="endr-status" style="margin-top:8px;font-size:12.5px;display:none;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px;">
+        <button class="btn-subtle" onclick="endrFechar()">Cancelar</button>
+        <button class="btn-subtle" id="endr-atualizar" onclick="endrAtualizar()" disabled
+                style="opacity:.55;cursor:not-allowed;" title="Valide o endereço editado primeiro. (Opcional)">Atualizar endereço no SISDPU</button>
+        <button class="btn-accent" id="endr-salvar" onclick="endrSalvarEnvio()" disabled
+                style="opacity:.55;cursor:not-allowed;" title="Valide o endereço editado primeiro.">Salvar endereço para envio</button>
+    </div>
+  </div>
+</div>
+
+{# ===== Modal de edição do corpo da carta (textos e parágrafos padrão) ===== #}
+<div id="carta-modal" class="endr-overlay" style="display:none;z-index:3300;">
+  <div class="fluent-card endr-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Editar corpo da carta</h3>
+    <p class="text-secondary" style="font-size:12.5px;margin:6px 0 12px;">
+        PAJ <span id="carta-modal-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>.
+        Aplique um <strong>texto padrão</strong> e/ou marque <strong>parágrafos padrão</strong>. Só o
+        <strong>texto</strong> entra na carta — <strong>anexos padrão são ignorados</strong> (a expedição
+        pelos Correios admite apenas texto).
+    </p>
+    <div id="carta-modelo-box" style="display:none;align-items:center;gap:8px;margin:0 0 10px;flex-wrap:wrap;">
+        <label for="carta-modelo" style="font-size:12.5px;color:var(--text-secondary);white-space:nowrap;">Aplicar texto padrão:</label>
+        <select id="carta-modelo" class="busca-input" style="flex:1;min-width:220px;" onchange="cartaAplicarModelo(this)">
+            <option value="">— escolher um modelo —</option>
+        </select>
+    </div>
+    <textarea id="carta-modal-txt" class="corr-msg-txt" rows="10" placeholder="Corpo da carta…"
+              oninput="sanitizarTexto(this)"></textarea>
+    <div id="carta-par-box" style="margin-top:12px;display:none;">
+        <button type="button" onclick="cartaTogglePar()"
+                style="display:flex;align-items:center;gap:6px;background:none;border:none;padding:0;cursor:pointer;color:var(--text-secondary);font-size:12px;font-weight:600;">
+            <svg id="carta-par-chevron" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                 stroke-width="2.4" stroke="currentColor" style="width:12px;height:12px;transition:transform .15s ease;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            Parágrafos padrão (marque para inserir)
+        </button>
+        <div id="carta-paragrafos" style="display:none;flex-direction:column;gap:4px;margin-top:8px;"></div>
+    </div>
+    <div id="carta-modal-status" style="margin-top:8px;font-size:12.5px;display:none;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
+        <button class="btn-subtle" onclick="cartaEditarFechar()">Cancelar</button>
+        <button class="btn-accent" onclick="cartaEditarSalvar()">Salvar texto</button>
+    </div>
+  </div>
+</div>
+
+{% include "_sse_log.html" %}
+{% include "_disparos.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -145,6 +306,146 @@ async function corrSalvarMsg(btn) {
     } catch (e) { alert('Erro: ' + e); }
     btn.disabled = false; btn.innerHTML = orig;
 }
+
+// ===== Modal de edição do corpo da carta (texto + parágrafos padrão; SEM anexos) =====
+let cartaAlvoTA = null;         // textarea da linha que está sendo editada
+let CARTA_COMUNICADOS = [];     // textos padrão da caixa (carregados por caixa ao abrir)
+let CARTA_PARAGRAFOS = [];      // parágrafos padrão da caixa
+async function cartaEditarAbrir(btn) {
+    const card = btn.closest('.lig-ia-card');
+    const ta = card && card.querySelector('.corr-msg-txt');
+    if (!ta) return;
+    cartaAlvoTA = ta;
+    document.getElementById('carta-modal-paj').textContent = ta.dataset.paj || '';
+    const mta = document.getElementById('carta-modal-txt');
+    mta.value = ta.value || '';
+    mta.dataset.cursor = mta.value.length;      // cursor inicial no fim
+    window.rastrearCursor(mta);
+    const st = document.getElementById('carta-modal-status'); st.style.display = 'none'; st.textContent = '';
+    // carrega textos/parágrafos padrão da CAIXA deste PAJ
+    CARTA_COMUNICADOS = []; CARTA_PARAGRAFOS = [];
+    try {
+        const r = await fetch('/api/correspondencia/modelos?slug=' + encodeURIComponent(ta.dataset.slug || ''));
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) { CARTA_COMUNICADOS = d.comunicados || []; CARTA_PARAGRAFOS = d.paragrafos || []; }
+    } catch (e) { /* segue sem modelos */ }
+    cartaMontarModelos();
+    cartaMontarParagrafos();
+    document.getElementById('carta-modal').style.display = 'flex';
+}
+function cartaEditarFechar() { document.getElementById('carta-modal').style.display = 'none'; cartaAlvoTA = null; }
+function cartaMontarModelos() {
+    const box = document.getElementById('carta-modelo-box');
+    const sel = document.getElementById('carta-modelo');
+    if (!CARTA_COMUNICADOS.length) { box.style.display = 'none'; return; }
+    sel.innerHTML = '<option value="">— escolher um modelo —</option>';
+    CARTA_COMUNICADOS.forEach((c, i) => {
+        const opt = document.createElement('option');
+        opt.value = String(i); opt.textContent = c.tipo || ('Modelo ' + (i + 1));
+        sel.appendChild(opt);
+    });
+    sel.value = ''; box.style.display = 'flex';
+}
+// Aplica um texto padrão SUBSTITUINDO o corpo (com confirmação). Só texto — anexos ignorados.
+function cartaAplicarModelo(sel) {
+    const i = parseInt(sel.value, 10);
+    if (isNaN(i) || !CARTA_COMUNICADOS[i]) return;
+    const c = CARTA_COMUNICADOS[i];
+    const ta = document.getElementById('carta-modal-txt');
+    if (ta.value.trim() && !confirm('Substituir o texto atual pelo modelo “' + (c.tipo || '') + '”?\n\n(Os [campos] entre colchetes precisarão ser preenchidos manualmente.)')) {
+        sel.value = ''; return;
+    }
+    ta.value = c.texto || '';
+    cartaMontarParagrafos();   // recomputa quais parágrafos já constam no novo texto
+}
+function cartaMontarParagrafos() {
+    const box = document.getElementById('carta-par-box');
+    const lista = document.getElementById('carta-paragrafos');
+    lista.innerHTML = '';
+    if (!CARTA_PARAGRAFOS.length) { box.style.display = 'none'; return; }
+    box.style.display = 'block';
+    lista.style.display = 'none';
+    const chev = document.getElementById('carta-par-chevron'); if (chev) chev.style.transform = 'rotate(0deg)';
+    const cur = document.getElementById('carta-modal-txt').value;
+    CARTA_PARAGRAFOS.forEach((p) => {
+        const lab = document.createElement('label');
+        lab.className = 'wa-opt'; lab.style.cssText = 'display:flex;gap:8px;align-items:flex-start;cursor:pointer;';
+        lab.innerHTML = '<input type="checkbox" style="margin-top:3px;">' +
+            '<span><span style="font-weight:600;font-size:13px;"></span>' +
+            '<span class="text-tertiary" style="font-size:11.5px;display:block;"></span></span>';
+        const cb = lab.querySelector('input');
+        cb.checked = cur.includes(p.texto);
+        cb.dataset.texto = p.texto;
+        cb.onchange = () => cartaParagrafoToggle(cb);
+        lab.querySelectorAll('span span')[0].textContent = p.titulo || '';
+        lab.querySelectorAll('span span')[1].textContent = p.texto || '';
+        lista.appendChild(lab);
+    });
+}
+function cartaTogglePar() {
+    const lista = document.getElementById('carta-paragrafos');
+    const chev = document.getElementById('carta-par-chevron');
+    const abrir = lista.style.display === 'none';
+    lista.style.display = abrir ? 'flex' : 'none';
+    if (chev) chev.style.transform = abrir ? 'rotate(90deg)' : 'rotate(0deg)';
+}
+// Insere/remove SÓ o texto do parágrafo (nunca anexos — Correios só admite texto).
+// Inserção NA POSIÇÃO DO CURSOR (helper compartilhado); remove ao desmarcar.
+function cartaParagrafoToggle(cb) {
+    const ta = document.getElementById('carta-modal-txt');
+    const txt = cb.dataset.texto;
+    if (cb.checked) {
+        if (!ta.value.includes(txt)) window.inserirNoCursor(ta, txt);
+    } else {
+        window.removerTexto(ta, txt);
+    }
+}
+// Salva o corpo editado no modal → persiste na correspondência e reflete na linha.
+async function cartaEditarSalvar() {
+    if (!cartaAlvoTA) return;
+    const ta = cartaAlvoTA;
+    const novo = document.getElementById('carta-modal-txt').value;
+    const st = document.getElementById('carta-modal-status');
+    st.style.display = 'block'; st.style.color = 'var(--text-secondary)'; st.textContent = 'Salvando…';
+    try {
+        const r = await fetch('/api/correspondencia/editar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: ta.dataset.slug, paj_norm: ta.dataset.paj,
+                                   id_tramite: ta.dataset.tramite, tipo: ta.dataset.tipo || 'tramite',
+                                   mensagem: novo }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) {
+            ta.value = novo;                       // reflete na linha retrátil
+            const rowSt = ta.closest('.lig-ia-card').querySelector('.corr-msg-status');
+            if (rowSt) { rowSt.textContent = '✓ salvo'; setTimeout(() => { rowSt.textContent = ''; }, 2500); }
+            cartaEditarFechar();
+        } else { st.style.color = 'var(--c-red,#dc2626)'; st.textContent = 'Erro: ' + (d.erro || 'falha'); }
+    } catch (e) { st.style.color = 'var(--c-red,#dc2626)'; st.textContent = 'Erro: ' + e; }
+}
+// Gera o corpo da carta pela IA, SOB DEMANDA, só neste PAJ (não trava a triagem da caixa).
+async function gerarCarta(btn) {
+    const orig = btn.innerHTML; btn.disabled = true; btn.innerHTML = 'Gerando…';
+    try {
+        const r = await fetch('/api/correspondencia/gerar-carta', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
+                                   id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite' }) });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { alert('Erro: ' + (d.erro || 'falha ao gerar a carta')); btn.disabled = false; btn.innerHTML = orig; return; }
+        // Atualiza o textarea do corpo na linha retrátil e abre o painel de conferência.
+        const mainTr = btn.closest('tr.corr-row');
+        const msgRow = mainTr && mainTr.nextElementSibling;
+        if (msgRow && msgRow.classList.contains('corr-msg-row')) {
+            const ta = msgRow.querySelector('.corr-msg-txt');
+            if (ta) ta.value = d.carta_corpo || '';
+            if (msgRow.style.display === 'none') {
+                const ab = mainTr.querySelector('.mov-badge'); if (ab) corrMsgToggle(ab);
+            }
+        }
+        btn.innerHTML = d.ia ? '✓ Carta gerada' : '✓ Gerada (sem IA)';
+        setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 2200);
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.innerHTML = orig; }
+}
 async function corrRemover(btn) {
     if (!confirm('Remover este PAJ da fila de correspondências?')) return;
     try {
@@ -154,6 +455,257 @@ async function corrRemover(btn) {
         const d = await r.json().catch(() => ({}));
         if (d.ok) location.reload(); else alert('Erro: ' + (d.erro || 'falha'));
     } catch (e) { alert('Erro: ' + e); }
+}
+// Badge de checagem do CEP na coluna Endereços.
+function _cepBadge(tr, cls, txt) {
+    const el = tr && tr.querySelector('.cep-badge');
+    if (el) { el.className = 'cep-badge ' + cls; el.textContent = txt; }
+}
+// Atualiza o bloco "Endereço de Envio" na hora (após validar). Vazio → placeholder.
+function _setEnvio(tr, txt) {
+    const el = tr && tr.querySelector('.end-txt-envio');
+    if (!el) return;
+    if (txt && txt.trim()) el.textContent = txt;
+    else el.innerHTML = '<span class="text-tertiary">— (defina validando o endereço)</span>';
+}
+function _habilitarExpedir(tr, divergente) {
+    const b = tr && tr.querySelector('.btn-expedir');
+    if (!b) return;
+    b.dataset.validado = '1'; b.dataset.divergente = divergente ? '1' : '0';
+    b.disabled = false; b.style.opacity = '1'; b.style.cursor = 'pointer';
+    b.title = divergente ? 'Endereço divergente — o Expedir pedirá confirmação.' : 'Expedir a carta pelos Correios.';
+}
+// Lista legível dos campos que divergem do CEP (município / UF / logradouro).
+function _campos(d) { return (d.divergencias || []).join(', ') || 'endereço'; }
+// Valida o endereço (resolve o CEP e compara com o cadastro) e habilita o Expedir.
+async function validarEndereco(btn) {
+    const tr = btn.closest('tr');
+    // "Revalidar" (já validado antes) SEMPRE reabre o modal p/ revisar/editar o endereço.
+    const revalidar = btn.dataset.revalidar === '1';
+    const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Validando…';
+    try {
+        const r = await fetch('/api/correspondencia/validar-endereco', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paj_norm: btn.dataset.paj }) });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { _cepBadge(tr, 'cep-erro', '⚠ ' + (d.erro || 'não foi possível validar')); btn.disabled = false; btn.innerHTML = orig; return; }
+        // Reflete o "Endereço de Envio" na hora (o backend já o definiu ao validar): quando o
+        // endereço é válido, o envio passa a corresponder ao endereço cadastrado no PAJ.
+        _setEnvio(tr, d.endereco_envio_txt || '');
+        if (d.cep_invalido)     { _cepBadge(tr, 'cep-div', '⚠ CEP não encontrado — corrija o endereço'); endrAbrir(tr, d); }
+        else if (!d.verificado) { _cepBadge(tr, 'cep-erro', '⚠ CEP não verificado (ViaCEP indisponível) — confira manualmente'); _habilitarExpedir(tr, true); if (revalidar) endrAbrir(tr, d); }
+        else if (d.divergente)  { _cepBadge(tr, 'cep-div', '⚠ Diverge do CEP em: ' + _campos(d) + ' — corrija'); endrAbrir(tr, d); }
+        else if (d.cep_localidade) { _cepBadge(tr, 'cep-loc', 'ⓘ CEP de localidade — usará o logradouro do cadastro'); _habilitarExpedir(tr, false); if (revalidar) endrAbrir(tr, d); }
+        else                    { _cepBadge(tr, 'cep-ok', '✓ Endereço validado'); _habilitarExpedir(tr, false); if (revalidar) endrAbrir(tr, d); }
+        btn.dataset.revalidar = '1'; btn.disabled = false; btn.innerHTML = 'Revalidar endereço';
+    } catch (e) { _cepBadge(tr, 'cep-erro', '⚠ erro ao validar'); btn.disabled = false; btn.innerHTML = orig; }
+}
+// ---- Modal de conferência de endereço (divergência) ----
+let _endrCtx = { paj: '', tr: null, resolvido: null };
+function _g(id) { return document.getElementById(id); }
+function _endrColeta() {
+    return { cep: _g('endr-cep').value.trim(), numero: _g('endr-numero').value.trim(),
+        logradouro: _g('endr-logradouro').value.trim(), complemento: _g('endr-complemento').value.trim(),
+        bairro: _g('endr-bairro').value.trim(), municipio: _g('endr-municipio').value.trim(),
+        uf: _g('endr-uf').value.trim().toUpperCase() };
+}
+function _endrHabilitar(on) {
+    // Habilita AMBOS os botões pós-validação: "Salvar endereço para envio" (local, obrigatório
+    // p/ expedir) e "Atualizar endereço no SISDPU" (opcional).
+    [['endr-salvar', 'Salva o endereço para a expedição.'],
+     ['endr-atualizar', 'Grava também no cadastro do SISDPU (opcional).']].forEach(([id, ok]) => {
+        const b = _g(id); if (!b) return;
+        b.disabled = !on; b.style.opacity = on ? '1' : '.55'; b.style.cursor = on ? 'pointer' : 'not-allowed';
+        b.title = on ? ok : 'Valide o endereço editado primeiro.';
+    });
+}
+function endrAbrir(tr, d) {
+    const eb = tr.querySelector('.btn-expedir'), ds = (eb && eb.dataset) || {};
+    const vb = tr.querySelector('.btn-validar');
+    _endrCtx = { paj: ds.paj || (vb ? vb.dataset.paj : ''), slug: ds.slug || '',
+                 tramite: ds.tramite || '', tipo: ds.tipo || 'tramite', tr: tr, resolvido: d.resolvido || null };
+    _g('endr-cadastro').textContent = d.cadastro_txt || '—';
+    _g('endr-resolvido').textContent = d.resolvido_txt || '—';
+    const c = d.cadastro || {};
+    _g('endr-cep').value = c.cep || ''; _g('endr-numero').value = c.numero || '';
+    _g('endr-logradouro').value = c.logradouro || ''; _g('endr-complemento').value = c.complemento || '';
+    _g('endr-bairro').value = c.bairro || ''; _g('endr-municipio').value = c.municipio || ''; _g('endr-uf').value = c.uf || '';
+    // Mostra, na abertura, o estado atual do endereço (problema OU confirmação) — sem exigir clique.
+    const st = _g('endr-status'); st.style.display = 'block';
+    if (d.cep_invalido) {
+        st.style.color = 'var(--c-red)';
+        st.textContent = '⚠ CEP não encontrado na base dos Correios. Corrija o CEP e clique em Validar.';
+    } else if (d.divergente) {
+        st.style.color = 'var(--c-red)';
+        st.textContent = '⚠ Diverge do CEP em ' + _campos(d) + '. O CEP retorna "' + (d.resolvido_txt || '?')
+                       + '". Corrija o(s) campo(s) e clique em Validar.';
+    } else if (d.cep_localidade) {
+        st.style.color = 'var(--c-addr)';
+        st.textContent = 'ⓘ CEP de localidade — usará o logradouro do cadastro. Endereço válido; edite se precisar e clique em Validar.';
+    } else if (!d.verificado) {
+        st.style.color = '#a06500';
+        st.textContent = '⚠ Não foi possível verificar o CEP agora (ViaCEP indisponível). Edite se precisar e clique em Validar.';
+    } else {
+        st.style.color = 'var(--c-zap)';
+        st.textContent = '✓ Endereço confere com o CEP. Edite se precisar e clique em Validar para atualizar.';
+    }
+    // Reseta os rótulos dos botões (evita ficarem presos em "Atualizando…"/"Salvando…").
+    _g('endr-atualizar').innerHTML = 'Atualizar endereço no SISDPU';
+    _g('endr-salvar').innerHTML = 'Salvar endereço para envio';
+    const _vb = _g('endr-validar'); _vb.disabled = false; _vb.innerHTML = 'Validar';
+    _endrHabilitar(false);   // precisa validar o endereço editado primeiro
+    _g('endr-modal').style.display = 'flex';
+}
+// Editou os campos → invalida a validação anterior (precisa validar de novo).
+function endrEdited() {
+    _endrHabilitar(false);
+    const st = _g('endr-status');
+    st.style.display = 'block'; st.style.color = 'var(--text-tertiary)';
+    st.textContent = 'Endereço alterado — clique em Validar.';
+}
+function endrCopiarDoCep() {
+    const r = _endrCtx.resolvido; if (!r) return;
+    if (r.logradouro) _g('endr-logradouro').value = r.logradouro;
+    if (r.bairro) _g('endr-bairro').value = r.bairro;
+    if (r.cidade) _g('endr-municipio').value = r.cidade;
+    if (r.uf) _g('endr-uf').value = r.uf;
+    endrEdited();
+}
+function endrFechar() { _g('endr-modal').style.display = 'none'; }
+// Valida o endereço EDITADO (sem salvar) e, se ok, habilita "Atualizar".
+async function endrValidarEditado() {
+    const st = _g('endr-status'), btn = _g('endr-validar');
+    const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Validando…';
+    st.style.display = 'block'; st.style.color = 'var(--text-secondary)'; st.textContent = 'Validando o endereço…';
+    try {
+        const r = await fetch('/api/correspondencia/validar-endereco-editado', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endereco: _endrColeta() }) });
+        const d = await r.json().catch(() => ({}));
+        btn.disabled = false; btn.innerHTML = orig;
+        if (!d.ok) { st.style.color = 'var(--c-red)'; st.textContent = '✗ ' + (d.erro || 'informe o CEP'); _endrHabilitar(false); return; }
+        _endrCtx.resolvido = d.resolvido || _endrCtx.resolvido;
+        _g('endr-resolvido').textContent = d.cep_invalido ? 'CEP não encontrado' : (d.resolvido_txt || '—');
+        if (d.cep_invalido) {
+            st.style.color = 'var(--c-red)';
+            st.textContent = '⚠ CEP não encontrado. Corrija o CEP e valide de novo.';
+            _endrHabilitar(false);
+        } else if (d.divergente) {
+            st.style.color = 'var(--c-red)';
+            st.textContent = '⚠ Ainda diverge em ' + _campos(d) + ': o CEP retorna "' + (d.resolvido_txt || '?') + '". Ajuste o(s) campo(s) divergente(s) e valide de novo.';
+            _endrHabilitar(false);
+        } else if (d.cep_localidade) {
+            st.style.color = 'var(--c-addr)';
+            st.textContent = 'ⓘ CEP de localidade — o logradouro do cadastro será usado. Endereço válido.';
+            _endrHabilitar(true);
+        } else if (!d.verificado) {
+            st.style.color = '#a06500';
+            st.textContent = '⚠ Não foi possível verificar o CEP agora (ViaCEP indisponível). Você pode atualizar assim mesmo.';
+            _endrHabilitar(true);
+        } else {
+            st.style.color = 'var(--c-zap)';
+            st.textContent = '✓ Endereço válido (confere com o CEP). Pode atualizar.';
+            _endrHabilitar(true);
+        }
+    } catch (e) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ Erro: ' + e; }
+}
+// Grava o endereço (validado) no cadastro local e libera o Expedir.
+async function endrAtualizar() {
+    // Se o cofre estiver trancado, abre o modal de destravamento e só segue após destravar.
+    if (!(await window.garantirSisdpu())) return;
+    const st = _g('endr-status'), btn = _g('endr-atualizar');
+    const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Atualizando…';
+    st.style.display = 'block'; st.style.color = 'var(--text-secondary)';
+    st.textContent = 'Gravando no SISDPU e no painel… (pode levar alguns segundos)';
+    try {
+        const r = await fetch('/api/correspondencia/atualizar-endereco', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: _endrCtx.slug, paj_norm: _endrCtx.paj,
+                                   id_tramite: _endrCtx.tramite, tipo: _endrCtx.tipo, endereco: _endrColeta() }) });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ ' + (d.erro || 'falha ao atualizar'); return; }
+        const tr = _endrCtx.tr;
+        const cls = d.divergente ? 'cep-div' : (d.cep_localidade ? 'cep-loc' : (d.verificado ? 'cep-ok' : 'cep-erro'));
+        const txt = d.divergente ? '⚠ CEP diverge do cadastro' : (d.cep_localidade ? 'ⓘ CEP de localidade' : (d.verificado ? '✓ CEP confere com o cadastro' : '⚠ CEP não verificado'));
+        _cepBadge(tr, cls, txt);
+        if (!d.divergente) _habilitarExpedir(tr, false);
+        st.style.color = d.sisdpu_ok ? 'var(--c-zap)' : '#a06500';
+        st.textContent = (d.sisdpu_ok
+            ? '✓ Endereço atualizado no SISDPU e no painel.'
+            : '✓ Endereço salvo no painel · ' + (d.sisdpu_detalhe || 'SISDPU não gravado') + '.')
+            + (d.divergente ? '' : ' Já pode expedir.');
+        btn.disabled = false; btn.innerHTML = orig;                 // restaura o botão (não fica "Atualizando…")
+        setTimeout(() => location.reload(), 1600);                  // recarrega p/ refletir Cadastro/Envio
+    } catch (e) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ Erro: ' + e; }
+}
+// Salva o endereço (validado) APENAS no painel e libera o Expedir — sem gravar no SISDPU.
+async function endrSalvarEnvio() {
+    const st = _g('endr-status'), btn = _g('endr-salvar');
+    const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Salvando…';
+    st.style.display = 'block'; st.style.color = 'var(--text-secondary)'; st.textContent = 'Salvando o endereço para o envio…';
+    try {
+        const r = await fetch('/api/correspondencia/salvar-endereco', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ paj_norm: _endrCtx.paj, endereco: _endrColeta() }) });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ ' + (d.erro || 'falha ao salvar'); return; }
+        const tr = _endrCtx.tr;
+        const cls = d.divergente ? 'cep-div' : (d.cep_localidade ? 'cep-loc' : (d.verificado ? 'cep-ok' : 'cep-erro'));
+        const txt = d.divergente ? '⚠ CEP diverge do cadastro' : (d.cep_localidade ? 'ⓘ CEP de localidade' : (d.verificado ? '✓ CEP confere com o cadastro' : '⚠ CEP não verificado'));
+        _cepBadge(tr, cls, txt);
+        _habilitarExpedir(tr, !!d.divergente);
+        st.style.color = 'var(--c-zap)'; st.textContent = '✓ Endereço salvo para envio. Já pode expedir.';
+        btn.disabled = false; btn.innerHTML = orig;                 // restaura o botão (não fica "Salvando…")
+        setTimeout(() => location.reload(), 1200);                  // recarrega p/ refletir o Endereço de Envio
+    } catch (e) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ Erro: ' + e; }
+}
+// Expede a carta pelos Correios (+ movimentação/juntada/tramitação no sucesso).
+async function expedirCarta(btn, forcar) {
+    if (btn.dataset.validado !== '1') { alert('Valide o endereço antes de expedir.'); return; }
+    const real = (btn.dataset.modo === 'real');
+    const divergente = (btn.dataset.divergente === '1');
+    const paj = btn.dataset.pajnum || '';
+    if (!forcar) {
+        let msg = real
+            ? ('Expedir a carta do PAJ ' + paj + ' AGORA pelos Correios?\n\n'
+               + '⚠ Isso POSTA a carta de verdade (custo de postagem no cartão) e NÃO pode ser desfeito.')
+            : ('Modo SIMULADO: a carta será montada no site dos Correios e o processo para no '
+               + 'Resumo (NÃO posta, sem custo). Continuar?');
+        if (divergente) msg += '\n\n⚠ ATENÇÃO: o endereço do CEP DIVERGE do cadastro. Confira antes de prosseguir.';
+        if (!confirm(msg)) return;
+        if (divergente) forcar = true;  // já avisado — dispensa o segundo aviso do servidor
+    }
+    // Expedição usa o cofre (Correios/CAS): se trancado, abre o destravamento e segue após.
+    if (!(await window.garantirSisdpu())) return;
+    const orig = btn.innerHTML; btn.disabled = true;
+    btn.textContent = real ? 'Expedindo…' : 'Simulando…';
+    const restore = () => { btn.disabled = false; btn.innerHTML = orig; };
+    // Log AO VIVO (SSE): mostra as etapas no site dos Correios e depois mov./tram. no SISDPU.
+    const d = await window.enviarComPopup('/api/correspondencia/expedir/stream',
+        { slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
+          id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite', forcar: !!forcar },
+        real ? '— expedindo a carta pelos Correios…' : '— simulando (não posta)…');
+    if (d.ok && d.status === 'expedido') {
+        // sucesso: o popup mostra tudo; recarrega ao fechar para refletir a saída da fila.
+        restore();
+    } else if (d.ok && d.status === 'simulado') {
+        restore();
+    } else if (!d.ok && d.status === 'conferencia') {
+        restore();
+        const ok = confirm('⚠ CONFERÊNCIA DE ENDEREÇO\n\n'
+            + 'O CEP resolve um logradouro DIFERENTE do cadastro:\n\n'
+            + 'Cadastro:  ' + (d.cadastro || '—') + '\n'
+            + 'Pelo CEP:  ' + (d.resolvido || '—') + '\n\n'
+            + 'Confira. Deseja expedir MESMO ASSIM (com o endereço do CEP)?');
+        if (ok) { window.sseFechar(); expedirCarta(btn, true); }
+    } else {
+        restore();
+    }
+    // Ao fechar o popup depois de uma expedição real bem-sucedida, recarrega a lista.
+    if (d.ok && d.status === 'expedido') {
+        const fechar = document.getElementById('sse-fechar');
+        if (fechar) fechar.onclick = () => location.reload();
+    }
 }
 </script>
 {% endblock %}

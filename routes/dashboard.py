@@ -9,11 +9,13 @@
 
 import json
 
+from anyio import to_thread
 from fastapi import APIRouter, Body, File, Request, UploadFile
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                RedirectResponse, StreamingResponse)
 
 from services import analise_service, config_service, painel_comunicacoes_service, envio_service
+from services import disparos_service
 
 router = APIRouter()
 
@@ -138,7 +140,8 @@ async def prontos_envio(request: Request, meio: str):
         caixas_filtro=caixas_filtro,
         tipos_filtro=tipos_filtro,
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
-        envio_modos_resumo=config_service.resumo_modos()))
+        envio_modos_resumo=config_service.resumo_modos(),
+        disparos=disparos_service.listar_disparos(meio=key, limite=25)))
 
 
 @router.post("/api/prontos/whatsapp/enviar")
@@ -155,16 +158,11 @@ async def prontos_whatsapp_enviar(payload: dict = Body(...)):
     if not (slug and paj) or (tipo != "conjunto" and not tr):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
 
-    async def gen():
-        try:
-            async for ev in painel_comunicacoes_service.enviar_whatsapp_tramite_stream(slug, paj, tr, tipo):
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'done': True, 'resultado': {'ok': False, 'detalhe': str(e)}})}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        disparos_service.stream_e_salvar(
+            painel_comunicacoes_service.enviar_whatsapp_tramite_stream(slug, paj, tr, tipo), "whatsapp"),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/prontos/enviar-item")
@@ -178,16 +176,11 @@ async def prontos_enviar_item(payload: dict = Body(...)):
     if not (slug and paj and meio):
         return JSONResponse({"ok": False, "detalhe": "Parâmetros ausentes."}, status_code=400)
 
-    async def gen():
-        try:
-            async for ev in painel_comunicacoes_service.enviar_item_meio_stream(slug, paj, tipo, tr, meio):
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'done': True, 'resultado': {'ok': False, 'detalhe': str(e)}})}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        disparos_service.stream_e_salvar(
+            painel_comunicacoes_service.enviar_item_meio_stream(slug, paj, tipo, tr, meio), meio),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/prontos/whatsapp/enviar-lote")
@@ -196,16 +189,11 @@ async def prontos_whatsapp_lote(payload: dict = Body(default={})):
     {selecao: [{slug, paj_norm, id_tramite, paj}]}. Resposta SSE (via POST)."""
     selecao = payload.get("selecao") or [] if isinstance(payload, dict) else []
 
-    async def gen():
-        try:
-            async for ev in painel_comunicacoes_service.enviar_whatsapp_lote_stream(selecao):
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    return StreamingResponse(
+        disparos_service.stream_e_salvar(
+            painel_comunicacoes_service.enviar_whatsapp_lote_stream(selecao), "whatsapp", erro_key="resumo"),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @router.get("/comprovante/whatsapp/{nome}")
@@ -223,16 +211,9 @@ async def comprovante_whatsapp(nome: str):
 
 @router.get("/api/prontos/enviar/stream")
 async def prontos_enviar_stream():
-    async def gen():
-        try:
-            async for ev in painel_comunicacoes_service.enviar_todas_filas_stream():
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
-
     return StreamingResponse(
-        gen(),
+        disparos_service.stream_e_salvar(
+            painel_comunicacoes_service.enviar_todas_filas_stream(), "app_sisdpu", erro_key="resumo"),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -244,16 +225,9 @@ async def prontos_enviar_selecao(payload: dict = Body(default={})):
     Corpo: {selecao: [{slug, paj_norm, id_tramite, tipo}]}. Resposta SSE (via POST)."""
     selecao = payload.get("selecao") or [] if isinstance(payload, dict) else []
 
-    async def gen():
-        try:
-            async for ev in painel_comunicacoes_service.enviar_selecao_stream(selecao):
-                yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
-        except Exception as e:  # noqa: BLE001
-            yield f"data: {json.dumps({'level': 'erro', 'msg': str(e)}, ensure_ascii=False)}\n\n"
-            yield f"data: {json.dumps({'done': True, 'resumo': {'ok': False, 'erro': str(e)}})}\n\n"
-
     return StreamingResponse(
-        gen(),
+        disparos_service.stream_e_salvar(
+            painel_comunicacoes_service.enviar_selecao_stream(selecao), "app_sisdpu", erro_key="resumo"),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -353,9 +327,11 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."},
                             status_code=400)
-    dados = painel_comunicacoes_service.gravar_para_envio(slug, paj_norm, id_tramite, mensagem, meios,
-                                             somente_leitura=somente_leitura, prazos=prazos,
-                                             tramitar_grupo=tramitar_grupo)
+    # Roda em thread: gravar por carta chama a IA (Claude, bloqueante) e não pode
+    # travar o event loop (congelaria o painel inteiro por alguns segundos).
+    dados = await to_thread.run_sync(lambda: painel_comunicacoes_service.gravar_para_envio(
+        slug, paj_norm, id_tramite, mensagem, meios,
+        somente_leitura=somente_leitura, prazos=prazos, tramitar_grupo=tramitar_grupo))
     if not dados:
         return JSONResponse({"ok": False, "erro": "tramitação não encontrada"}, status_code=404)
     return {"ok": True}
@@ -433,9 +409,9 @@ async def gravar_conjunto(slug: str, paj_norm: str, payload: dict = Body(...)):
     tramitar_grupo = payload.get("tramitar_grupo", "") if isinstance(payload, dict) else ""
     if not meios:
         return JSONResponse({"ok": False, "erro": "Selecione ao menos um meio de contato."}, status_code=400)
-    dados = painel_comunicacoes_service.gravar_conjunto(slug, paj_norm, payload.get("mensagem", ""), meios,
-                                           somente_leitura=somente_leitura, prazos=prazos,
-                                           tramitar_grupo=tramitar_grupo)
+    dados = await to_thread.run_sync(lambda: painel_comunicacoes_service.gravar_conjunto(
+        slug, paj_norm, payload.get("mensagem", ""), meios,
+        somente_leitura=somente_leitura, prazos=prazos, tramitar_grupo=tramitar_grupo))
     if not dados:
         return JSONResponse({"ok": False, "erro": "conjunto não encontrado"}, status_code=404)
     return {"ok": True}

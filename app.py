@@ -10,6 +10,7 @@ grava PID file. Evita duplicatas.
 """
 
 import contextlib
+import datetime as _dt
 import logging
 import os
 import re
@@ -128,6 +129,9 @@ def _data_hora_br(valor) -> str:
 
 app.state.jinja.filters["data_br"] = _data_br
 app.state.jinja.filters["data_hora_br"] = _data_hora_br
+# Data de HOJE em ISO (AAAA-MM-DD), CALLABLE p/ ser sempre atual. Usada para marcar
+# "Hoje" no Log dos últimos envios (compara com o ts ISO do registro, gerado no servidor).
+app.state.jinja.globals["hoje_iso"] = lambda: _dt.datetime.now().strftime("%Y-%m-%d")
 # Telefone BR para exibição: "(41) 99908-2652" (usado nos selos de comprovante).
 from services.texto_util import formatar_telefone_br as _tel_br  # noqa: E402
 

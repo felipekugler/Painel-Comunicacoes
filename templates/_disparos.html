@@ -1,0 +1,129 @@
+{#- =========================================================================
+    "Log dos últimos envios" — cada linha é UMA operação de envio (o popup
+    inteiro mostrado ao vivo na tela de Envio), salvo para consulta.
+    Colunas: Data · Log (abre o passo a passo) · Falha (sim/não).
+    Requer no contexto:  disparos = [{ts, meio, linhas:[{level,msg}], falha}]
+    Autossuficiente: traz o próprio CSS, a tabela, o modal e o JS.
+   ========================================================================= -#}
+{% set disparos = disparos or [] %}
+
+<style>
+.disp-wrap { margin-top:26px; }
+.disp-head { display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin:0 0 8px; }
+.disp-head h2 { font-size:15px; margin:0; font-weight:600; color:var(--text-secondary); }
+.disp-count { font-size:11.5px; color:var(--text-tertiary); }
+.disp-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+.disp-table th { text-align:left; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em;
+                 color:var(--text-tertiary); font-weight:700; padding:6px 10px; border-bottom:1px solid var(--stroke); white-space:nowrap; }
+.disp-table td { padding:8px 10px; border-bottom:1px solid var(--stroke); vertical-align:middle; }
+.disp-table tbody tr:last-child td { border-bottom:none; }
+.disp-ts { font-family:'Cascadia Code','Consolas',monospace; font-size:12px; color:var(--text-secondary); white-space:nowrap; }
+.disp-verlog { font-size:11.5px; padding:4px 12px; border-radius:7px; border:1px solid var(--stroke-strong);
+               background:transparent; color:var(--text-secondary); cursor:pointer; white-space:nowrap; }
+.disp-verlog:hover { background:var(--layer-alt); }
+.disp-hoje { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap;
+             color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent); border:1px solid color-mix(in srgb,var(--accent) 45%,transparent); }
+.disp-falha { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 10px; border-radius:999px; white-space:nowrap; }
+.disp-falha-sim { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border:1px solid color-mix(in srgb,#dc2626 45%,transparent); }
+.disp-falha-nao { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border:1px solid color-mix(in srgb,#16a34a 45%,transparent); }
+.disp-aviso-sim { color:var(--c-addr); background:color-mix(in srgb,var(--c-addr) 14%,transparent); border:1px solid color-mix(in srgb,var(--c-addr) 50%,transparent); }
+.disp-aviso-nao { color:var(--text-tertiary); background:transparent; border:1px solid var(--stroke); }
+.disp-empty { font-size:12.5px; color:var(--text-tertiary); padding:14px 4px; }
+/* Modal com as linhas do log, no visual do popup de envio — AUTOSSUFICIENTE.
+   As classes .wa-overlay e .mov-dialog só estão definidas em algumas páginas
+   (dashboard/historico/prontos); nas telas de Ligações/Correspondências elas NÃO
+   existem e o modal renderizava como bloco inline abaixo da tabela. Fixamos o
+   overlay e a caixa pelo próprio #id para centralizar em QUALQUER página. */
+#disp-modal { position:fixed; inset:0; z-index:3000; background:rgba(0,0,0,.45);
+              align-items:center; justify-content:center; padding:20px; }
+#disp-modal .mov-dialog { width:100%; max-width:56vw; padding:24px; max-height:85vh; overflow:auto; }
+.disp-log-box { margin-top:12px; background:var(--layer-alt); border:1px solid var(--stroke); border-radius:10px;
+                padding:12px 14px; max-height:60vh; overflow:auto;
+                font-family:'Cascadia Code','Consolas',monospace; font-size:11.5px; line-height:1.65; white-space:pre-wrap; }
+.disp-ln { display:block; }
+.disp-ln-ok    { color:#16a34a; }
+.disp-ln-erro  { color:#dc2626; }
+.disp-ln-novo  { color:var(--accent); font-weight:700; }
+.disp-ln-muted { color:var(--text-tertiary); }
+.disp-ln-info  { color:var(--text-secondary); }
+.disp-ln-aviso { color:var(--c-addr); font-weight:700; }
+.disp-ln-sep   { display:block; height:.6em; }
+</style>
+
+<div class="disp-wrap">
+    <div class="disp-head">
+        <h2>Log dos últimos envios</h2>
+    </div>
+    <div class="fluent-card" style="overflow-x:auto;">
+        {% if disparos %}
+        <table class="disp-table">
+            <thead>
+                <tr>
+                    <th style="width:12rem;">Data</th>
+                    <th>Log</th>
+                    <th style="width:7rem;text-align:center;">Aviso</th>
+                    <th style="width:7rem;text-align:center;">Falha</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for d in disparos %}
+                {% set _linhas = d.linhas or [] %}
+                <tr>
+                    <td class="disp-ts">{{ d.ts|data_hora_br if d.ts else '' }}</td>
+                    <td>
+                        <span style="display:inline-flex;align-items:center;gap:6px;">
+                            <button class="disp-verlog" onclick="dispLog(this)"
+                                    data-quando="{{ d.ts|data_hora_br if d.ts else '' }}"
+                                    data-linhas='{{ _linhas|tojson }}'>Ver log ({{ _linhas|length }} linha{{ 's' if _linhas|length != 1 else '' }})</button>
+                            {% if d.ts and d.ts[:10] == hoje_iso() %}<span class="disp-hoje">Hoje</span>{% endif %}
+                        </span>
+                    </td>
+                    <td style="text-align:center;">
+                        {% if d.aviso %}<span class="disp-falha disp-aviso-sim">Sim</span>
+                        {% else %}<span class="disp-falha disp-aviso-nao">Não</span>{% endif %}
+                    </td>
+                    <td style="text-align:center;">
+                        {% if d.falha %}<span class="disp-falha disp-falha-sim">Sim</span>
+                        {% else %}<span class="disp-falha disp-falha-nao">Não</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="disp-empty">Nenhum envio registrado ainda neste canal.</div>
+        {% endif %}
+    </div>
+</div>
+
+<div id="disp-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)dispLogFechar()">
+  <div class="fluent-card mov-dialog">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+        <h3 class="font-display" style="font-size:18px;margin:0;">Log do envio <span id="disp-log-quando" class="text-tertiary" style="font-size:13px;font-weight:400;"></span></h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="dispLogFechar()">Fechar</button>
+    </div>
+    <p class="text-tertiary" style="font-size:12px;margin:6px 0 0;">Passo a passo exatamente como foi exibido durante o envio.</p>
+    <div id="disp-log-box" class="disp-log-box"></div>
+  </div>
+</div>
+
+<script>
+function dispLog(btn) {
+    document.getElementById('disp-log-quando').textContent = btn.dataset.quando ? '· ' + btn.dataset.quando : '';
+    let linhas = [];
+    try { linhas = JSON.parse(btn.dataset.linhas || '[]'); } catch (e) {}
+    const box = document.getElementById('disp-log-box');
+    box.innerHTML = '';
+    if (!linhas.length) { box.textContent = 'Sem linhas registradas.'; }
+    linhas.forEach(l => {
+        const lvl = (l.level || 'info');
+        if (lvl === 'sep') { const s = document.createElement('span'); s.className = 'disp-ln-sep'; box.appendChild(s); return; }
+        const span = document.createElement('span');
+        span.className = 'disp-ln disp-ln-' + (['ok','erro','novo','muted','info','aviso'].indexOf(lvl) >= 0 ? lvl : 'info');
+        span.textContent = l.msg || '';
+        box.appendChild(span);
+    });
+    document.getElementById('disp-modal').style.display = 'flex';
+}
+function dispLogFechar() { document.getElementById('disp-modal').style.display = 'none'; }
+</script>

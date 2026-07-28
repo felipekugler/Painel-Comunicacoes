@@ -189,6 +189,73 @@ def set_prazo_tramitacao_padrao(n: int) -> int:
     return d["prazo_tramitacao_padrao"]
 
 
+# ---------------- Correspondências / Expedição de carta (Correios) ----------------
+CARTA_PRAZO_POS_ENTREGA_PADRAO = 5           # dias após a previsão de entrega
+CARTA_CAIXA_TRAMITACAO_PADRAO = "01 - PREV_AGENDA/AGUARDAR"
+CARTA_CABECALHO_PADRAO = "DEFENSORIA PÚBLICA DA UNIÃO – Unidade de Curitiba/PR"
+CARTA_RODAPE_PADRAO = ("DPU – Rua Visconde do Rio Branco, 1811, Centro – Curitiba/PR – "
+                       "CEP 80420-210")
+
+
+def get_carta_cabecalho() -> str:
+    """Cabeçalho PADRÃO da carta (topo da e-Carta). Texto livre configurável.
+    Enquanto não for editado, usa o padrão da unidade."""
+    v = ler_config().get("carta_cabecalho")
+    return CARTA_CABECALHO_PADRAO if v is None else str(v)
+
+
+def set_carta_cabecalho(txt: str) -> str:
+    d = ler_config()
+    d["carta_cabecalho"] = (txt or "").strip()
+    _gravar(d)
+    return d["carta_cabecalho"]
+
+
+def get_carta_rodape() -> str:
+    """Rodapé PADRÃO da carta (assinatura/identificação da unidade). Texto livre.
+    Enquanto não for editado, usa o padrão da unidade."""
+    v = ler_config().get("carta_rodape")
+    return CARTA_RODAPE_PADRAO if v is None else str(v)
+
+
+def set_carta_rodape(txt: str) -> str:
+    d = ler_config()
+    d["carta_rodape"] = (txt or "").strip()
+    _gravar(d)
+    return d["carta_rodape"]
+
+
+def get_carta_prazo_pos_entrega() -> int:
+    """Dias somados à PREVISÃO DE ENTREGA para calcular o prazo da tramitação de
+    aguardo após expedir a carta (padrão 5). Entre 0 e 365."""
+    n = ler_config().get("carta_prazo_pos_entrega", CARTA_PRAZO_POS_ENTREGA_PADRAO)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = CARTA_PRAZO_POS_ENTREGA_PADRAO
+    return max(0, min(n, 365))
+
+
+def set_carta_prazo_pos_entrega(n: int) -> int:
+    d = ler_config()
+    d["carta_prazo_pos_entrega"] = max(0, min(int(n), 365))
+    _gravar(d)
+    return d["carta_prazo_pos_entrega"]
+
+
+def get_carta_caixa_tramitacao() -> str:
+    """Caixa de grupo para onde o PAJ é tramitado após expedir a carta (aguardo de
+    retorno). Padrão '01 - PREV_AGENDA/AGUARDAR'."""
+    return str(ler_config().get("carta_caixa_tramitacao", "") or CARTA_CAIXA_TRAMITACAO_PADRAO)
+
+
+def set_carta_caixa_tramitacao(txt: str) -> str:
+    d = ler_config()
+    d["carta_caixa_tramitacao"] = (txt or "").strip() or CARTA_CAIXA_TRAMITACAO_PADRAO
+    _gravar(d)
+    return d["carta_caixa_tramitacao"]
+
+
 # ---------------- concorrência da análise IA ----------------
 def get_analise_concorrencia() -> int:
     n = ler_config().get("analise_concorrencia", ANALISE_CONCORRENCIA_PADRAO)

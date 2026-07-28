@@ -461,3 +461,39 @@ def analisar_conjunto(movimentacoes: list[dict], comunicados: list[dict] | None,
         # só texto (sem emojis) e sem linha em branco entre parágrafos
         "sugestao": colapsar_paragrafos(remover_emojis(obj.get("sugestao") or "")),
     }
+
+
+_PROMPT_CORPO_CARTA = """Você vai redigir APENAS o CORPO de uma carta física (e-Carta dos \
+Correios) que a Defensoria Pública da União enviará a um(a) assistido(a).
+
+Quem lê é, em regra, pessoa simples e humilde, muitas vezes de baixa escolaridade. Então:
+- Linguagem MUITO simples, clara e direta; frases curtas.
+- Conciso: poucos parágrafos, só o essencial para a pessoa entender e agir.
+- SEM termos técnicos ou jurídicos; se algo precisar ser citado, explique em palavras do dia a dia.
+- Tom respeitoso e acolhedor.
+- Comece com "Prezado(a) Senhor(a)," e termine com uma despedida cordial em nome da \
+Defensoria Pública da União.
+- NÃO invente dados (datas, horários, locais, números, prazos, nomes): use SOMENTE o que \
+estiver no texto-base abaixo. Se um dado não estiver lá, não o mencione.
+- Escreva SÓ o corpo (sem cabeçalho, sem endereço, sem assinatura/rodapé — esses já existem).
+- Responda APENAS com o texto do corpo, sem comentários, sem aspas, sem markdown.
+
+Texto-base (o que precisa ser comunicado ao assistido):
+---
+{sugestao}
+---"""
+
+
+def gerar_corpo_carta(sugestao: str) -> str | None:
+    """Adapta a Sugestão IA para o CORPO de uma carta em linguagem simples/concisa
+    (leitor humilde). Retorna só o corpo (sem cabeçalho/rodapé) ou None em erro/cota.
+    Ponto único de chamada ao Claude via _run_claude (inclui a anti-alucinação)."""
+    base = (sugestao or "").strip()
+    if not base:
+        return None
+    result = _run_claude(_PROMPT_CORPO_CARTA.format(sugestao=base))
+    if result is None:
+        return None
+    # só texto, sem emojis, sem linha em branco entre parágrafos; tira aspas/cercas soltas
+    txt = colapsar_paragrafos(remover_emojis(result)).strip().strip('`').strip()
+    return txt or None

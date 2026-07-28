@@ -348,6 +348,13 @@ def _prazos_envio(prazos: dict | None) -> dict:
     }
 
 
+def _paj_tem_endereco(paj_norm: str) -> bool:
+    """True se o PAJ tem ao menos um endereço com CEP (postável). Sem endereço a CARTA
+    fica INDISPONÍVEL — não se grava por carta nem se expede correspondência."""
+    cont = ler_contato(paj_norm)
+    return any((e.get("cep") or "").strip() for e in (cont.get("enderecos") or []))
+
+
 def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
                       meios: list[str], somente_leitura: bool = False,
                       prazos: dict | None = None, tramitar_grupo: str | None = None) -> dict:
@@ -367,7 +374,8 @@ def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, mensagem: str,
     # 1) Canais de ENCAMINHAMENTO (cumulativos) — cada um grava no próprio trilho.
     if "telefone" in todos:
         enfileirar_ligacao(slug, paj_norm, id_tramite, mensagem=mensagem)
-    if "carta" in todos:
+    # Carta só quando há endereço postável (defesa; a UI já desabilita a opção sem endereço).
+    if "carta" in todos and _paj_tem_endereco(paj_norm):
         encaminhar_correspondencia(slug, paj_norm, id_tramite, mensagem=mensagem)
     # 2) Meios de MENSAGEM (app/whatsapp/email) — fila de "Prontos para Envio".
     msg_meios = [m for m in todos if m in envio_service.MEIOS]
@@ -434,6 +442,8 @@ ANEXOS_DIR = DADOS_DIR / "_anexos"
 _ANEXO_MAX = 25 * 1024 * 1024  # 25 MB por arquivo
 # Comprovantes de envio por WhatsApp (PDF de 2 páginas gerado no envio).
 COMPROVANTES_WA_DIR = DADOS_DIR / "_comprovantes_whatsapp"
+# Comprovantes de postagem de CARTA (PDF do SMT/Correios, baixado ao efetivar).
+COMPROVANTES_CARTA_DIR = DADOS_DIR / "_comprovantes_carta"
 # Formatos aceitos pelo Aplicativo SISDPU (envio de anexos). Outros são rejeitados
 # aqui para não quebrar o envio pelo app. DOC/DOCX/ODT/PNG/JPEG/GIF/PDF.
 _ANEXO_EXTS = {"doc", "docx", "odt", "png", "jpg", "jpeg", "gif", "pdf"}
@@ -781,6 +791,9 @@ def _contato_derivado(cont: dict) -> dict:
         for t in d["telefones"])
     d["emails_txt"] = "\n".join(d["emails"])
     d["enderecos_txt"] = "\n".join(_fmt_endereco(e) for e in d["enderecos"])
+    # Endereço postável? Exige ao menos um endereço com CEP (chave do fluxo dos Correios).
+    # Sem endereço, a CARTA fica indisponível (gravar por carta / expedir correspondência).
+    d["tem_endereco"] = any((e.get("cep") or "").strip() for e in d["enderecos"])
     tem_tel = len(d["telefones"]) > 0
     wa_nums = d["whatsapp_numeros"]
     if wa_nums:
@@ -1047,10 +1060,34 @@ def _enriquecer_conjunto(box: dict, cont: dict) -> dict:
     return d
 
 
+def _tramites_info(t: dict, conjunto: bool) -> list[dict]:
+    """Dados da(s) TRAMITAÇÃO(ÕES) ATENDIDA(S) no contato — guardados no registro do
+    histórico para exibir na linha retrátil (card vermelho): data, remetente, prazo e
+    descrição. Sempre uma LISTA (1 item na tramitação única; N no conjunto)."""
+    if conjunto:
+        datas = t.get("datas_tramites") or []
+        rems = t.get("remetentes_tramites") or []
+        praz = t.get("prazos_tramites") or []
+        descs = t.get("descricoes_tramites") or []
+        n = max(len(datas), len(rems), len(praz), len(descs), 0)
+        return [{
+            "data": datas[i] if i < len(datas) else "",
+            "remetente": rems[i] if i < len(rems) else "",
+            "prazo": praz[i] if i < len(praz) else "",
+            "descricao": descs[i] if i < len(descs) else "",
+        } for i in range(n)]
+    return [{
+        "data": t.get("data_envio", ""),
+        "remetente": t.get("remetente", ""),
+        "prazo": t.get("prazo", ""),
+        "descricao": t.get("descricao_tramite", ""),
+    }]
+
+
 def montar_dashboard(slug: str) -> dict:
     """Classifica os itens da caixa em 3 grupos: triagem, pendentes e fila (gravados).
     Itens têm `tipo` = 'tramite' | 'conjunto' | 'triagem'. Itens JÁ ENVIADOS (e que
-    ainda não saíram da caixa) não são exibidos — ficam só no Histórico de mensagens."""
+    ainda não saíram da caixa) não são exibidos — ficam só no Histórico de contatos."""
     triagem, pendentes, fila = [], [], []
     bdir = _box_dir(slug)
     if bdir.is_dir():
@@ -1237,7 +1274,7 @@ def gravar_conjunto(slug: str, paj_norm: str, mensagem: str, meios: list[str],
     # Encaminhamentos cumulativos do CONJUNTO.
     if "telefone" in todos:
         enfileirar_ligacao(slug, paj_norm, "", mensagem=mensagem, tipo="conjunto")
-    if "carta" in todos:
+    if "carta" in todos and _paj_tem_endereco(paj_norm):
         encaminhar_correspondencia(slug, paj_norm, "", mensagem=mensagem, tipo="conjunto")
     msg_meios = [m for m in todos if m in envio_service.MEIOS]
     box = _ler_box(slug, paj_norm)  # re-lê após encaminhamentos
@@ -1919,6 +1956,14 @@ _ALERTA_FORA_CAIXA_DET = (
     "usuário. Envio cancelado; confira manualmente (possível remoção)."
 )
 
+# Aviso (NÃO bloqueia) quando o trâmite saiu da caixa por AÇÃO EXTERNA (possível
+# conclusão por outro usuário) e NÃO há registro NOSSO de conclusão para ele. O envio
+# por meio(s) adicional(is) segue mesmo assim (decisão do usuário: multi-meio livre).
+_ALERTA_FORA_CAIXA_EXTERNO = (
+    "⚠ Atenção: o trâmite não está mais na caixa de grupo (possível conclusão por outro "
+    "usuário). Enviando mesmo assim — confira manualmente se necessário."
+)
+
 
 def _marcar_alerta_fora_caixa(slug: str, paj_norm: str, tipo: str, id_tramite: str) -> None:
     """Marca a tramitação/conjunto com 'alerta_fora_caixa' (selo de conferência manual /
@@ -1931,6 +1976,19 @@ def _marcar_alerta_fora_caixa(slug: str, paj_norm: str, tipo: str, id_tramite: s
     alvo["alerta_fora_caixa"] = {"em": _dt.datetime.now().isoformat(timespec="seconds"),
                                  "detalhe": _ALERTA_FORA_CAIXA_DET}
     _gravar_box(slug, box)
+
+
+def _salvar_sessao_log(meio: str, log: list, falha: bool) -> None:
+    """Salva (best-effort) UMA sessão de envio no log de disparos, a partir de um
+    `log` interno — usado pelos meios SEM modal ao vivo (Ligações/Correspondências;
+    WhatsApp/App são capturados no stream da rota). NUNCA propaga erro: o envio não
+    pode quebrar por causa do log."""
+    import contextlib
+    with contextlib.suppress(Exception):
+        from services import disparos_service
+        linhas = disparos_service.linhas_de_log(log)
+        if linhas:
+            disparos_service.registrar_sessao(meio, linhas, bool(falha))
 
 
 async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
@@ -1972,9 +2030,10 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
 
     # Verificação anti-duplicidade (só em modo REAL): a(s) tramitação(ões) originária(s)
     # ainda está(ão) na caixa? Se TODAS saíram (outro usuário já concluiu), NÃO envia —
-    # loga em vermelho e marca o item para conferência manual (possível remoção).
-    # EXCEÇÃO — REENVIO: o trâmite originário já foi concluído e saiu da caixa POR
-    # DEFINIÇÃO; a verificação não se aplica (acusaria "fora da caixa" indevidamente).
+    # A verificação NÃO bloqueia (multi-meio livre): se o trâmite saiu da caixa,
+    # apenas informamos. Se fomos NÓS que concluímos (envio anterior por outro meio),
+    # seguimos sem alarde; se saiu por AÇÃO EXTERNA (possível outro usuário), avisamos
+    # e seguimos mesmo assim. EXCEÇÃO — REENVIO: dispensada (já concluído por definição).
     ids_orig = [i for i in ids if str(i).strip()]
     algum_real = any(config_service.get_envio_modo_meio(m) == "real" for m in meios)
     if ids_orig and algum_real and t.get("reenvio"):
@@ -1983,11 +2042,13 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
     elif ids_orig and algum_real:
         fora = await _tramites_fora_da_caixa(ids_orig)
         if fora and len(fora) == len(ids_orig):
-            yield {"level": "erro", "msg": f"     ✗ Verificação na caixa: {_ALERTA_FORA_CAIXA_DET}"}
-            _marcar_alerta_fora_caixa(slug, paj_norm, "conjunto" if conjunto else "tramite",
-                                      "" if conjunto else ids_orig[0])
-            yield {"_status": "pulado"}
-            return
+            previa = _conclusao_previa(ids_orig)
+            if previa:
+                yield {"level": "aviso",
+                       "msg": "     Verificação na caixa: trâmite já concluído por este painel ("
+                              + _detalhe_ja_concluido(previa) + ") — seguindo com o envio."}
+            else:
+                yield {"level": "aviso", "msg": "     " + _ALERTA_FORA_CAIXA_EXTERNO}
 
     cont = ler_contato(paj_norm)
     anexos_meta = t.get("anexos", []) or []
@@ -2020,6 +2081,7 @@ async def _enviar_item_stream(slug, caixa, t, modo, rotulo="", meio_unico=None):
         "oficio": t.get("oficio", ""),
         "id_tramite": ids[0] if len(ids) == 1 else "", "tramite_ids": ids,
         "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
+        "tramites_info": _tramites_info(t, conjunto),
         "tipo": t.get("sugestao_tipo", ""),  # classificação do texto padrão
         "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
         "mensagem": mensagem, "anexos": anexos_meta,
@@ -2237,20 +2299,23 @@ def _log_passo(log: list, etapa: str, ok: bool | None, detalhe: str, ts: str | N
     })
 
 
-def _evento_passo(etapa: str, ok: bool | None, detalhe: str, prefixo: str = "     ") -> dict:
-    """Formata um passo como evento SSE (linha do popup de progresso)."""
+def _evento_passo(etapa: str, ok: bool | None, detalhe: str, prefixo: str = "     ",
+                  nivel: str | None = None) -> dict:
+    """Formata um passo como evento SSE (linha do popup de progresso). `nivel` força a
+    cor da linha (ex.: 'aviso' = âmbar); por padrão deriva de `ok`."""
     icone = "✓" if ok else ("✗" if ok is False else "•")
-    nivel = "ok" if ok else ("erro" if ok is False else "muted")
+    niv = nivel or ("ok" if ok else ("erro" if ok is False else "muted"))
     txt = f"{prefixo}{icone} {etapa}" + (f": {detalhe}" if detalhe else "")
-    return {"level": nivel, "msg": txt}
+    return {"level": niv, "msg": txt}
 
 
-def _passo(log: list, emit, etapa: str, ok: bool | None, detalhe: str) -> None:
+def _passo(log: list, emit, etapa: str, ok: bool | None, detalhe: str, nivel: str | None = None) -> None:
     """Registra o passo no log do histórico E, se houver `emit`, transmite ao popup
-    em tempo real. `emit(evento_dict)` é fornecido pelos fluxos em streaming."""
+    em tempo real. `emit(evento_dict)` é fornecido pelos fluxos em streaming. `nivel`
+    força a cor da linha no popup (ex.: 'aviso' = âmbar)."""
     _log_passo(log, etapa, ok, detalhe)
     if emit is not None:
-        emit(_evento_passo(etapa, ok, detalhe))
+        emit(_evento_passo(etapa, ok, detalhe, nivel=nivel))
 
 
 async def _drenar_com_passos(coro_factory):
@@ -2599,6 +2664,8 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
 # CORRESPONDÊNCIA (expedição pelos Correios — fluxo futuro).
 _FASE_ATENDIMENTO_RETORNO = "Atendimento de retorno"
 _FASE_TENTATIVA_INFRUTIFERA = "Tentativa infrutífera de contato com o assistido"
+# Fase da movimentação ao expedir uma carta pelos Correios (nome exato no SISDPU).
+_FASE_CARTA_EXPEDIDA = "Ofício/Carta/Comunicação expedida"
 LIGACOES_MAX_TENTATIVAS = 3
 
 
@@ -2797,7 +2864,7 @@ async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
     if frutifero:
         fase = _FASE_ATENDIMENTO_RETORNO
         texto = (registro or "").strip() or "Contato telefônico frutífero com o assistido."
-        descricao = f"{texto}\n\nContato telefônico realizado para o(s) {_rot_num}: {num_txt}."
+        descricao = f"Contato telefônico realizado para o(s) {_rot_num}: {num_txt}.\n\n{texto}"
     else:
         fase = _FASE_TENTATIVA_INFRUTIFERA
         descricao = (f"[Painel de Comunicações] Tentativa {n_atual} de {LIGACOES_MAX_TENTATIVAS} "
@@ -2845,6 +2912,7 @@ async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
                (f'registrada · "mov. {mov_seq}"' if mov_ok else mov.get("detalhe", "")))
         if not mov_ok:
             # Movimentação real falhou → NÃO conta a tentativa (o usuário corrige e refaz).
+            _salvar_sessao_log("telefone", log, True)
             return {"ok": False, "erro": mov.get("detalhe", "Falha na movimentação.")}
         mov_url = f"{sisdpu_client.SISDPU_URL}/pages/atendimento/detalhamentoProcesso.xhtml?id={id_proc}" if id_proc else ""
         mov_status_val = "movimentado"
@@ -2892,6 +2960,7 @@ async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
         "id_tramite": (originarios[0] if len(originarios) == 1 else ""),
         "tramite_ids": originarios, "conjunto": (tipo == "conjunto"),
         "tramite_data": d.get("data_envio", ""),
+        "tramites_info": _tramites_info(d, tipo == "conjunto"),
         "caixa_slug": slug, "caixa_nome": caixa.get("nome", ""), "grupo": caixa.get("grupo", ""),
         "mensagem": (tentativa["registro"] if frutifero else
                      f"Tentativa {n_atual}/{LIGACOES_MAX_TENTATIVAS} de contato telefônico — sem êxito."),
@@ -2909,22 +2978,42 @@ async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
         "log": log,
         "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
     })
+    _salvar_sessao_log("telefone", log, hist_status not in ("enviado", "simulado"))
     return {"ok": True, "resultado": resultado, "tentativa": n_atual, "simulado": simulado,
             "status_ligacao": lig["status"], "mov_seq": mov_seq,
             "esgotado": lig["status"] == "esgotado", "detalhe": ""}
 
 
 # ==================== CORRESPONDÊNCIAS ====================
+def _gerar_carta_corpo(msg: str) -> str:
+    """CORPO da carta a partir da mensagem-base (Sugestão). Com IA disponível, adapta
+    para linguagem simples/concisa (leitor humilde); sem IA (Modo Simples) ou em
+    falha/cota, usa a própria mensagem-base. Chamado ao gravar por carta / expedir."""
+    base = (msg or "").strip()
+    if not base:
+        return ""
+    if analise_service.disponivel():
+        with contextlib.suppress(Exception):
+            corpo = analise_service.gerar_corpo_carta(base)
+            if corpo:
+                return corpo
+    return base
+
+
 def encaminhar_correspondencia(slug: str, paj_norm: str, id_tramite: str, motivo: str = "",
                                mensagem: str = "", encerrar_ligacao: bool = False,
-                               tipo: str = "tramite") -> dict:
+                               tipo: str = "tramite", gerar_corpo: bool = False) -> dict:
     """Encaminha um trâmite (ou CONJUNTO) para a fila de CORRESPONDÊNCIAS. `mensagem` = base do
-    texto da carta (Correios, fluxo futuro). `encerrar_ligacao` = True apenas quando vem do
-    botão 'Enviar correspondência' da central de Ligações; do modal 'Gravar para envio' é False
-    (cumulativo). Idempotente — se já pendente, atualiza a mensagem-base."""
+    texto da carta. `encerrar_ligacao` = True apenas quando vem do botão 'Enviar correspondência'
+    da central de Ligações; do modal 'Gravar para envio' é False (cumulativo). Idempotente — se já
+    pendente, atualiza a mensagem-base. `gerar_corpo=False` (padrão): NÃO chama a IA aqui — para
+    não atrasar a triagem da caixa; o corpo é gerado sob demanda por PAJ (botão 'Gerar carta')."""
     box = _ler_box(slug, paj_norm)
     if not box:
         return {"ok": False, "erro": "PAJ não encontrado."}
+    # Sem endereço postável a carta é indisponível (não encaminha).
+    if not _paj_tem_endereco(paj_norm):
+        return {"ok": False, "erro": "PAJ sem endereço cadastrado — carta indisponível."}
     alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
     if alvo is None:
         return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
@@ -2934,6 +3023,8 @@ def encaminhar_correspondencia(slug: str, paj_norm: str, id_tramite: str, motivo
     if corr.get("status") == "pendente":
         if msg:
             corr["mensagem_base"] = msg
+            if gerar_corpo:
+                corr["carta_corpo"] = _gerar_carta_corpo(msg)  # regenera o corpo pela IA (sob demanda)
             alvo["correspondencia"] = corr
             _gravar_box(slug, box)
         return {"ok": True, "ja": True}
@@ -2944,25 +3035,708 @@ def encaminhar_correspondencia(slug: str, paj_norm: str, id_tramite: str, motivo
         "tentativas_ligacao": len(lig.get("tentativas") or []),
         "motivo": (motivo or "").strip(),
         "mensagem_base": msg,
+        "carta_corpo": (_gerar_carta_corpo(msg) if gerar_corpo else ""),  # IA só sob demanda ('Gerar carta')
         "tipo": tipo,
     }
     if encerrar_ligacao and lig.get("status"):
         lig["status"] = "encaminhado_correspondencia"
         alvo["ligacao"] = lig
     _gravar_box(slug, box)
+    # Entrada NOVA na fila → começa SEM endereço de envio/validação (valem só enquanto na fila:
+    # se o PAJ voltar depois de removido/expedido, exige nova validação e nova geração da carta).
+    cont = ler_contato(paj_norm)
+    if _limpar_endereco_envio(cont):
+        _gravar_contato(cont)
+    _det_corr = ("Encaminhado para expedição por carta"
+                 + (" (após ligações infrutíferas)" if lig.get("tentativas") else "")
+                 + ((" — motivo: " + motivo.strip()) if (motivo or "").strip() else "")
+                 + ". Expedição pelos Correios: pendente.")
+    _salvar_sessao_log("carta",
+                       [{"ok": None, "etapa": "Encaminhamento para correspondência", "detalhe": _det_corr}],
+                       False)
     return {"ok": True}
 
 
+def editar_carta_corpo(slug: str, paj_norm: str, id_tramite: str, texto: str,
+                       tipo: str = "tramite") -> dict:
+    """Salva o CORPO da carta editado MANUALMENTE na conferência (central de
+    Correspondências). NÃO regera pela IA — grava exatamente o texto conferido."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, *_ = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    corr = alvo.get("correspondencia") or {}
+    if corr.get("status") != "pendente":
+        return {"ok": False, "erro": "Correspondência não está pendente."}
+    corr["carta_corpo"] = colapsar_paragrafos(remover_emojis(texto or ""))
+    alvo["correspondencia"] = corr
+    _gravar_box(slug, box)
+    return {"ok": True}
+
+
+def gerar_carta(slug: str, paj_norm: str, id_tramite: str, tipo: str = "tramite") -> dict:
+    """Gera pela IA o CORPO da carta de UM PAJ da fila de correspondências, SOB DEMANDA
+    (botão 'Gerar carta'). A geração é feita aqui — e não no 'Gravar para envio' — para não
+    atrasar a triagem da caixa. Retorna {ok, carta_corpo, ia}."""
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, *_ = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    corr = alvo.get("correspondencia") or {}
+    if corr.get("status") != "pendente":
+        return {"ok": False, "erro": "Correspondência não está pendente."}
+    base = (corr.get("mensagem_base") or "").strip()
+    if not base:
+        return {"ok": False, "erro": "Sem texto-base para gerar a carta."}
+    corpo = _gerar_carta_corpo(base)
+    corr["carta_corpo"] = corpo
+    alvo["correspondencia"] = corr
+    _gravar_box(slug, box)
+    return {"ok": True, "carta_corpo": corpo, "ia": analise_service.disponivel()}
+
+
+def _primeiro_endereco(cont: dict) -> dict | None:
+    """1º endereço do PAJ com CEP (o que será usado na expedição)."""
+    for e in (cont.get("enderecos") or []):
+        if (e.get("cep") or "").strip():
+            return e
+    return None
+
+
+_CEP_CACHE: dict = {}
+
+
+CEP_INEXISTENTE = "INEXISTENTE"  # sentinela: CEP bem/mal formado que NÃO existe no ViaCEP
+
+
+def resolver_cep(cep: str):
+    """Resolve um CEP via ViaCEP. Retorna:
+      - {logradouro, bairro, cidade, uf} → CEP encontrado;
+      - CEP_INEXISTENTE → CEP malformado ou inexistente (ViaCEP respondeu 'erro'/400);
+      - None → ViaCEP indisponível (offline/timeout) — não dá p/ verificar.
+    Cacheia os resultados DEFINITIVOS (dict e inexistente); NÃO cacheia o None (offline)
+    para permitir nova tentativa depois."""
+    digs = "".join(c for c in str(cep or "") if c.isdigit())
+    if len(digs) != 8:
+        return CEP_INEXISTENTE  # CEP malformado = inválido (abre o modal de correção)
+    if digs in _CEP_CACHE:
+        return _CEP_CACHE[digs]
+    import json as _j
+    import urllib.error as _ue
+    import urllib.request as _u
+    res = None
+    try:
+        with _u.urlopen(f"https://viacep.com.br/ws/{digs}/json/", timeout=3) as r:
+            d = _j.loads(r.read().decode("utf-8"))
+        if d.get("erro"):
+            res = CEP_INEXISTENTE
+        else:
+            res = {"logradouro": (d.get("logradouro") or "").strip(),
+                   "bairro": (d.get("bairro") or "").strip(),
+                   "cidade": (d.get("localidade") or "").strip(),
+                   "uf": (d.get("uf") or "").strip()}
+    except _ue.HTTPError as e:
+        res = CEP_INEXISTENTE if e.code == 400 else None  # 400 = CEP inválido; outros = indisponível
+    except Exception:  # noqa: BLE001 — offline/timeout → indisponível (não cacheia)
+        res = None
+    if res is not None:
+        _CEP_CACHE[digs] = res
+    return res
+
+
+def _norm_logr(s: str) -> str:
+    """Normaliza logradouro p/ comparar: minúsculas, sem acento, sem o tipo (rua/av...)."""
+    import unicodedata
+    s = "".join(c for c in unicodedata.normalize("NFKD", (s or "").lower())
+                if not unicodedata.combining(c))
+    s = re.sub(r"^(rua|r|av|avenida|travessa|tv|alameda|al|rodovia|rod|estrada|estr|praca|"
+               r"largo|quadra|q|servidao|servidão)\.?\s+", "", s)
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _norm_txt(s: str) -> str:
+    """Normaliza texto p/ comparar (município): minúsculas, sem acento, sem '(...)'
+    (ex.: 'Curitiba (capital)' → 'curitiba')."""
+    import unicodedata
+    s = "".join(c for c in unicodedata.normalize("NFKD", (s or "").lower())
+                if not unicodedata.combining(c))
+    s = re.sub(r"\(.*?\)", "", s)
+    s = re.sub(r"[^a-z0-9 ]+", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# UF pode vir como SIGLA (ViaCEP: "PR") ou NOME por extenso (cadastro SISDPU: "PARANA").
+# Para comparar sem falso-positivo, canonizamos tudo para a SIGLA.
+_UF_NOME2SIGLA = {
+    "acre": "AC", "alagoas": "AL", "amapa": "AP", "amazonas": "AM", "bahia": "BA",
+    "ceara": "CE", "distrito federal": "DF", "espirito santo": "ES", "goias": "GO",
+    "maranhao": "MA", "mato grosso": "MT", "mato grosso do sul": "MS", "minas gerais": "MG",
+    "para": "PA", "paraiba": "PB", "parana": "PR", "pernambuco": "PE", "piaui": "PI",
+    "rio de janeiro": "RJ", "rio grande do norte": "RN", "rio grande do sul": "RS",
+    "rondonia": "RO", "roraima": "RR", "santa catarina": "SC", "sao paulo": "SP",
+    "sergipe": "SE", "tocantins": "TO"}
+_UF_SIGLAS = set(_UF_NOME2SIGLA.values())
+
+
+def _uf_sigla(x: str) -> str:
+    """Devolve a SIGLA da UF a partir de sigla OU nome por extenso (sem acento).
+    Ex.: 'PR'→'PR', 'PARANA'→'PR', 'Paraná'→'PR'. Desconhecido → devolve normalizado."""
+    s = _norm_txt(x).upper()
+    if not s:
+        return ""
+    if len(s) == 2 and s in _UF_SIGLAS:
+        return s
+    return _UF_NOME2SIGLA.get(s.lower(), s)
+
+
+def _conferir_endereco(end: dict | None) -> dict:
+    """Compara o endereço do CADASTRO com o resolvido pelo CEP (ViaCEP). Retorna
+    {resolvido, resolvido_txt, cadastro_txt, divergente, cep_localidade, verificado,
+    cep_invalido}. `cep_invalido`=True quando o CEP não existe (→ modal de correção);
+    `verificado`=False só quando o ViaCEP está indisponível (offline)."""
+    out = {"resolvido": None, "resolvido_txt": "", "cadastro_txt": (_fmt_endereco(end) if end else ""),
+           "divergente": False, "divergencias": [], "cep_localidade": False,
+           "verificado": False, "cep_invalido": False}
+    if not end:
+        return out
+    r = resolver_cep(end.get("cep", ""))
+    if r is None:
+        return out  # ViaCEP indisponível (offline) → não verificado
+    out["verificado"] = True
+    if r == CEP_INEXISTENTE:
+        out["cep_invalido"] = True   # CEP não existe → precisa corrigir
+        return out
+    out["resolvido"] = r
+    out["resolvido_txt"] = ", ".join(p for p in [
+        r["logradouro"], r["bairro"], (f'{r["cidade"]}/{r["uf"]}' if r["cidade"] or r["uf"] else "")] if p)
+    # Município e UF: o CEP determina a cidade/UF — se o cadastro divergir, é erro
+    # (vale inclusive para CEP de localidade, que não tem logradouro p/ comparar).
+    divs = []
+    mc, mr = _norm_txt(end.get("municipio", "")), _norm_txt(r["cidade"])
+    uc, ur = _uf_sigla(end.get("uf", "")), _uf_sigla(r["uf"])  # canoniza p/ sigla (nome×sigla não é divergência)
+    if mc and mr and mc != mr:
+        divs.append("município")
+    if uc and ur and uc != ur:
+        divs.append("UF")
+    if r["logradouro"]:
+        lc, lr = _norm_logr(end.get("logradouro", "")), _norm_logr(r["logradouro"])
+        if lc and lr and lc != lr and lc not in lr and lr not in lc:
+            divs.append("logradouro")
+    else:
+        out["cep_localidade"] = True  # CEP de localidade (cidade inteira, sem logradouro)
+    out["divergente"] = bool(divs)
+    out["divergencias"] = divs
+    return out
+
+
+def _end_fingerprint(end: dict | None) -> str:
+    """Assinatura do endereço p/ saber se uma validação salva ainda vale (invalida se
+    CEP/logradouro/município/UF mudarem)."""
+    if not end:
+        return ""
+    return "|".join(_norm_txt(str(end.get(k, ""))) for k in ("cep", "logradouro", "municipio", "uf"))
+
+
+def _persistir_validacao(cont: dict, end: dict | None, conf: dict) -> None:
+    """Salva no CONTATO o resultado da conferência de endereço, com a assinatura do
+    endereço conferido — para re-exibir o badge e reabilitar o Expedir ao voltar à aba."""
+    cont["_validacao_endereco"] = {
+        "fp": _end_fingerprint(end), "em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "verificado": conf["verificado"], "divergente": conf["divergente"],
+        "divergencias": conf.get("divergencias", []),
+        "cep_localidade": conf["cep_localidade"], "cep_invalido": conf["cep_invalido"],
+        "resolvido": conf.get("resolvido")}  # dados do CEP (p/ montar o endereço de envio)
+    _gravar_contato(cont)
+
+
+def _limpar_endereco_envio(cont: dict) -> bool:
+    """Remove o endereço de ENVIO e a validação (valem só enquanto o PAJ está na fila).
+    Retorna True se algo foi removido (o chamador grava o contato)."""
+    removido = False
+    for k in ("_validacao_endereco", "_endereco_envio"):
+        if cont.pop(k, None) is not None:
+            removido = True
+    return removido
+
+
+def _endereco_envio(cont: dict) -> str:
+    """Endereço EXATO para onde a carta será enviada. É um dado À PARTE do cadastro (chave
+    `_endereco_envio`): SÓ existe depois que o endereço foi VALIDADO e SALVO (validação casando,
+    sem CEP inválido nem divergência) — senão retorna "" (vazio). Monta: número/complemento/CEP
+    do endereço de envio + logradouro/bairro/cidade/UF conforme o CEP (o site dos Correios
+    preenche o logradouro pelo CEP); em CEP de localidade / ViaCEP indisponível, usa o do envio."""
+    end = cont.get("_endereco_envio")
+    v = cont.get("_validacao_endereco") or {}
+    if not end or not v or v.get("fp") != _end_fingerprint(end):
+        return ""                                   # sem endereço de envio validado
+    if v.get("cep_invalido") or v.get("divergente"):
+        return ""                                   # ainda não é um destino válido
+    envio = dict(end)
+    r = v.get("resolvido") or {}
+    if v.get("verificado") and not v.get("cep_localidade") and r.get("logradouro"):
+        envio["logradouro"] = r.get("logradouro") or envio.get("logradouro")
+        if r.get("bairro"):
+            envio["bairro"] = r["bairro"]
+        if r.get("cidade"):
+            envio["municipio"] = r["cidade"]
+        if r.get("uf"):
+            envio["uf"] = r["uf"]
+    return _fmt_endereco(envio)
+
+
+def _validacao_para_render(cont: dict) -> dict:
+    """A partir da validação SALVA (se ainda casar com o ENDEREÇO DE ENVIO), devolve o que a
+    lista de correspondências precisa: {badge:{cls,txt}|None, liberado:bool, divergente:0/1}.
+    Espelha os badges/estados do botão 'Validar endereço' do front."""
+    v = cont.get("_validacao_endereco") or {}
+    end = cont.get("_endereco_envio")
+    if not v or not end or v.get("fp") != _end_fingerprint(end):
+        return {"badge": None, "liberado": False, "divergente": 0}  # nunca validado / desatualizado
+    if v.get("cep_invalido"):
+        return {"badge": {"cls": "cep-div", "txt": "⚠ CEP não encontrado — revalide"}, "liberado": False, "divergente": 0}
+    if not v.get("verificado"):
+        return {"badge": {"cls": "cep-erro", "txt": "⚠ CEP não verificado (ViaCEP indisponível) — confira manualmente"},
+                "liberado": True, "divergente": 1}
+    if v.get("divergente"):
+        campos = ", ".join(v.get("divergencias") or []) or "endereço"
+        return {"badge": {"cls": "cep-div", "txt": f"⚠ Diverge do CEP em: {campos} — corrija"}, "liberado": False, "divergente": 0}
+    if v.get("cep_localidade"):
+        return {"badge": {"cls": "cep-loc", "txt": "ⓘ CEP de localidade — usará o logradouro do cadastro"}, "liberado": True, "divergente": 0}
+    return {"badge": {"cls": "cep-ok", "txt": "✓ Endereço validado"}, "liberado": True, "divergente": 0}
+
+
+def _parse_data_br(s: str):
+    """Extrai uma date de 'DD/MM/AAAA' (ou None)."""
+    m = re.search(r"(\d{2})/(\d{2})/(\d{4})", s or "")
+    if not m:
+        return None
+    with contextlib.suppress(Exception):
+        return _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    return None
+
+
+def _montar_descricao_carta(assistido: str, end: dict, lote: str, previsao: str,
+                            inteiro_teor: str) -> str:
+    """Descrição HTML da movimentação 'Ofício/Carta/Comunicação expedida'."""
+    import html as _html
+    e = _html.escape
+    endereco = _fmt_endereco(end) if end else "—"
+    linhas = [
+        "<strong>[Painel de Comunicações] Carta expedida pelos Correios (e-Carta)</strong>",
+        f"Destinatário: <strong>{e(assistido or '—')}</strong>",
+        f"Endereço: {e(endereco)}",
+        f"Lote/Mensagem SMT: <strong>{e(lote or '—')}</strong>",
+        f"Previsão de entrega: {e(previsao or 'não informada')}",
+    ]
+    corpo = e(inteiro_teor or "").replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+    return (f"<p>{'<br>'.join(linhas)}</p>"
+            f"<p>Carta e comprovante da postagem em anexo.</p>"
+            f"<p><strong>Inteiro teor da carta:</strong><br><em>{corpo}</em></p>")
+
+
+def validar_endereco_carta(paj_norm: str) -> dict:
+    """Valida o endereço p/ expedição e DEFINE o endereço de ENVIO (dado à parte do cadastro):
+    valida o envio já salvo ou, se ainda não houver, o do cadastro. Resolve o CEP (ViaCEP) e
+    compara. Chamado pelo botão 'Validar endereço' antes de habilitar o Expedir. NÃO altera o
+    cadastro do PAJ (`enderecos`)."""
+    cont = ler_contato(paj_norm)
+    base = cont.get("_endereco_envio") or _primeiro_endereco(cont)
+    if not base:
+        return {"ok": False, "erro": "PAJ sem endereço com CEP — carta indisponível."}
+    campos = {k: (str(base.get(k) or "")).strip() for k in _CAMPOS_ENDERECO}
+    cont["_endereco_envio"] = campos             # validar define/confirma o endereço de envio
+    conf = _conferir_endereco(campos)
+    _persistir_validacao(cont, campos, conf)     # grava _endereco_envio + validação (1 _gravar_contato)
+    return _resp_conf(conf, campos, cont)
+
+
+_CAMPOS_ENDERECO = ("cep", "logradouro", "numero", "complemento", "bairro", "municipio", "uf")
+
+
+def _resp_conf(conf: dict, campos: dict, cont: dict | None = None) -> dict:
+    """Payload padrão das rotas de validação/salvamento a partir da conferência + endereço.
+    Se `cont` for dado, inclui `endereco_envio_txt` = o Endereço de Envio já resolvido (""
+    quando ainda não é um destino válido) — o front atualiza o bloco 'Endereço de Envio'
+    na hora, sem precisar recarregar a página."""
+    return {"ok": True, "verificado": conf["verificado"], "divergente": conf["divergente"],
+            "divergencias": conf["divergencias"], "cep_localidade": conf["cep_localidade"],
+            "cep_invalido": conf["cep_invalido"], "cadastro_txt": conf["cadastro_txt"],
+            "resolvido_txt": conf["resolvido_txt"],
+            "cadastro": {k: (campos.get(k) or "") for k in _CAMPOS_ENDERECO},
+            "resolvido": conf["resolvido"],
+            "endereco_envio_txt": (_endereco_envio(cont) if cont is not None else "")}
+
+
+def _set_endereco_cadastro(cont: dict, campos: dict) -> None:
+    """Atualiza o 1º endereço com CEP do CADASTRO local (`enderecos`) — usar SÓ quando o SISDPU
+    confirmar a gravação, para o 'Endereço de Cadastro' refletir o que está de fato no SISDPU."""
+    ends = cont.get("enderecos") or []
+    idx = next((i for i, e in enumerate(ends) if (e.get("cep") or "").strip()), None)
+    if idx is None:
+        ends.insert(0, {})
+        idx = 0
+    ends[idx].update(campos)
+    cont["enderecos"] = ends
+
+
+def validar_endereco_editado(endereco: dict) -> dict:
+    """Valida um endereço EDITADO (SEM salvar): resolve o CEP informado e compara com o
+    logradouro digitado. Usado pelo botão 'Validar' do modal de conferência."""
+    end = {k: (str(endereco.get(k) or "")).strip() for k in _CAMPOS_ENDERECO}
+    if not end["cep"]:
+        return {"ok": False, "erro": "Informe o CEP."}
+    conf = _conferir_endereco(end)
+    return {"ok": True, "verificado": conf["verificado"], "divergente": conf["divergente"],
+            "divergencias": conf["divergencias"],
+            "cep_localidade": conf["cep_localidade"], "cep_invalido": conf["cep_invalido"],
+            "cadastro_txt": conf["cadastro_txt"],
+            "resolvido_txt": conf["resolvido_txt"], "resolvido": conf["resolvido"]}
+
+
+def atualizar_endereco_local(paj_norm: str, endereco: dict) -> dict:
+    """'Salvar endereço para envio': grava o endereço de ENVIO (dado à parte) e revalida.
+    NÃO altera o 'Endereço de Cadastro' (`enderecos`) — este só muda com gravação confirmada no
+    SISDPU (ou por sincronização). Retorna a nova conferência."""
+    cont = ler_contato(paj_norm)
+    campos = {k: (str(endereco.get(k) or "")).strip() for k in _CAMPOS_ENDERECO}
+    if not campos["cep"]:
+        return {"ok": False, "erro": "Informe o CEP."}
+    cont["_endereco_envio"] = campos             # só o endereço de envio
+    conf = _conferir_endereco(campos)
+    _persistir_validacao(cont, campos, conf)     # grava _endereco_envio + validação
+    return _resp_conf(conf, campos, cont)
+
+
+async def atualizar_endereco(slug: str, paj_norm: str, id_tramite: str, tipo: str,
+                             endereco: dict) -> dict:
+    """Grava o endereço corrigido no CADASTRO DO ASSISTIDO no SISDPU E no cache local,
+    e revalida. Retorna a conferência (como atualizar_endereco_local) + sisdpu_ok/detalhe."""
+    from ingestao import sisdpu_client
+    from services import credenciais_service
+    box = _ler_box(slug, paj_norm)
+    if not box:
+        return {"ok": False, "erro": "PAJ não encontrado."}
+    alvo, id_proc, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
+    if not id_proc:
+        sis = {"ok": False, "detalhe": "PAJ sem id de processo — atualizado só localmente."}
+    elif not (credenciais_service.destrancado() or credenciais_service.env_tem_credenciais()):
+        sis = {"ok": False, "detalhe": "SISDPU desconectado"}   # não tenta abrir o navegador
+    else:
+        try:
+            sis = await sisdpu_client.atualizar_endereco_assistido(id_proc, endereco)
+        except Exception as e:  # noqa: BLE001
+            sis = {"ok": False, "detalhe": f"falha ao gravar no SISDPU: {e}"}
+    # Sempre grava o endereço de ENVIO + validação; o 'Endereço de Cadastro' (`enderecos`) só é
+    # atualizado se o SISDPU CONFIRMOU a gravação (senão continua espelhando o SISDPU real).
+    cont = ler_contato(paj_norm)
+    campos = {k: (str(endereco.get(k) or "")).strip() for k in _CAMPOS_ENDERECO}
+    if not campos["cep"]:
+        return {"ok": False, "erro": "Informe o CEP."}
+    cont["_endereco_envio"] = campos
+    if sis.get("ok"):
+        _set_endereco_cadastro(cont, campos)
+    conf = _conferir_endereco(campos)
+    _persistir_validacao(cont, campos, conf)   # 1 _gravar_contato (envio + validação [+ cadastro])
+    local = _resp_conf(conf, campos)
+    local["sisdpu_ok"] = bool(sis.get("ok"))
+    local["sisdpu_detalhe"] = sis.get("detalhe", "")
+    return local
+
+
+async def expedir_correspondencia(slug: str, paj_norm: str, id_tramite: str,
+                                  tipo: str = "tramite", forcar: bool = False) -> dict:
+    """Wrapper NÃO-streaming: consome `expedir_correspondencia_stream` e devolve só o
+    resultado final (compat p/ chamadas sem modal ao vivo)."""
+    resultado = {"ok": False, "erro": "sem retorno"}
+    async for ev in expedir_correspondencia_stream(slug, paj_norm, id_tramite, tipo, forcar):
+        if ev.get("done"):
+            resultado = ev.get("resultado", resultado)
+    return resultado
+
+
+async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: str,
+                                         tipo: str = "tramite", forcar: bool = False):
+    """Expede a carta pelos Correios (SMT) e, em caso de POSTAGEM (modo real), movimenta
+    o PAJ na fase 'Ofício/Carta/Comunicação expedida' + junta os DOIS PDFs (carta + comprovante
+    da postagem) e TRAMITA para a caixa de aguardo (prazo = previsão de entrega + N dias). Governado
+    pelo modo do meio 'correspondencia': SIMULADO percorre o assistente e para no Resumo (não posta).
+    GERA eventos SSE do log AO VIVO — sub-passos no site dos Correios e depois movimentação/tramitação
+    no SISDPU — e, por último, {"done": True, "resultado": {...}}."""
+    from ingestao import correios_client, sisdpu_client
+    from services import historico_service
+    log: list = []
+
+    def passo(etapa, ok, detalhe, nivel=None):
+        """Registra no log do histórico E devolve o evento SSE para yield."""
+        _log_passo(log, etapa, ok, detalhe)
+        return _evento_passo(etapa, ok, detalhe, nivel=nivel)
+
+    def _falha(msg):
+        return {"done": True, "resultado": {"ok": False, "erro": msg}}
+
+    box = _ler_box(slug, paj_norm)
+    caixa = config_service.get_caixa(slug)
+    if not box or not caixa:
+        yield {"level": "erro", "msg": "PAJ/caixa não encontrado."}
+        yield _falha("PAJ/caixa não encontrado.")
+        return
+    if not _paj_tem_endereco(paj_norm):
+        yield {"level": "erro", "msg": "PAJ sem endereço cadastrado — carta indisponível."}
+        yield _falha("PAJ sem endereço cadastrado — carta indisponível.")
+        return
+    alvo, id_proc, originarios, paj_disp, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        yield {"level": "erro", "msg": "Trâmite/conjunto não encontrado."}
+        yield _falha("Trâmite/conjunto não encontrado.")
+        return
+    corr = alvo.get("correspondencia") or {}
+    if corr.get("status") != "pendente":
+        yield {"level": "erro", "msg": "Correspondência não está pendente."}
+        yield _falha("Correspondência não está pendente.")
+        return
+    cont = ler_contato(paj_norm)
+    # A carta vai para o ENDEREÇO DE ENVIO (validado/salvo); só cai no cadastro se, por algum
+    # motivo, não houver envio definido (fluxo antigo).
+    end = cont.get("_endereco_envio") or _primeiro_endereco(cont)
+    if not end:
+        yield {"level": "erro", "msg": "PAJ sem endereço com CEP."}
+        yield _falha("PAJ sem endereço com CEP.")
+        return
+    # Conferência do endereço: se o CEP resolver um logradouro divergente do cadastro,
+    # NÃO expede automaticamente (exige conferência manual → forcar=True).
+    conf = _conferir_endereco(end)
+    if conf["divergente"] and not forcar:
+        yield {"level": "aviso", "msg": "Endereço do CEP diverge do cadastro — conferência necessária."}
+        yield {"done": True, "resultado": {
+            "ok": False, "status": "conferencia",
+            "cadastro": conf["cadastro_txt"], "resolvido": conf["resolvido_txt"],
+            "erro": ("O endereço do CEP diverge do cadastro. Confira antes de expedir "
+                     "(ou confirme para expedir mesmo assim).")}}
+        return
+    assistido = cont.get("assistido", "") or ""
+    destinatario = {"nome": assistido, "cpf": cont.get("cpf", ""),
+                    "cep": end.get("cep", ""), "numero": end.get("numero", ""),
+                    "complemento": end.get("complemento", ""),
+                    # logradouro do CADASTRO: usado só se o CEP for de localidade (autofill vazio)
+                    "logradouro": end.get("logradouro", ""),
+                    "cep_localidade": conf["cep_localidade"]}
+    cabecalho = config_service.get_carta_cabecalho()
+    rodape = config_service.get_carta_rodape()
+    corpo = corr.get("carta_corpo", "") or corr.get("mensagem_base", "")
+    modo = config_service.get_envio_modo_meio("correspondencia")
+    efetivar = (modo == "real")
+    COMPROVANTES_CARTA_DIR.mkdir(parents=True, exist_ok=True)
+    yield {"level": "novo",
+           "msg": f"Expedição de carta — PAJ {paj_disp} · {assistido} · "
+                  f"modo {'REAL (posta e cobra)' if efetivar else 'simulado (não posta)'}"}
+    _log_passo(log, "Expedição de carta", None,
+               f"Destinatário {assistido} · CEP {end.get('cep', '')} · modo {'real' if efetivar else 'simulado'}")
+    # --- Correios: sub-passos do site AO VIVO (login → destinatário → carta → resumo → efetivar) ---
+    r = {"ok": False, "detalhe": "sem retorno"}
+    try:
+        async for ev in _drenar_com_passos(lambda emit: correios_client.expedir_carta(
+                destinatario, cabecalho, corpo, rodape, efetivar=efetivar,
+                comprovante_dir=str(COMPROVANTES_CARTA_DIR), emit=emit)):
+            if "_result" in ev:
+                r = ev["_result"]
+            else:
+                yield ev
+    except Exception as e:  # noqa: BLE001
+        r = {"ok": False, "detalhe": f"exceção: {e}"}
+    if not r.get("ok"):
+        yield passo("Expedição de carta", False, r.get("detalhe", ""))
+        yield _falha(r.get("detalhe", "Falha na expedição da carta."))
+        return
+    if not efetivar:
+        _log_passo(log, "Expedição de carta", None, "Modo simulado — chegou ao Resumo, sem postar.")
+        yield {"level": "ok", "msg": "Modo simulado: carta montada e conferida no Resumo (não postada)."}
+        yield {"done": True, "resultado": {
+            "ok": True, "status": "simulado",
+            "detalhe": "Modo simulado: a carta foi montada e chegou ao Resumo, mas NÃO foi postada."}}
+        return
+    # ---- POSTAGEM efetivada → Fase 3 (movimentação + juntada + tramitação) ----
+    lote = r.get("lote", "")
+    previsao = r.get("previsao_entrega", "")
+    comprovante = r.get("comprovante_caminho", "")
+    comp_nome = r.get("comprovante_nome", "")
+    carta_pdf = r.get("carta_pdf_caminho", "")    # PDF do CONTEÚDO da carta (capturado no "Visualizar")
+    carta_nome = r.get("carta_pdf_nome", "")
+    yield passo("Postagem nos Correios", True, f"Lote {lote or '—'} · previsão {previsao or 'não informada'}")
+    inteiro_teor = "\n\n".join(p for p in [cabecalho, corpo, rodape] if p).strip()
+    dias = config_service.get_carta_prazo_pos_entrega()
+    base = _parse_data_br(previsao) or _dt.date.today()
+    data_aguardar = (base + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
+    desc_mov = _montar_descricao_carta(assistido, end, lote, previsao, inteiro_teor)
+    # Dois anexos, com nomes UNIFORMES no SISDPU (o `nome` vira o nome do arquivo + a
+    # descrição do documento): "Carta" e "Comprovante da postagem".
+    anexos = []
+    if carta_pdf:
+        anexos.append({"nome": "Carta.pdf", "caminho": carta_pdf})
+    if comprovante:
+        anexos.append({"nome": "Comprovante da postagem.pdf", "caminho": comprovante})
+    anexos = anexos or None
+    n_anx = len(anexos or [])
+    yield {"level": "info",
+           "msg": f"     Movimentando o PAJ no SISDPU (fase '{_FASE_CARTA_EXPEDIDA}') · "
+                  f"{n_anx} anexo(s): carta + comprovante da postagem…"}
+    try:
+        mov = await sisdpu_client.movimentar_paj(
+            [{"id": id_proc, "numero": paj_disp}], desc_mov,
+            fase=_FASE_CARTA_EXPEDIDA, anexos=anexos,
+            tipo_arquivo="Correspondência", descricao_html=True)
+    except Exception as e:  # noqa: BLE001
+        mov = {"ok": False, "detalhe": f"exceção: {e}", "mov_seq": None}
+    mov_ok = bool(mov.get("ok"))
+    mov_seq = mov.get("mov_seq")
+    yield passo(f"Movimentação (fase '{_FASE_CARTA_EXPEDIDA}')", mov_ok,
+                (f'"mov. {mov_seq}"' if mov_ok else mov.get("detalhe", "")))
+    tram_caixa, tram_status = "", "nao_realizada"
+    if mov_ok:
+        caixa_tram = config_service.get_carta_caixa_tramitacao()
+        desc_tram = f"Carta expedida. Aguardar retorno até {data_aguardar}."
+        yield {"level": "info",
+               "msg": f"     Tramitando para {caixa_tram} (aguardar retorno até {data_aguardar})…"}
+        try:
+            tram = await sisdpu_client.tramitar_paj(
+                [{"id": id_proc, "numero": paj_disp}], grupo=caixa_tram,
+                descricao=desc_tram, prazo_data=data_aguardar, prazo_desc=desc_tram)
+        except Exception as e:  # noqa: BLE001
+            tram = {"ok": False, "detalhe": f"exceção: {e}"}
+        tram_ok = bool(tram.get("ok"))
+        tram_caixa = caixa_tram if tram_ok else ""
+        tram_status = "tramitado" if tram_ok else "falha"
+        yield passo(f"Tramitação → {caixa_tram}", tram_ok,
+                    f"aguardar até {data_aguardar}" if tram_ok else tram.get("detalhe", ""))
+    # CONCLUSÃO do(s) trâmite(s) ORIGINÁRIO(S): admite na caixa de grupo + dá baixa na caixa de
+    # entrada (btnConcluir). Sem isso, o trâmite de origem fica PENDENTE na caixa. Só quando a
+    # movimentação teve êxito E a tramitação foi OK (senão mantém na caixa p/ nova tentativa).
+    concluido_status = "nao_realizada"
+    ids_orig = [x for x in (originarios or []) if x]
+    if mov_ok and tram_status == "tramitado" and ids_orig:
+        yield {"level": "muted",
+               "msg": f"     admitindo e concluindo {len(ids_orig)} trâmite(s) originário(s)…"}
+        try:
+            conc = await sisdpu_client.concluir_paj(ids_orig)
+        except Exception as e:  # noqa: BLE001
+            conc = {"ok": False, "detalhe": f"exceção: {e}"}
+        adm_ok, adm_det, conc_ok, conc_det = _resumo_conclusao(conc)
+        yield passo("Admissão na caixa de grupo", adm_ok, adm_det)
+        yield passo("Conclusão na caixa de entrada", conc_ok, conc_det)
+        concluido_status = "concluido" if conc_ok else "falha"
+    # persistência: marca a correspondência como EXPEDIDA (sai dos pendentes)
+    corr.update(status="expedida", expedida_em=_dt.datetime.now().isoformat(timespec="seconds"),
+                lote=lote, previsao_entrega=previsao, data_aguardar=data_aguardar,
+                inteiro_teor=inteiro_teor, comprovante=comp_nome, carta_pdf=carta_nome,
+                mov_seq=mov_seq, tram_caixa=tram_caixa)
+    alvo["correspondencia"] = corr
+    _gravar_box(slug, box)
+    with contextlib.suppress(Exception):
+        historico_service.registrar({
+            "paj_norm": paj_norm, "paj": paj_disp, "assistido": assistido,
+            "oficio": alvo.get("oficio_origem", ""),
+            "id_tramite": (originarios[0] if len(originarios) == 1 else ""),
+            "tramite_ids": originarios, "conjunto": (tipo == "conjunto"),
+            "tramites_info": _tramites_info(_enriquecer_conjunto(box, cont) if tipo == "conjunto"
+                                            else _enriquecer_tramite(box, alvo, cont), tipo == "conjunto"),
+            "caixa_slug": slug, "caixa_nome": caixa.get("nome", ""), "grupo": caixa.get("grupo", ""),
+            "meio": "carta", "meios": ["carta"], "mensagem": corpo,
+            "mov_descricao": desc_mov, "url_detalhe": alvo.get("url_detalhe", ""),
+            "id_processo": id_proc, "mov_seq": mov_seq,
+            "mov_status": "movimentado" if mov_ok else "falha",
+            "tram_caixa": tram_caixa, "tram_status": tram_status, "tram_grupo": tram_caixa,
+            "concluido_status": concluido_status,
+            "status": "enviado" if mov_ok else "parcial",
+            "detalhe": f"Carta expedida (Lote {lote or '—'}; previsão {previsao or '—'}).",
+            "comprovante": comp_nome, "carta_pdf": carta_nome, "log": log,
+            "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+        })
+    # NÃO chamar _salvar_sessao_log aqui: a sessão do disparo (log ao vivo) é persistida pelo
+    # `disparos_service.stream_e_salvar` que envolve este gerador na rota /stream.
+    yield {"level": "ok",
+           "msg": f"Carta expedida. Lote {lote or '—'}; aguardar retorno até {data_aguardar}."}
+    yield {"done": True, "resultado": {
+        "ok": True, "status": "expedido", "lote": lote, "previsao": previsao,
+        "data_aguardar": data_aguardar, "mov_seq": mov_seq, "tram_caixa": tram_caixa,
+        "concluido_status": concluido_status,
+        "detalhe": f"Carta expedida. Lote {lote or '—'}; aguardar retorno até {data_aguardar}."}}
+
+
+async def rejuntar_comprovante(slug: str, paj_norm: str, id_tramite: str, comprovante_nome: str,
+                               tipo: str = "tramite", previsao: str = "") -> dict:
+    """CORREÇÃO: junta o COMPROVANTE DA POSTAGEM CORRETO a um PAJ (quando um comprovante trocado
+    foi anexado). Faz uma movimentação fase 'Juntada de documento' com o PDF e atualiza o registro
+    da correspondência (campo `comprovante`). NÃO refaz a tramitação."""
+    from ingestao import sisdpu_client
+    from services import historico_service
+    # 1) tenta o box local; 2) se o PAJ já saiu da caixa (tramitado), recupera id_processo/paj do HISTÓRICO.
+    box = _ler_box(slug, paj_norm)
+    alvo, id_proc, paj_disp = None, "", ""
+    if box:
+        alvo, id_proc, _originarios, paj_disp, _sug = _alvo_contato(box, id_tramite, tipo)
+    if not id_proc:
+        with contextlib.suppress(Exception):
+            for r in historico_service.listar():
+                if r.get("paj_norm") == paj_norm and r.get("meio") == "carta" and r.get("id_processo"):
+                    id_proc = str(r.get("id_processo"))
+                    paj_disp = r.get("paj") or paj_disp
+                    break
+    if not id_proc:
+        return {"ok": False, "erro": "PAJ/id_processo não encontrado (nem no box, nem no histórico)."}
+    caminho = COMPROVANTES_CARTA_DIR / Path(comprovante_nome).name
+    if not caminho.is_file():
+        return {"ok": False, "erro": f"Comprovante '{comprovante_nome}' não encontrado no disco."}
+    prev_txt = f"<br>Previsão de entrega: {previsao}." if previsao else ""
+    desc = ("<p><strong>Comprovante de postagem correto. Desconsiderar o anterior.</strong>"
+            + prev_txt + "</p>")
+    try:
+        mov = await sisdpu_client.movimentar_paj(
+            [{"id": id_proc, "numero": paj_disp}], desc, fase="Juntada de documento",
+            anexos=[{"nome": "Comprovante da postagem.pdf", "caminho": str(caminho)}],
+            tipo_arquivo="Correspondência", descricao_html=True)
+    except Exception as e:  # noqa: BLE001
+        mov = {"ok": False, "detalhe": f"exceção: {e}"}
+    if not mov.get("ok"):
+        return {"ok": False, "erro": mov.get("detalhe", "falha na juntada")}
+    # atualiza o registro da correspondência p/ apontar o comprovante correto (só se o box existir)
+    if box and alvo:
+        with contextlib.suppress(Exception):
+            corr = alvo.get("correspondencia") or {}
+            if corr:
+                corr["comprovante"] = Path(comprovante_nome).name
+                if previsao:
+                    corr["previsao_entrega"] = previsao
+                alvo["correspondencia"] = corr
+                _gravar_box(slug, box)
+    return {"ok": True, "mov_seq": mov.get("mov_seq"),
+            "detalhe": f"Comprovante correto juntado (mov. {mov.get('mov_seq') or '—'})."}
+
+
 def cancelar_correspondencia(slug: str, paj_norm: str, id_tramite: str, tipo: str = "tramite") -> dict:
-    """Remove o trâmite/conjunto da fila de correspondências (não revive a ligação encerrada)."""
+    """Remove o trâmite/conjunto da fila de correspondências (não revive a ligação encerrada).
+    Zera a carta gerada e a mensagem-base (que ficam em `correspondencia`) e, se o PAJ não tiver
+    mais nenhuma correspondência pendente, zera também a validação/endereço de envio — esses dados
+    valem SÓ enquanto o PAJ está na fila (ao voltar, exige nova validação e nova geração da carta)."""
     box = _ler_box(slug, paj_norm)
     if not box:
         return {"ok": False, "erro": "PAJ não encontrado."}
     alvo, _idp, _ids, _paj, _sug = _alvo_contato(box, id_tramite, tipo)
     if alvo is None:
         return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
-    alvo["correspondencia"] = {}
+    alvo["correspondencia"] = {}  # zera status + mensagem-base + carta_corpo
     _gravar_box(slug, box)
+    conj = box.get("conjunto") or {}
+    resta = (any((s.get("correspondencia") or {}).get("status") == "pendente"
+                 for s in box.get("solicitacoes", []))
+             or (conj.get("correspondencia") or {}).get("status") == "pendente")
+    if not resta:
+        cont = ler_contato(paj_norm)
+        if _limpar_endereco_envio(cont):
+            _gravar_contato(cont)
     return {"ok": True}
 
 
@@ -2979,6 +3753,17 @@ def _enriquecer_correspondencia(box: dict, alvo: dict, cont: dict, caixa_meta: d
     d["corr_tentativas_ligacao"] = corr.get("tentativas_ligacao", 0)
     d["corr_motivo"] = corr.get("motivo", "")
     d["corr_mensagem_base"] = corr.get("mensagem_base", "")
+    # Corpo da carta (IA ou editado); fallback p/ a base em registros antigos.
+    d["corr_carta_corpo"] = corr.get("carta_corpo", "") or corr.get("mensagem_base", "")
+    # Validação de endereço PERSISTIDA (re-exibe badge + reabilita Expedir ao voltar à aba).
+    # A conferência em si continua sob demanda ("Validar endereço"); aqui só relemos o que ficou salvo.
+    val = _validacao_para_render(cont)
+    d["corr_val_badge"] = val["badge"]
+    d["corr_validado"] = val["liberado"]
+    d["corr_val_divergente"] = val["divergente"]
+    _pe = _primeiro_endereco(cont)
+    d["corr_endereco_cadastro"] = _fmt_endereco(_pe) if _pe else ""  # endereço tal como no cadastro
+    d["corr_endereco_envio"] = _endereco_envio(cont)  # endereço EXATO de destino da carta (CEP)
     return d
 
 
@@ -3094,11 +3879,11 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 return {"ok": False, "status": "falha",
                         "detalhe": ("Conflito de sessão do SISDPU detectado — feche a OUTRA sessão do seu "
                                     "usuário no SISDPU e tente novamente. A mensagem NÃO foi enviada.")}
-            # Anti-duplicidade: a(s) tramitação(ões) originária(s) ainda está(ão) na caixa?
-            # Se TODAS saíram (outro usuário já concluiu), NÃO envia — loga em vermelho e
-            # marca o item para conferência manual (possível remoção).
-            # EXCEÇÃO — REENVIO: o trâmite originário já foi concluído e saiu da caixa POR
-            # DEFINIÇÃO; pular a verificação (senão acusaria "fora da caixa" indevidamente).
+            # Verificação na caixa — NÃO bloqueia (multi-meio livre, decisão do usuário):
+            # se o trâmite saiu da caixa, apenas informamos. Se fomos NÓS que concluímos
+            # (envio anterior por outro meio), seguimos sem alarde; se saiu por AÇÃO EXTERNA
+            # (possível outro usuário), avisamos e seguimos mesmo assim (confira manualmente).
+            # EXCEÇÃO — REENVIO: dispensada (trâmite originário já concluído por definição).
             if t.get("reenvio"):
                 _passo(log, emit, "Verificação na caixa", None,
                        "reenvio — dispensada (trâmite originário já concluído)")
@@ -3106,9 +3891,14 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                 ids_norm = [i for i in ids if str(i).strip()]
                 fora = await _tramites_fora_da_caixa(ids_norm)
                 if ids_norm and fora and len(fora) == len(ids_norm):
-                    _passo(log, emit, "Verificação na caixa", False, _ALERTA_FORA_CAIXA_DET)
-                    _marcar_alerta_fora_caixa(slug, paj_norm, tipo, id_tramite)
-                    return {"ok": False, "status": "fora_da_caixa", "detalhe": _ALERTA_FORA_CAIXA_DET}
+                    previa = _conclusao_previa(ids_norm)
+                    if previa:
+                        _passo(log, emit, "Verificação na caixa", None,
+                               "trâmite já concluído por este painel (" + _detalhe_ja_concluido(previa)
+                               + ") — seguindo com o envio por este meio", nivel="aviso")
+                    else:
+                        _passo(log, emit, "Verificação na caixa", None,
+                               _ALERTA_FORA_CAIXA_EXTERNO, nivel="aviso")
         # ENVIO por NÚMERO: dispara para CADA número cadastrado (pode haver vários).
         # Falha em um número NÃO impede os demais — a falha fica registrada só no LOG.
         # Entre um número e outro do mesmo PAJ, espera ~70% do intervalo configurado
@@ -3205,6 +3995,7 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "oficio": t.get("oficio", ""),
             "id_tramite": (ids[0] if len(ids) == 1 else ""), "tramite_ids": ids,
             "conjunto": conjunto, "tramite_data": t.get("data_envio", ""),
+            "tramites_info": _tramites_info(t, conjunto),
             "tipo": t.get("sugestao_tipo", ""),
             "caixa_slug": slug, "caixa_nome": caixa["nome"], "grupo": caixa["grupo"],
             "meio": "whatsapp", "meios": ["whatsapp"],

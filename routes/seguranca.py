@@ -62,6 +62,62 @@ async def api_credenciais(payload: dict = Body(...)):
     return {"ok": True}
 
 
+@router.post("/api/credenciais-correios", response_class=JSONResponse)
+async def api_credenciais_correios(payload: dict = Body(...)):
+    """Cadastra/atualiza as credenciais do Correios/CAS no MESMO cofre (exige o painel
+    destrancado + a senha-mestra correta). Não perde as credenciais do SISDPU."""
+    p = payload or {}
+    usuario = (p.get("usuario") or "").strip()
+    senha = p.get("senha") or ""
+    senha_mestra = p.get("senha_mestra") or ""
+    if not usuario or not senha or not senha_mestra:
+        return JSONResponse({"ok": False, "erro": "Preencha usuário, senha do Correios e a senha-mestra."},
+                            status_code=400)
+    try:
+        credenciais_service.salvar_correios(usuario, senha, senha_mestra)
+    except ValueError as e:
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=400)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+    return {"ok": True, "usuario": credenciais_service.get_correios_usuario()}
+
+
+@router.post("/api/seguranca/testar-correios", response_class=JSONResponse)
+async def api_testar_correios():
+    """Confirma as credenciais do Correios fazendo o login headless real no CAS."""
+    from ingestao import correios_client
+    try:
+        res = await correios_client.testar_login()
+    except Exception as e:  # noqa: BLE001
+        res = {"ok": False, "status": "erro", "detalhe": str(e)}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.post("/api/seguranca/recuperar-comprovantes", response_class=JSONResponse)
+async def api_recuperar_comprovantes():
+    """RECUPERAÇÃO (sem postar): baixa o comprovante de CADA remessa do dia e extrai o
+    destinatário, p/ recasar comprovantes trocados ao PAJ certo."""
+    from ingestao import correios_client
+    from services import painel_comunicacoes_service as svc
+    try:
+        res = await correios_client.baixar_comprovantes_dia(str(svc.COMPROVANTES_CARTA_DIR))
+    except Exception as e:  # noqa: BLE001
+        res = {"ok": False, "detalhe": str(e)}
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
+@router.get("/api/correios/status", response_class=JSONResponse)
+async def api_correios_status():
+    """Status LEVE do Correios para o selo (SEM abrir o navegador): reflete se as
+    credenciais estão no cofre e se o painel está desbloqueado. Teste REAL de login:
+    POST /api/seguranca/testar-correios."""
+    return {"ok": True,
+            "configurado": credenciais_service.correios_configurado(),
+            "destrancado": credenciais_service.destrancado(),
+            "cofre_existe": credenciais_service.configurado(),  # há cofre cifrado em disco?
+            "usuario": credenciais_service.get_correios_usuario()}
+
+
 @router.post("/api/bloquear", response_class=JSONResponse)
 async def api_bloquear():
     """Tranca o painel de novo (esquece as credenciais da memória)."""

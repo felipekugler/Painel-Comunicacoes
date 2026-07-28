@@ -11,3 +11,4 @@ cryptography>=42.0
 
 # Ingestao / scraping da caixa SISDPU
 playwright>=1.40
+pypdf>=6

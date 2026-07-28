@@ -1,0 +1,76 @@
+{#- =========================================================================
+    Modal de LOG AO VIVO (SSE) — passo a passo de um envio/expedição.
+    Autossuficiente (CSS + modal + JS). Inclua o parcial e chame:
+        const r = await enviarComPopup(url, corpoJSON, 'título inicial');
+    Consome eventos {level,msg} e o final {done:true, resultado:{...}} (retornado).
+    Estiliza o overlay pelo próprio #id (não depende de .wa-overlay da página).
+   ========================================================================= -#}
+<style>
+#sse-modal { position:fixed; inset:0; z-index:3400; background:rgba(0,0,0,.45);
+             display:none; align-items:center; justify-content:center; padding:20px; }
+#sse-modal .sse-dialog { width:100%; max-width:min(680px,94vw); padding:22px; max-height:88vh; overflow:auto; }
+#sse-modal .sse-log { margin-top:14px; height:min(360px,55vh); overflow:auto; background:var(--layer-alt);
+                      border:1px solid var(--stroke); border-radius:8px; padding:12px;
+                      font-family:'Cascadia Code','Consolas',monospace; font-size:11px; line-height:1.65; }
+#sse-modal .sync-line { white-space:pre-wrap; display:block; }
+#sse-modal .sync-sep  { height:1.1em; }
+#sse-modal .sync-info { color:var(--text-secondary); }
+#sse-modal .sync-ok   { color:#16a34a; }
+#sse-modal .sync-novo { color:var(--accent); font-weight:600; }
+#sse-modal .sync-erro { color:var(--c-red,#dc2626); }
+#sse-modal .sync-muted{ color:var(--text-tertiary); }
+#sse-modal .sync-aviso{ color:var(--c-addr); font-weight:600; }
+</style>
+
+<div id="sse-modal">
+  <div class="fluent-card sse-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">
+        Envio <span id="sse-status" class="text-secondary" style="font-size:13px;font-weight:400;"></span>
+    </h3>
+    <div id="sse-log" class="sse-log"></div>
+    <div style="text-align:right;margin-top:12px;">
+        <button class="btn-subtle" id="sse-fechar" onclick="sseFechar()" style="display:none;">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Consumidor SSE genérico: abre o popup, mostra o passo a passo e devolve o `resultado`
+// do evento final {done:true, resultado:{...}}. (Mesmo padrão do popup de envio dos outros meios.)
+window.sseFechar = function () { document.getElementById('sse-modal').style.display = 'none'; };
+window.enviarComPopup = async function (url, corpo, tituloInicial) {
+    const modal = document.getElementById('sse-modal');
+    const log = document.getElementById('sse-log');
+    const st = document.getElementById('sse-status');
+    const fechar = document.getElementById('sse-fechar');
+    log.innerHTML = ''; st.textContent = tituloInicial || '— em andamento…'; fechar.style.display = 'none';
+    modal.style.display = 'flex';
+    let resultado = { ok: false, detalhe: 'sem retorno' };
+    try {
+        const resp = await fetch(url, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(corpo)
+        });
+        const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
+        while (true) {
+            const { done, value } = await reader.read(); if (done) break;
+            buf += dec.decode(value, { stream: true }); let idx;
+            while ((idx = buf.indexOf('\n\n')) >= 0) {
+                const linha = buf.slice(0, idx); buf = buf.slice(idx + 2);
+                if (!linha.startsWith('data: ')) continue;
+                let d; try { d = JSON.parse(linha.slice(6)); } catch (_) { continue; }
+                if (d.done) { resultado = d.resultado || resultado; st.textContent = '— concluído'; continue; }
+                const div = document.createElement('div');
+                div.className = 'sync-line sync-' + (d.level || 'info');
+                div.textContent = d.msg || ''; log.appendChild(div); log.scrollTop = log.scrollHeight;
+            }
+        }
+    } catch (e) {
+        const div = document.createElement('div'); div.className = 'sync-line sync-erro';
+        div.textContent = 'Erro: ' + e; log.appendChild(div); st.textContent = '— erro';
+        resultado = { ok: false, detalhe: String(e) };
+    }
+    fechar.style.display = '';
+    return resultado;
+};
+</script>

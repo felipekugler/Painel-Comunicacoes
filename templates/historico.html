@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Histórico de mensagens{% endblock %}
+{% block title %}Histórico de contatos{% endblock %}
 
 {#- Ícone do meio de contato usado (sem texto; tooltip com o rótulo).
     `infrutifero` (telefone): desenha um X vermelho sobre o ícone = ligação não completada. -#}
 {% macro meio_icon(tipo, rotulo, infrutifero=false) %}
-    {%- set var = {'app_sisdpu':'--c-app','whatsapp':'--c-zap','email':'--c-mail','telefone':'--c-tel'}.get(tipo, '--text-secondary') -%}
+    {%- set var = {'app_sisdpu':'--c-app','whatsapp':'--c-zap','email':'--c-mail','telefone':'--c-tel','carta':'--c-addr'}.get(tipo, '--text-secondary') -%}
     <span class="meio-ic" style="color:var({{ var }});" title="{{ rotulo }}{% if infrutifero %} — ligação não completada (infrutífera){% endif %}">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor">
             {%- if tipo == 'app_sisdpu' -%}
@@ -12,12 +12,14 @@
             {%- elif tipo == 'whatsapp' -%}
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
             {%- elif tipo == 'email' -%}
-                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm0 0c0 1.657 1.007 3 2.25 3S21 13.657 21 12a9 9 0 1 0-2.636 6.364M16.5 12V8.25" />
             {%- elif tipo == 'telefone' -%}
                 <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
                 {%- if infrutifero -%}
                 <path stroke="#dc2626" stroke-width="2.4" stroke-linecap="round" d="M4.8 4.8 19.2 19.2M19.2 4.8 4.8 19.2" />
                 {%- endif -%}
+            {%- elif tipo == 'carta' -%}
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
             {%- endif -%}
         </svg>
     </span>
@@ -26,7 +28,7 @@
 {% block content %}
 <div class="flex items-end justify-between gap-4 flex-wrap mb-6">
     <div>
-        <h1 class="font-display" style="font-size: 28px; margin: 0;">Histórico de mensagens</h1>
+        <h1 class="font-display" style="font-size: 28px; margin: 0;">Histórico de contatos</h1>
         <p class="text-secondary mt-1" style="font-size: 13px;">
             Todas as mensagens enviadas pelo painel, de qualquer caixa
             <span class="pill ml-1">{{ registros|length }}</span>
@@ -108,8 +110,26 @@
                     </div>
                 </td>
                 <td class="text-center col-compacta">
-                    {# comprovante(s): registros novos têm `comprovantes`=[{nome,numero}] (1 por
-                       número contatado); os antigos têm só `comprovante` (string única). #}
+                    {% if r.meio == 'carta' %}
+                    {# Carta: PDF do CONTEÚDO expedido + COMPROVANTE de postagem (servidos de _comprovantes_carta). #}
+                    {% if r.carta_pdf or r.comprovante %}
+                    <div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
+                        {% if r.carta_pdf %}
+                        <a class="pdf-link" target="_blank" rel="noopener" title="Abrir a carta"
+                           href="/carta-arquivo/{{ r.carta_pdf | urlencode }}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg><span class="pdf-lbl">Carta</span>
+                        </a>
+                        {% endif %}
+                        {% if r.comprovante %}
+                        <a class="pdf-link" target="_blank" rel="noopener" title="Abrir o comprovante da postagem"
+                           href="/carta-arquivo/{{ r.comprovante | urlencode }}">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg><span class="pdf-lbl">Comprovante da postagem</span>
+                        </a>
+                        {% endif %}
+                    </div>
+                    {% else %}<span class="text-tertiary">—</span>{% endif %}
+                    {% else %}
+                    {# comprovante(s) de WhatsApp: registros novos têm `comprovantes`=[{nome,numero}]; antigos só `comprovante`. #}
                     {%- set comps = r.comprovantes if r.comprovantes else ([{'nome': r.comprovante}] if r.comprovante else []) -%}
                     {% if comps %}
                     <div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
@@ -122,6 +142,7 @@
                     {% endfor %}
                     </div>
                     {% else %}<span class="text-tertiary">—</span>{% endif %}
+                    {% endif %}
                 </td>
                 <td class="text-center col-compacta">
                     {% if r.mov_seq %}
@@ -212,8 +233,21 @@
                                 {% else %}<span class="text-tertiary" style="font-size:12.5px;">nenhum</span>{% endif %}
                             </span>
                         </div>
+                        {% if r.tramites_info %}
+                        <div class="msg-accordion-lbl" style="margin-top:12px;">Tramitação atendida</div>
+                        {% for ti in r.tramites_info %}
+                        <div class="hist-tram-card">
+                            <div class="tram-meta">{{ ti.data | data_hora_br }} - {{ ti.remetente or "—" }}{% if ti.prazo %} <span class="pill-prazo" title="Prazo atribuído à tramitação">⏱ {{ ti.prazo }}</span>{% endif %}</div>
+                            {% if ti.descricao %}<div class="desc-tram" title="{{ ti.descricao }}">{{ ti.descricao }}</div>{% else %}<div class="text-tertiary" style="font-size:12.5px;">Sem descrição de trâmite.</div>{% endif %}
+                        </div>
+                        {% endfor %}
+                        {% endif %}
                         <div class="msg-accordion-lbl" style="margin-top:12px;">Conteúdo da mensagem</div>
-                        <div class="msg-full">{{ r.mensagem }}</div>
+                        {% set _md = r.mov_descricao or '' %}
+                        {% if _md %}
+                            {% if _md.lstrip()[:1] == '<' %}<div class="msg-full">{{ _md|safe }}</div>
+                            {% else %}<div class="msg-full">{{ _md }}</div>{% endif %}
+                        {% else %}<div class="msg-full">{{ r.mensagem }}</div>{% endif %}
                     </div>
                 </td>
             </tr>
@@ -288,6 +322,16 @@ a.tram-link:hover { background:var(--layer-alt); color:var(--text); border-color
 /* Seção retrátil (acordeão) com o teor da mensagem, abaixo da linha */
 .msg-accordion { background: var(--layer-alt); padding: 0 !important; }
 .msg-accordion-in { padding: 12px 16px; border-left: 3px solid var(--accent); }
+/* Card da tramitação ATENDIDA (mesmo vermelho off-white do dashboard) */
+.hist-tram-card { border:1px solid color-mix(in srgb, var(--c-red) 22%, var(--stroke));
+                  border-radius:10px; padding:10px 12px; margin-top:6px;
+                  background: color-mix(in srgb, var(--c-red) 8%, var(--card)); max-width:900px; }
+.hist-tram-card + .hist-tram-card { margin-top:8px; }
+.hist-tram-card .tram-meta { font-size:11.5px; font-weight:600; color:var(--text-tertiary); margin-bottom:3px; }
+.hist-tram-card .desc-tram { font-size:12.5px; color:var(--text-secondary); white-space:pre-wrap; }
+.hist-tram-card .pill-prazo { display:inline-block; font-size:10.5px; font-weight:700; padding:1px 7px; border-radius:999px;
+                              color:var(--c-addr); background:color-mix(in srgb,var(--c-addr) 12%,transparent);
+                              border:1px solid color-mix(in srgb,var(--c-addr) 45%,transparent); margin-left:4px; }
 .msg-accordion-lbl { font-weight:600; font-size:12px; color: var(--text-secondary); }
 .msg-accordion .msg-full { margin-top:6px; max-width:900px; }
 /* Linha de metadados (Tipo · Prazo · Anexos) no topo do acordeão */
@@ -310,9 +354,9 @@ a.tram-link:hover { background:var(--layer-alt); color:var(--text); border-color
   </div>
 </div>
 
-<div id="limpar-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)histLimparFechar()">
+<div id="limpar-modal" class="wa-overlay" style="display:none;">
   <div class="fluent-card" style="width:100%;max-width:480px;padding:24px;">
-    <h3 class="font-display" style="font-size:18px;margin:0 0 4px;">Limpar histórico de mensagens</h3>
+    <h3 class="font-display" style="font-size:18px;margin:0 0 4px;">Limpar histórico de contatos</h3>
     <p class="text-secondary" style="font-size:13px;margin:0 0 16px;">Escolha o que apagar. Esta ação não pode ser desfeita.</p>
     <label class="lm-opt"><input type="radio" name="lm-modo" value="tudo" checked onchange="histLimparSync()">
         <span>Apagar <strong>todo</strong> o histórico</span></label>
@@ -327,7 +371,7 @@ a.tram-link:hover { background:var(--layer-alt); color:var(--text); border-color
   </div>
 </div>
 
-<div id="reenviar-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)reenviarFechar()">
+<div id="reenviar-modal" class="wa-overlay" style="display:none;">
   <div class="fluent-card" style="width:100%;max-width:460px;padding:24px;">
     <h3 class="font-display" style="font-size:18px;margin:0 0 4px;">Reenviar por outro meio</h3>
     <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
@@ -465,7 +509,7 @@ async function histLimparConfirmar(){
     const modo = document.querySelector('input[name=lm-modo]:checked').value;
     const data = document.getElementById('lm-data').value;
     if(modo === 'ate' && !data){ alert('Informe a data de corte.'); return; }
-    const msg = modo === 'tudo' ? 'Apagar TODO o histórico de mensagens?'
+    const msg = modo === 'tudo' ? 'Apagar TODO o histórico de contatos?'
                                 : ('Apagar mensagens anteriores a ' + data + '?');
     if(!confirm(msg + '\n\nEsta ação não pode ser desfeita.')) return;
     try{

@@ -11,7 +11,7 @@
             {%- elif tipo == 'whatsapp' -%}
                 <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 9.75a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
             {%- elif tipo == 'email' -%}
-                <path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 12a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0Zm0 0c0 1.657 1.007 3 2.25 3S21 13.657 21 12a9 9 0 1 0-2.636 6.364M16.5 12V8.25" />
             {%- endif -%}
         </svg>
     </span>
@@ -143,6 +143,7 @@
                                     data-app="{{ 1 if c.app_sisdpu else 0 }}"
                                     data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
                                     data-email="{{ 1 if c.email else 0 }}"
+                                    data-endereco="{{ 1 if paj.tem_endereco else 0 }}"
                                     onclick="gravarAbrir(this)">Editar</button>
                             <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
                                     data-slug="{{ paj.caixa_slug }}"
@@ -291,7 +292,7 @@
                                     data-prazo-app="{{ paj.envio_prazo_app }}" data-prazo-whatsapp="{{ paj.envio_prazo_whatsapp }}"
                                     data-prazo-email="{{ paj.envio_prazo_email }}"
                                     data-app="{{ 1 if c.app_sisdpu else 0 }}" data-whats="{{ 1 if paj.whatsapp_estado == 'ativo' else 0 }}"
-                                    data-email="{{ 1 if c.email else 0 }}" onclick="gravarAbrir(this)">Editar</button>
+                                    data-email="{{ 1 if c.email else 0 }}" data-endereco="{{ 1 if paj.tem_endereco else 0 }}" onclick="gravarAbrir(this)">Editar</button>
                             <button class="btn-subtle" style="padding:3px 9px;font-size:12px;"
                                     data-slug="{{ paj.caixa_slug }}" data-paj="{{ paj.paj_norm }}"
                                     data-tipo="{{ paj.tipo }}" data-tramite="{{ paj.id_tramite }}"
@@ -368,6 +369,8 @@
     Nenhum PAJ gravado para envio por <strong>{{ meio_label }}</strong>.
 </div>
 {% endif %}
+
+{% include "_disparos.html" %}
 {% endblock %}
 
 {% block scripts %}
@@ -486,6 +489,7 @@
 .sync-info { color:var(--text-secondary); } .sync-ok { color:var(--c-zap); }
 .sync-novo { color:var(--accent); font-weight:600; } .sync-erro { color:var(--c-red); }
 .sync-muted { color:var(--text-tertiary); }
+.sync-aviso { color:var(--c-addr); font-weight:600; }  /* aviso (âmbar): verificação na caixa */
 .pr-filtros { display:flex; align-items:center; gap:16px; flex-wrap:wrap; margin-bottom:12px;
               padding:10px 14px; border:1px solid var(--stroke); border-radius:10px; background:var(--card); }
 .pr-filtros label { font-size:12px; color:var(--text-secondary); display:inline-flex; align-items:center; gap:6px; }
@@ -495,7 +499,7 @@
 </style>
 
 <!-- Modal "Editar envio" -->
-<div id="grava-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)gravarFechar()">
+<div id="grava-modal" class="wa-overlay" style="display:none;">
   <div class="fluent-card grava-dialog">
     <div style="display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 12px;">
         <h3 class="font-display" style="font-size:18px;margin:0;">Editar envio</h3>
@@ -555,7 +559,7 @@
 </div>
 
 <!-- Modal "Conflito de envio pelo App SISDPU" -->
-<div id="conf-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)confFechar()">
+<div id="conf-modal" class="wa-overlay" style="display:none;">
   <div class="fluent-card conf-dialog">
     <h3 class="font-display" style="font-size:18px;margin:0;display:flex;align-items:center;gap:8px;">
         <span style="color:var(--c-red);">⚠</span> Conflito de envio pelo Aplicativo SISDPU
@@ -711,14 +715,16 @@ function gravarAbrir(btn) {
     MEIOS_ENVIO.forEach(m => {
         // Encaminhamentos (Ligação/Carta): checkbox simples, sem prazo/somente-leitura.
         if (m.tipo === 'encaminhamento') {
+            const semEnd = (m.key === 'carta') && (btn.dataset.endereco !== '1');
             const rowE = document.createElement('div');
             rowE.style.cssText = 'display:flex;align-items:center;gap:6px;min-height:34px;';
             const labE = document.createElement('label');
-            labE.className = 'wa-opt';
-            labE.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '">' +
+            labE.className = 'wa-opt' + (semEnd ? ' opt-off' : '');
+            labE.innerHTML = '<input type="checkbox" class="meio-cb" value="' + m.key + '"' + (semEnd ? ' disabled' : '') + '>' +
                 '<span style="font-size:14px;"></span><span class="text-tertiary" style="font-size:11.5px;"></span>';
             labE.querySelectorAll('span')[0].textContent = m.label;
-            labE.querySelectorAll('span')[1].textContent = (m.key === 'telefone') ? '→ central de Ligações' : '→ central de Correspondências';
+            labE.querySelectorAll('span')[1].textContent = semEnd ? '— sem endereço cadastrado'
+                : ((m.key === 'telefone') ? '→ central de Ligações' : '→ central de Correspondências');
             rowE.appendChild(labE);
             box.appendChild(rowE);
             return;

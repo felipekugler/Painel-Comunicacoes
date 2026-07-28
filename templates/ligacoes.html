@@ -112,9 +112,11 @@
 </div>
 {% endif %}
 
+<hr style="border:none;border-top:1px solid var(--stroke);margin:36px 0 28px;">
+
 {# ===================== LIGAÇÕES FEITAS ===================== #}
 <div class="mb-3" style="display:flex;align-items:center;gap:8px;">
-    <h2 class="font-display" style="font-size:17px;margin:0;">Ligações Feitas</h2>
+    <h2 class="font-display" style="font-size:17px;margin:0;">Acompanhamento de tentativas infrutíferas</h2>
     <span class="pill">{{ feitas|length }}</span>
     <span class="text-tertiary" style="font-size:12px;">Já tiveram ao menos uma tentativa (em andamento).</span>
 </div>
@@ -170,9 +172,13 @@
                 <td>
                     <div style="display:flex;gap:6px;flex-wrap:wrap;">
                         {% if it.lig_esgotado %}
-                        <button class="btn-amarelo" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;width:auto;"
-                                data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
-                                data-pajnum="{{ it.paj }}" data-tipo="{{ it.lig_tipo }}" onclick="ligCorrespondencia(this)">Enviar correspondência</button>
+                            {% if it.tem_endereco %}
+                            <button class="btn-amarelo" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;width:auto;"
+                                    data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-tramite="{{ it.id_tramite }}"
+                                    data-pajnum="{{ it.paj }}" data-tipo="{{ it.lig_tipo }}" onclick="ligCorrespondencia(this)">Enviar correspondência</button>
+                            {% else %}
+                            <span class="text-tertiary" style="font-size:11.5px;white-space:nowrap;" title="O PAJ não tem endereço cadastrado — a expedição de carta fica indisponível.">Sem endereço — carta indisponível</span>
+                            {% endif %}
                         {% endif %}
                         <button class="btn-accent" style="padding:4px 12px;font-size:12.5px;white-space:nowrap;"
                                 data-slug="{{ it.caixa_slug }}" data-paj="{{ it.paj_norm }}" data-pajnum="{{ it.paj }}"
@@ -222,8 +228,8 @@
 
 {# ===================== MODAL: registrar ligação ===================== #}
 <div id="lig-modal" class="wa-overlay" style="display:none;position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;"
-     onclick="if(event.target===this)ligFechar()">
-  <div class="fluent-card" style="width:100%;max-width:680px;max-height:90vh;overflow:auto;padding:26px 28px;">
+    >
+  <div class="fluent-card" style="width:100%;max-width:50vw;max-height:90vh;overflow:auto;padding:26px 28px;">
     <h3 class="font-display" style="font-size:19px;margin:0 0 4px;">Registrar ligação</h3>
     <p class="text-tertiary" style="font-size:12.5px;margin:0 0 16px;">PAJ <span id="lig-pajnum" style="font-family:'Cascadia Code','Consolas',monospace;"></span> · <span id="lig-assistido"></span></p>
 
@@ -287,7 +293,7 @@
 
 {# ===================== MODAL: histórico de movimentações (só leitura) ===================== #}
 <div id="movlig-modal" class="wa-overlay" style="display:none;position:fixed;inset:0;z-index:3100;background:rgba(0,0,0,.42);align-items:center;justify-content:center;padding:20px;"
-     onclick="if(event.target===this)movLigFechar()">
+    >
   <div class="fluent-card" style="width:100%;max-width:680px;max-height:85vh;overflow:auto;">
     <h3 class="font-display" style="font-size:18px;margin:0 0 10px;">
         Movimentações — PAJ <span id="movlig-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
@@ -298,6 +304,8 @@
     </div>
   </div>
 </div>
+
+{% include "_disparos.html" %}
 {% endblock %}
 
 {% block scripts %}
