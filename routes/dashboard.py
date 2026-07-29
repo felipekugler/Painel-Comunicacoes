@@ -337,6 +337,26 @@ async def gravar_para_envio(slug: str, paj_norm: str, id_tramite: str, payload: 
     return {"ok": True}
 
 
+@router.post("/api/paj/concluir-sem-contato", response_class=JSONResponse)
+async def concluir_sem_contato(payload: dict = Body(...)):
+    """Conclui o PAJ da caixa SEM nenhum contato (já tratado). Corpo: slug, paj_norm,
+    id_tramite, tipo ('tramite'|'conjunto'), e opcionais tramitar_grupo, prazo, tram_descricao."""
+    slug = payload.get("slug", "")
+    paj_norm = payload.get("paj_norm", "")
+    id_tramite = payload.get("id_tramite", "")
+    tipo = payload.get("tipo", "tramite")
+    if not slug or not paj_norm:
+        return JSONResponse({"ok": False, "erro": "slug/paj_norm ausentes"}, status_code=400)
+    try:
+        res = await painel_comunicacoes_service.concluir_paj_sem_contato(
+            slug, paj_norm, id_tramite, tipo=tipo,
+            tramitar_grupo=payload.get("tramitar_grupo", "") or "",
+            prazo=payload.get("prazo"), tram_descricao=payload.get("tram_descricao", "") or "")
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"ok": False, "erro": str(e)}, status_code=500)
+    return JSONResponse(res, status_code=200 if res.get("ok") else 400)
+
+
 @router.get("/api/grupos-unidade", response_class=JSONResponse)
 async def grupos_unidade(refresh: int = 0):
     """Lista as caixas de GRUPO da unidade (p/ o dropdown de tramitação no modal Gravar).

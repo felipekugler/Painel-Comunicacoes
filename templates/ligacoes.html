@@ -345,7 +345,9 @@ a.lig-mov:hover { background: color-mix(in srgb, var(--accent) 22%, transparent)
 /* Modal de movimentações (só leitura) */
 .mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
 .mov-item:first-child { border-top:none; }
-.mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
+.mov-cab { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:3px; }
+.mov-cab .mov-fase { color:var(--accent); font-weight:700; }
+.mov-cab .mov-user { color:var(--text-tertiary); font-weight:500; }
 .mov-desc { font-size:13px; color:var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
 </style>
 <script>
@@ -554,7 +556,8 @@ function movLigAbrir(btn) {
     } else {
         lista.innerHTML = movs.map(m => {
             const cab = '[' + (m.seq != null ? m.seq : '') + '] ' + waEsc(m.data || '')
-                + (m.tipo ? ' · ' + waEsc(m.tipo) : '') + (m.fases ? ' · ' + waEsc(m.fases) : '');
+                + (m.fases ? ' · <span class="mov-fase">' + waEsc(m.fases) + '</span>' : '')
+                + (m.usuario ? ' · <span class="mov-user">' + waEsc(m.usuario) + '</span>' : '');
             return '<div class="mov-item"><div class="mov-cab">' + cab + '</div>'
                  + '<div class="mov-desc">' + waEsc(m.descricao || '(sem descrição)') + '</div></div>';
         }).join('');

@@ -922,6 +922,8 @@ def _sol_pendente(s: dict) -> bool:
         return False
     if (s.get("correspondencia") or {}).get("status"):
         return False
+    if s.get("concluido_sem_contato"):  # concluído da caixa sem nenhum contato
+        return False
     return True
 
 
@@ -2984,6 +2986,107 @@ async def registrar_ligacao(slug: str, paj_norm: str, id_tramite: str, numeros,
             "esgotado": lig["status"] == "esgotado", "detalhe": ""}
 
 
+async def concluir_paj_sem_contato(slug: str, paj_norm: str, id_tramite: str,
+                                   tipo: str = "tramite", tramitar_grupo: str = "",
+                                   prazo=None, tram_descricao: str = "", emit=None) -> dict:
+    """Conclui o(s) trâmite(s) ORIGINÁRIO(S) de um PAJ na caixa SEM nenhum contato com o
+    assistido (PAJ já tratado / sem medida de contato necessária). Opcionalmente TRAMITA o
+    PAJ para outra caixa (grupo/prazo/descrição escolhidos no modal). Marca o item como
+    concluído (sai de "Pendentes", inclusive o conjunto) e grava 1 evento no Histórico de
+    contatos (meio 'sem_contato'). Sempre real no SISDPU (admite + conclui o originário)."""
+    from services import historico_service
+    caixa = config_service.get_caixa(slug)
+    box = _ler_box(slug, paj_norm)
+    if not box or not caixa:
+        return {"ok": False, "erro": "PAJ/caixa não encontrado."}
+    alvo, id_proc, originarios, paj_disp, _sug = _alvo_contato(box, id_tramite, tipo)
+    if alvo is None:
+        return {"ok": False, "erro": "Trâmite/conjunto não encontrado."}
+    if not id_proc:
+        return {"ok": False, "erro": "PAJ sem id de processo — não é possível concluir."}
+    cont = ler_contato(paj_norm)
+    d = _enriquecer_conjunto(box, cont) if tipo == "conjunto" else _enriquecer_tramite(box, alvo, cont)
+    log: list = []
+    _log_passo(log, "Conclusão sem contato", True,
+               "PAJ concluído da caixa sem nenhum contato com o assistido pelo Painel de Comunicações.")
+    tram_res = {"tram_caixa": "", "tram_status": "nao_solicitada", "tram_detalhe": "",
+                "tram_url": "", "tram_descricao": ""}
+    # 1) Tramitação OPCIONAL (grupo/prazo/descrição escolhidos no modal).
+    if tramitar_grupo:
+        prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(prazo)
+        desc = (tram_descricao or "").strip() or \
+            "PAJ concluído pelo Painel de Comunicações sem necessidade de contato com o assistido."
+        tram_res["tram_descricao"] = desc
+        if emit is not None:
+            emit({"level": "muted", "msg": f"     tramitando o PAJ → {tramitar_grupo}…"})
+        try:
+            tram = await sisdpu_client.tramitar_paj(
+                [{"id": id_proc, "numero": paj_disp}], grupo=tramitar_grupo,
+                descricao=desc, prazo_data=prazo_data, prazo_desc=prazo_desc)
+        except Exception as e:  # noqa: BLE001
+            tram = {"ok": False, "detalhe": f"exceção: {e}"}
+        if tram.get("ok"):
+            _prazo_txt = "sem prazo" if prazo_dias is None else f"prazo {prazo_dias}d"
+            tram_res.update({"tram_caixa": tramitar_grupo, "tram_status": "tramitado",
+                             "tram_detalhe": tram.get("detalhe", ""),
+                             "tram_url": f"{sisdpu_client.SISDPU_URL}/pages/tramite/historicoTramitacao.xhtml?id={id_proc}&caixaEntrada=false"})
+            _passo(log, emit, "Tramitação do PAJ", True,
+                   f'realizada para a caixa "{tramitar_grupo}" · {_prazo_txt}')
+        else:
+            tram_res.update({"tram_status": "falha", "tram_detalhe": tram.get("detalhe", "")})
+            _passo(log, emit, "Tramitação do PAJ", False,
+                   f'falhou para a caixa "{tramitar_grupo}": {tram.get("detalhe", "")}')
+            _salvar_sessao_log("sem_contato", log, True)
+            return {"ok": False, "erro": "Falha ao tramitar: " + tram.get("detalhe", "")}
+    else:
+        _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
+    # 2) Conclusão do(s) trâmite(s) originário(s): admite (sai do grupo) + conclui (baixa).
+    conc_res = await _concluir_originarios(originarios, log, emit)
+    if conc_res.get("concluido_status") not in ("concluido", "ja_concluido"):
+        _salvar_sessao_log("sem_contato", log, True)
+        return {"ok": False, "erro": "Não foi possível concluir o trâmite: "
+                + conc_res.get("concluido_detalhe", "")}
+    # 3) Marca como concluído-sem-contato → sai de "Pendentes" (trâmite e/ou conjunto).
+    marca = {"em": _dt.datetime.now().isoformat(timespec="seconds"),
+             "usuario": _usuario_sisdpu(), "tram_grupo": tramitar_grupo or ""}
+    if tipo == "conjunto":
+        conj = box.get("conjunto") or {}
+        conj["concluido_sem_contato"] = marca
+        box["conjunto"] = conj
+        ids_set = set(originarios)
+        for s in box.get("solicitacoes", []):
+            if s.get("id_tramite") in ids_set:
+                s["concluido_sem_contato"] = marca
+    else:
+        alvo["concluido_sem_contato"] = marca
+    _gravar_box(slug, box)
+    # 4) Registro no Histórico de contatos (meio 'sem_contato').
+    historico_service.registrar({
+        "paj_norm": paj_norm, "paj": paj_disp,
+        "assistido": d.get("assistido", ""), "oficio": d.get("oficio", ""),
+        "id_tramite": (originarios[0] if len(originarios) == 1 else ""),
+        "tramite_ids": originarios, "conjunto": (tipo == "conjunto"),
+        "tramite_data": d.get("data_envio", ""),
+        "tramites_info": _tramites_info(d, tipo == "conjunto"),
+        "caixa_slug": slug, "caixa_nome": caixa.get("nome", ""), "grupo": caixa.get("grupo", ""),
+        "mensagem": "PAJ concluído sem necessidade de contato com o assistido pelo Painel de Comunicações.",
+        "meio": "sem_contato", "meios": ["sem_contato"],
+        "url_detalhe": d.get("url_detalhe", ""), "id_processo": id_proc,
+        "mov_seq": None, "mov_status": "nao_aplicavel", "mov_url": "",
+        "tram_grupo": tramitar_grupo or "", "tram_caixa": tram_res["tram_caixa"],
+        "tram_status": tram_res["tram_status"], "tram_detalhe": tram_res["tram_detalhe"],
+        "tram_url": tram_res["tram_url"], "tram_descricao": tram_res["tram_descricao"],
+        "concluido_status": conc_res["concluido_status"], "concluido_detalhe": conc_res["concluido_detalhe"],
+        "status": "concluido",
+        "detalhe": "Concluído da caixa sem nenhum contato.",
+        "log": log,
+        "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
+    })
+    _salvar_sessao_log("sem_contato", log, False)
+    return {"ok": True, "concluido_status": conc_res["concluido_status"],
+            "tram_status": tram_res["tram_status"]}
+
+
 # ==================== CORRESPONDÊNCIAS ====================
 def _gerar_carta_corpo(msg: str) -> str:
     """CORPO da carta a partir da mensagem-base (Sugestão). Com IA disponível, adapta
@@ -3110,42 +3213,99 @@ def _primeiro_endereco(cont: dict) -> dict | None:
 _CEP_CACHE: dict = {}
 
 
-CEP_INEXISTENTE = "INEXISTENTE"  # sentinela: CEP bem/mal formado que NÃO existe no ViaCEP
+CEP_INEXISTENTE = "INEXISTENTE"  # sentinela: CEP que NENHUM provedor encontrou
 
 
-def resolver_cep(cep: str):
-    """Resolve um CEP via ViaCEP. Retorna:
-      - {logradouro, bairro, cidade, uf} → CEP encontrado;
-      - CEP_INEXISTENTE → CEP malformado ou inexistente (ViaCEP respondeu 'erro'/400);
-      - None → ViaCEP indisponível (offline/timeout) — não dá p/ verificar.
-    Cacheia os resultados DEFINITIVOS (dict e inexistente); NÃO cacheia o None (offline)
-    para permitir nova tentativa depois."""
-    digs = "".join(c for c in str(cep or "") if c.isdigit())
-    if len(digs) != 8:
-        return CEP_INEXISTENTE  # CEP malformado = inválido (abre o modal de correção)
-    if digs in _CEP_CACHE:
-        return _CEP_CACHE[digs]
+def _cep_normaliza(d: dict):
+    """Normaliza a resposta de um provedor (formato ViaCEP/OpenCEP) para o dict interno.
+    Retorna CEP_INEXISTENTE se a resposta indica não-encontrado."""
+    if not isinstance(d, dict) or d.get("erro") or d.get("error"):
+        return CEP_INEXISTENTE
+    logr = (d.get("logradouro") or "").strip()
+    cidade = (d.get("localidade") or d.get("cidade") or "").strip()
+    # Sem logradouro E sem cidade → resposta vazia/ inválida.
+    if not logr and not cidade:
+        return CEP_INEXISTENTE
+    return {"logradouro": logr, "bairro": (d.get("bairro") or "").strip(),
+            "cidade": cidade, "uf": (d.get("uf") or "").strip()}
+
+
+def _cep_consultar(url: str):
+    """Consulta UM provedor de CEP. Retorna dict | CEP_INEXISTENTE | None (indisponível).
+    404/400 = CEP não encontrado nesse provedor; timeout/offline/erro = indisponível (None)."""
     import json as _j
     import urllib.error as _ue
     import urllib.request as _u
-    res = None
     try:
-        with _u.urlopen(f"https://viacep.com.br/ws/{digs}/json/", timeout=3) as r:
+        with _u.urlopen(url, timeout=3) as r:
             d = _j.loads(r.read().decode("utf-8"))
-        if d.get("erro"):
-            res = CEP_INEXISTENTE
-        else:
-            res = {"logradouro": (d.get("logradouro") or "").strip(),
-                   "bairro": (d.get("bairro") or "").strip(),
-                   "cidade": (d.get("localidade") or "").strip(),
-                   "uf": (d.get("uf") or "").strip()}
     except _ue.HTTPError as e:
-        res = CEP_INEXISTENTE if e.code == 400 else None  # 400 = CEP inválido; outros = indisponível
-    except Exception:  # noqa: BLE001 — offline/timeout → indisponível (não cacheia)
-        res = None
-    if res is not None:
-        _CEP_CACHE[digs] = res
-    return res
+        return CEP_INEXISTENTE if e.code in (400, 404) else None
+    except Exception:  # noqa: BLE001 — offline/timeout/JSON inválido → indisponível
+        return None
+    return _cep_normaliza(d)
+
+
+# Provedores de CEP, consultados EM ORDEM (nome → construtor da URL). ViaCEP é o primário;
+# OpenCEP é a ALTERNATIVA (o ViaCEP às vezes responde 'erro' p/ CEPs VÁLIDOS — ex.: 81260-040).
+_CEP_PROVEDORES = (
+    ("viacep", lambda digs: f"https://viacep.com.br/ws/{digs}/json/"),
+    ("opencep", lambda digs: f"https://opencep.com/v1/{digs}"),
+)
+_CEP_PROV_NOMES = {"viacep": "ViaCEP", "opencep": "OpenCEP"}
+
+
+def resolver_cep_detalhado(cep: str) -> dict:
+    """Consulta TODOS os provedores (SEM short-circuit) e devolve:
+      {"resolvido": {logradouro,bairro,cidade,uf} | CEP_INEXISTENTE | None,
+       "provedores": {"viacep": "ok"|"nao"|"off", "opencep": ...}}
+    ok=achou · nao=respondeu inexistente · off=indisponível. `resolvido` segue a regra do
+    resolver_cep (1º provedor que achou; senão None se houve offline; senão INEXISTENTE).
+    Cacheia o resultado completo só quando NÃO houve provedor offline (permite nova tentativa)."""
+    digs = "".join(c for c in str(cep or "") if c.isdigit())
+    if len(digs) != 8:
+        return {"resolvido": CEP_INEXISTENTE,
+                "provedores": {nome: "nao" for nome, _ in _CEP_PROVEDORES}}
+    if digs in _CEP_CACHE:
+        return _CEP_CACHE[digs]
+    prov: dict = {}
+    achou = None
+    houve_indisponivel = False
+    for nome, urlfn in _CEP_PROVEDORES:
+        r = _cep_consultar(urlfn(digs))
+        if isinstance(r, dict):
+            prov[nome] = "ok"
+            if achou is None:
+                achou = r
+        elif r is None:
+            prov[nome] = "off"
+            houve_indisponivel = True
+        else:
+            prov[nome] = "nao"
+    if achou is not None:
+        resolvido = achou
+    elif houve_indisponivel:
+        resolvido = None
+    else:
+        resolvido = CEP_INEXISTENTE
+    out = {"resolvido": resolvido, "provedores": prov}
+    if not houve_indisponivel:   # definitivo → cacheia (senão permite retry depois)
+        _CEP_CACHE[digs] = out
+    return out
+
+
+def resolver_cep(cep: str):
+    """Só o endereço resolvido (dict | CEP_INEXISTENTE | None). Ver resolver_cep_detalhado."""
+    return resolver_cep_detalhado(cep)["resolvido"]
+
+
+def _prov_badges_list(prov: dict | None) -> list[dict]:
+    """Converte {viacep:'ok'|'nao'|'off', ...} na lista de badges do template (nome/marca/status)."""
+    if not prov:
+        return []
+    return [{"nome": _CEP_PROV_NOMES.get(k, k), "st": prov[k],
+             "mark": "✓" if prov.get(k) == "ok" else "✗"}
+            for k in ("viacep", "opencep") if prov.get(k)]
 
 
 def _norm_logr(s: str) -> str:
@@ -3201,12 +3361,14 @@ def _conferir_endereco(end: dict | None) -> dict:
     `verificado`=False só quando o ViaCEP está indisponível (offline)."""
     out = {"resolvido": None, "resolvido_txt": "", "cadastro_txt": (_fmt_endereco(end) if end else ""),
            "divergente": False, "divergencias": [], "cep_localidade": False,
-           "verificado": False, "cep_invalido": False}
+           "verificado": False, "cep_invalido": False, "provedores": {}}
     if not end:
         return out
-    r = resolver_cep(end.get("cep", ""))
+    det = resolver_cep_detalhado(end.get("cep", ""))
+    out["provedores"] = det.get("provedores") or {}  # status por serviço (ViaCEP/OpenCEP)
+    r = det["resolvido"]
     if r is None:
-        return out  # ViaCEP indisponível (offline) → não verificado
+        return out  # serviços de CEP indisponíveis (offline) → não verificado
     out["verificado"] = True
     if r == CEP_INEXISTENTE:
         out["cep_invalido"] = True   # CEP não existe → precisa corrigir
@@ -3250,7 +3412,8 @@ def _persistir_validacao(cont: dict, end: dict | None, conf: dict) -> None:
         "verificado": conf["verificado"], "divergente": conf["divergente"],
         "divergencias": conf.get("divergencias", []),
         "cep_localidade": conf["cep_localidade"], "cep_invalido": conf["cep_invalido"],
-        "resolvido": conf.get("resolvido")}  # dados do CEP (p/ montar o endereço de envio)
+        "resolvido": conf.get("resolvido"),  # dados do CEP (p/ montar o endereço de envio)
+        "provedores": conf.get("provedores") or {}}  # status por serviço (badges ViaCEP/OpenCEP)
     _gravar_contato(cont)
 
 
@@ -3269,7 +3432,7 @@ def _endereco_envio(cont: dict) -> str:
     `_endereco_envio`): SÓ existe depois que o endereço foi VALIDADO e SALVO (validação casando,
     sem CEP inválido nem divergência) — senão retorna "" (vazio). Monta: número/complemento/CEP
     do endereço de envio + logradouro/bairro/cidade/UF conforme o CEP (o site dos Correios
-    preenche o logradouro pelo CEP); em CEP de localidade / ViaCEP indisponível, usa o do envio."""
+    preenche o logradouro pelo CEP); em CEP de localidade / serviços de CEP indisponíveis, usa o do envio."""
     end = cont.get("_endereco_envio")
     v = cont.get("_validacao_endereco") or {}
     if not end or not v or v.get("fp") != _end_fingerprint(end):
@@ -3300,7 +3463,7 @@ def _validacao_para_render(cont: dict) -> dict:
     if v.get("cep_invalido"):
         return {"badge": {"cls": "cep-div", "txt": "⚠ CEP não encontrado — revalide"}, "liberado": False, "divergente": 0}
     if not v.get("verificado"):
-        return {"badge": {"cls": "cep-erro", "txt": "⚠ CEP não verificado (ViaCEP indisponível) — confira manualmente"},
+        return {"badge": {"cls": "cep-erro", "txt": "⚠ CEP não verificado (serviços de CEP indisponíveis) — confira manualmente"},
                 "liberado": True, "divergente": 1}
     if v.get("divergente"):
         campos = ", ".join(v.get("divergencias") or []) or "endereço"
@@ -3368,7 +3531,7 @@ def _resp_conf(conf: dict, campos: dict, cont: dict | None = None) -> dict:
             "cep_invalido": conf["cep_invalido"], "cadastro_txt": conf["cadastro_txt"],
             "resolvido_txt": conf["resolvido_txt"],
             "cadastro": {k: (campos.get(k) or "") for k in _CAMPOS_ENDERECO},
-            "resolvido": conf["resolvido"],
+            "resolvido": conf["resolvido"], "provedores": conf.get("provedores") or {},
             "endereco_envio_txt": (_endereco_envio(cont) if cont is not None else "")}
 
 
@@ -3395,7 +3558,8 @@ def validar_endereco_editado(endereco: dict) -> dict:
             "divergencias": conf["divergencias"],
             "cep_localidade": conf["cep_localidade"], "cep_invalido": conf["cep_invalido"],
             "cadastro_txt": conf["cadastro_txt"],
-            "resolvido_txt": conf["resolvido_txt"], "resolvido": conf["resolvido"]}
+            "resolvido_txt": conf["resolvido_txt"], "resolvido": conf["resolvido"],
+            "provedores": conf.get("provedores") or {}}
 
 
 def atualizar_endereco_local(paj_norm: str, endereco: dict) -> dict:
@@ -3448,19 +3612,47 @@ async def atualizar_endereco(slug: str, paj_norm: str, id_tramite: str, tipo: st
     return local
 
 
+async def atualizar_endereco_por_cep(slug: str, paj_norm: str, id_tramite: str, tipo: str,
+                                     cep: str) -> dict:
+    """Atualiza o endereço do assistido no SISDPU trocando o CEP (caso de CEP desmembrado, do
+    modal da expedição). Parte do endereço de ENVIO/cadastro atual, aplica o CEP novo e — se
+    algum serviço resolver o CEP — atualiza logradouro/bairro/município/UF; número e complemento
+    são MANTIDOS. Reusa `atualizar_endereco` (grava no SISDPU + cache local + revalida)."""
+    digs = "".join(c for c in str(cep or "") if c.isdigit())
+    if len(digs) != 8:
+        return {"ok": False, "erro": "Informe um CEP válido (8 dígitos)."}
+    cont = ler_contato(paj_norm)
+    base = cont.get("_endereco_envio") or _primeiro_endereco(cont) or {}
+    end = {k: (str(base.get(k) or "")).strip() for k in _CAMPOS_ENDERECO}
+    end["cep"] = digs
+    r = resolver_cep(digs)
+    if isinstance(r, dict):
+        if r.get("logradouro"):
+            end["logradouro"] = r["logradouro"]
+        if r.get("bairro"):
+            end["bairro"] = r["bairro"]
+        if r.get("cidade"):
+            end["municipio"] = r["cidade"]
+        if r.get("uf"):
+            end["uf"] = r["uf"]
+    return await atualizar_endereco(slug, paj_norm, id_tramite, tipo, end)
+
+
 async def expedir_correspondencia(slug: str, paj_norm: str, id_tramite: str,
-                                  tipo: str = "tramite", forcar: bool = False) -> dict:
+                                  tipo: str = "tramite", forcar: bool = False,
+                                  cep_override: str = "") -> dict:
     """Wrapper NÃO-streaming: consome `expedir_correspondencia_stream` e devolve só o
     resultado final (compat p/ chamadas sem modal ao vivo)."""
     resultado = {"ok": False, "erro": "sem retorno"}
-    async for ev in expedir_correspondencia_stream(slug, paj_norm, id_tramite, tipo, forcar):
+    async for ev in expedir_correspondencia_stream(slug, paj_norm, id_tramite, tipo, forcar, cep_override):
         if ev.get("done"):
             resultado = ev.get("resultado", resultado)
     return resultado
 
 
 async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: str,
-                                         tipo: str = "tramite", forcar: bool = False):
+                                         tipo: str = "tramite", forcar: bool = False,
+                                         cep_override: str = ""):
     """Expede a carta pelos Correios (SMT) e, em caso de POSTAGEM (modo real), movimenta
     o PAJ na fase 'Ofício/Carta/Comunicação expedida' + junta os DOIS PDFs (carta + comprovante
     da postagem) e TRAMITA para a caixa de aguardo (prazo = previsão de entrega + N dias). Governado
@@ -3510,7 +3702,10 @@ async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: s
     # Conferência do endereço: se o CEP resolver um logradouro divergente do cadastro,
     # NÃO expede automaticamente (exige conferência manual → forcar=True).
     conf = _conferir_endereco(end)
-    if conf["divergente"] and not forcar:
+    # CEP corrigido pelo usuário (desmembrado, informado no modal de CEP não identificado):
+    # substitui o CEP do destinatário e dispensa a conferência (o usuário já decidiu prosseguir).
+    _cep_ovr = "".join(c for c in str(cep_override or "") if c.isdigit())
+    if conf["divergente"] and not forcar and not _cep_ovr:
         yield {"level": "aviso", "msg": "Endereço do CEP diverge do cadastro — conferência necessária."}
         yield {"done": True, "resultado": {
             "ok": False, "status": "conferencia",
@@ -3520,7 +3715,7 @@ async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: s
         return
     assistido = cont.get("assistido", "") or ""
     destinatario = {"nome": assistido, "cpf": cont.get("cpf", ""),
-                    "cep": end.get("cep", ""), "numero": end.get("numero", ""),
+                    "cep": (_cep_ovr or end.get("cep", "")), "numero": end.get("numero", ""),
                     "complemento": end.get("complemento", ""),
                     # logradouro do CADASTRO: usado só se o CEP for de localidade (autofill vazio)
                     "logradouro": end.get("logradouro", ""),
@@ -3550,7 +3745,13 @@ async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: s
         r = {"ok": False, "detalhe": f"exceção: {e}"}
     if not r.get("ok"):
         yield passo("Expedição de carta", False, r.get("detalhe", ""))
-        yield _falha(r.get("detalhe", "Falha na expedição da carta."))
+        if r.get("status") == "cep_nao_identificado":
+            # CEP não reconhecido pelos Correios → status próprio p/ o badge de falha na tela.
+            yield {"done": True, "resultado": {
+                "ok": False, "status": "cep_nao_identificado",
+                "erro": r.get("detalhe", ""), "detalhe": r.get("detalhe", "")}}
+        else:
+            yield _falha(r.get("detalhe", "Falha na expedição da carta."))
         return
     if not efetivar:
         _log_passo(log, "Expedição de carta", None, "Modo simulado — chegou ao Resumo, sem postar.")
@@ -3761,6 +3962,9 @@ def _enriquecer_correspondencia(box: dict, alvo: dict, cont: dict, caixa_meta: d
     d["corr_val_badge"] = val["badge"]
     d["corr_validado"] = val["liberado"]
     d["corr_val_divergente"] = val["divergente"]
+    # Badges por serviço de CEP (✓/✗ ViaCEP · ✓/✗ OpenCEP) — só quando a validação está vigente.
+    d["corr_val_provedores"] = (_prov_badges_list((cont.get("_validacao_endereco") or {}).get("provedores"))
+                                if val["badge"] else [])
     _pe = _primeiro_endereco(cont)
     d["corr_endereco_cadastro"] = _fmt_endereco(_pe) if _pe else ""  # endereço tal como no cadastro
     d["corr_endereco_envio"] = _endereco_envio(cont)  # endereço EXATO de destino da carta (CEP)

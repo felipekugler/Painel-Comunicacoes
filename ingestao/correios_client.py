@@ -46,6 +46,11 @@ class CorreiosCredenciaisInvalidas(RuntimeError):
     """O CAS recusou usuário/senha do Correios."""
 
 
+class CorreiosCepNaoIdentificado(RuntimeError):
+    """O site dos Correios NÃO reconheceu o CEP do destinatário (não autopreencheu
+    logradouro/bairro/cidade/UF) — provável CEP desmembrado. Aborta a expedição."""
+
+
 # ------------------------------------------------------------------ browser
 async def _get_page() -> Page:
     """Retorna a page Playwright (cria o browser headless se preciso). Chromium com
@@ -320,16 +325,30 @@ async def _preencher_destinatario(page: Page, d: dict) -> None:
     await page.fill('input[name="cep"]', cep)
     await page.evaluate("""() => { const e=document.querySelector('input[name=cep]');
         e.dispatchEvent(new Event('change',{bubbles:true})); e.blur(); }""")
-    # espera o logradouro chegar (até ~4s)
-    logr = ""
+    # Aguarda o autopreenchimento do CEP (até ~4s): lê logradouro, cidade e UF de forma
+    # robusta (retorna '' quando o campo não existe). Sinal de que a consulta respondeu =
+    # qualquer um deles preenchido.
+    _JS_END = """() => {
+        const g = n => { const e = document.querySelector('input[name="' + n + '"]'); return e ? (e.value||'').trim() : ''; };
+        return { logr: g('endereco.logradouro'),
+                 cidade: g('endereco.cidade') || g('endereco.localidade') || g('endereco.municipio'),
+                 uf: g('endereco.uf') || g('endereco.estado') };
+    }"""
+    vals = {"logr": "", "cidade": "", "uf": ""}
     for _ in range(20):
-        logr = await page.eval_on_selector('input[name="endereco.logradouro"]', "e => e.value")
-        if (logr or "").strip():
+        vals = await page.evaluate(_JS_END)
+        if vals.get("logr") or vals.get("cidade") or vals.get("uf"):
             break
         await page.wait_for_timeout(200)
-    # CEP de localidade (cidade inteira): o site não autopreencheu o logradouro →
-    # usa o do cadastro do PAJ (item 2 da conferência de endereço).
-    if not (logr or "").strip() and (d.get("logradouro") or "").strip():
+    # CEP NÃO IDENTIFICADO pelos Correios: a consulta não trouxe NEM cidade NEM UF → o site
+    # não preencheu os campos e o cadastro do destinatário quebraria. Aborta com mensagem clara
+    # (provável CEP desmembrado). Não vale a pena tentar preencher tudo à mão.
+    if not vals.get("cidade") and not vals.get("uf"):
+        raise CorreiosCepNaoIdentificado(
+            "CEP não identificado nos correios. Verifique se o CEP não foi desmembrado.")
+    # CEP de localidade (cidade inteira): veio cidade/UF, mas NÃO o logradouro →
+    # usa o logradouro do cadastro do PAJ (item 2 da conferência de endereço).
+    if not vals.get("logr") and (d.get("logradouro") or "").strip():
         with contextlib.suppress(Exception):
             await page.fill('input[name="endereco.logradouro"]', str(d["logradouro"]).strip())
     await page.fill('input[name="endereco.numero"]', str(d.get("numero") or "").strip())
@@ -847,6 +866,13 @@ async def expedir_carta(destinatario: dict, cabecalho: str, corpo: str, rodape: 
                    comprovante_nome=cap["comprovante_nome"],
                    comprovante_caminho=cap["comprovante_caminho"],
                    detalhe="Carta expedida.")
+        return out
+    except CorreiosCepNaoIdentificado as e:
+        # CEP não reconhecido pelo site → aborta a expedição SEM postar, com status próprio
+        # para a tela exibir o badge de falha específico.
+        _ev(str(e), "erro")
+        out["status"] = "cep_nao_identificado"
+        out["detalhe"] = str(e)
         return out
     except (CorreiosSemCredenciais, CorreiosCredenciaisInvalidas) as e:
         out["detalhe"] = str(e)

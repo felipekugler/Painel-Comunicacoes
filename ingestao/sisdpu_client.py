@@ -588,6 +588,19 @@ _JS_DETALHAR_PAJ = r"""
     // movimentacao/tipo(3) fases(4) descricao(5) ... usuario. Filtramos por seq
     // numerico + celula de data (DD/MM/AAAA) para isolar essa tabela.
     const movs = [];
+    // indice da coluna "Usuario" descoberto pelo CABECALHO de cada tabela (a posicao
+    // pode variar); cache por tabela. Fallback = ultima celula (usuario e' a ultima coluna).
+    const _uCache = new Map();
+    const _idxUsuario = (table) => {
+        if (!table) return -1;
+        if (_uCache.has(table)) return _uCache.get(table);
+        let idx = -1;
+        table.querySelectorAll("thead th").forEach((th, i) => {
+            if (idx === -1 && /usu[aá]rio/i.test(th.textContent || "")) idx = i;
+        });
+        _uCache.set(table, idx);
+        return idx;
+    };
     for (const tr of document.querySelectorAll("table tbody tr")) {
         const cells = tr.querySelectorAll(":scope > td");
         if (cells.length < 6) continue;
@@ -595,12 +608,15 @@ _JS_DETALHAR_PAJ = r"""
         const data = (cells[2].textContent || "").trim();
         if (!/^\d{1,4}$/.test(seq)) continue;
         if (!/\d{2}\/\d{2}\/\d{4}/.test(data)) continue;
+        const uIdx = _idxUsuario(tr.closest("table"));
+        const uCell = (uIdx >= 0 && cells[uIdx]) ? cells[uIdx] : cells[cells.length - 1];
         movs.push({
             seq: parseInt(seq, 10),
             data: data,
             tipo: (cells[3].textContent || "").replace(/\s+/g, " ").trim(),
             fases: (cells[4].textContent || "").replace(/\s+/g, " ").trim(),
             descricao: (cells[5].textContent || "").replace(/\s+/g, " ").trim(),
+            usuario: (uCell ? uCell.textContent : "").replace(/\s+/g, " ").trim(),
         });
     }
     movs.sort((a, b) => b.seq - a.seq);   // mais recentes primeiro

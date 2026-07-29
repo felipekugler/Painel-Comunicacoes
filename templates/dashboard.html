@@ -189,6 +189,15 @@
         </svg>
         Gravar para envio
     </button>
+    <button class="btn-subtle btn-concluir-sc" style="padding:5px 9px;font-size:12px;"
+            data-tipo="{{ paj.tipo }}" data-paj="{{ paj.paj_norm }}" data-pajnum="{{ paj.paj }}"
+            data-tramite="{{ paj.id_tramite }}" onclick="concluirSemContatoAbrir(this)"
+            title="Concluir este PAJ da caixa sem nenhum contato (já tratado / nenhuma medida de contato necessária)">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:13px;height:13px;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+        Concluir PAJ da caixa
+    </button>
 {% endmacro %}
 
 {#-- Descrição do trâmite com o cabeçalho "[data/hora] - [remetente]" acima do texto.
@@ -747,7 +756,9 @@
 .mov-item.mov-off .mov-cab { opacity:.6; }
 .mov-item { padding:12px 0; border-top:1px solid var(--stroke); }
 .mov-item:first-child { border-top:none; }
-.mov-cab { font-size:12px; font-weight:600; color:var(--accent); margin-bottom:3px; }
+.mov-cab { font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:3px; }
+.mov-cab .mov-fase { color:var(--accent); font-weight:700; }
+.mov-cab .mov-user { color:var(--text-tertiary); font-weight:500; }
 .mov-desc { font-size:13px; color:var(--text-secondary); white-space:pre-wrap; line-height:1.55; }
 .section-head { display:flex; align-items:center; gap:10px; margin:0 0 12px; flex-wrap:wrap; }
 .badge-modo { font-size:10px; font-weight:800; letter-spacing:.04em; padding:3px 8px; border-radius:6px;
@@ -925,6 +936,58 @@
                 <path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
             </svg>
             Gravar para envio
+        </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal "Concluir PAJ da caixa" (sem nenhum contato) -->
+<div id="csc-modal" class="wa-overlay" style="display:none;">
+  <div class="fluent-card grava-dialog">
+    <h3 class="font-display" style="font-size:18px;margin:0;">Concluir PAJ da caixa — PAJ <span id="csc-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span></h3>
+    <p class="text-secondary" style="font-size:13px;margin:6px 0 10px;">
+        Confirma concluir este PAJ da caixa <strong>sem nenhum contato</strong> com o assistido?
+        Use quando o PAJ já foi tratado e não precisa de nenhuma medida de contato pelo painel.
+        O trâmite originário será concluído (sai da caixa) e o histórico registrará a conclusão sem contato.
+    </p>
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:2px;">Tramitação <span class="text-tertiary" style="font-weight:400;">(opcional — para onde o PAJ deve ir antes de concluir)</span></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <select id="csc-tramitar" class="grava-tramitar-sel">
+                <option value="">— Não tramitar —</option>
+            </select>
+            <div id="csc-tramitar-favs" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        </div>
+    </div>
+    <div id="csc-prazo-wrap" style="margin-top:10px;display:none;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:6px;">Prazo de conclusão</div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;">
+            <input type="checkbox" id="csc-sem-prazo" checked onchange="document.getElementById('csc-prazo').disabled=this.checked;"> Tramitar sem prazo de conclusão
+        </label>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+            <label class="wa-opt" style="gap:6px;">
+                <span style="font-size:13px;">Prazo (dias)</span>
+                <input type="number" id="csc-prazo" min="0" value="15" disabled
+                       style="width:54px;padding:3px 6px;border-radius:6px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);font-size:13px;">
+            </label>
+            <span id="csc-prazo-badges" style="display:inline-flex;gap:6px;flex-wrap:wrap;"></span>
+        </div>
+    </div>
+    <hr class="grava-sep">
+    <div>
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">Descrição do trâmite <span class="text-tertiary" style="font-weight:400;">(opcional)</span></div>
+        <textarea id="csc-desc" class="sug-textarea" style="min-height:90px;" placeholder="Descrição da tramitação (se deixar em branco, usa um texto padrão de conclusão sem contato)…"></textarea>
+    </div>
+    <hr class="grava-sep">
+    <div id="csc-erro" class="text-tertiary" style="display:none;font-size:12.5px;color:var(--c-red);margin-bottom:6px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn-subtle" onclick="concluirSemContatoFechar()">Cancelar</button>
+        <button class="btn-accent" id="csc-ok" onclick="concluirSemContatoConfirmar()">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.9" stroke="currentColor" style="width:14px;height:14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            Concluir PAJ
         </button>
     </div>
   </div>
@@ -1206,6 +1269,91 @@ async function copiarTexto(txt, rotulo) {
     }
 }
 function copiarDe(el) { copiarTexto(el.dataset.copy || '', el.dataset.rotulo || 'Conteúdo'); }
+
+// ---------- Concluir PAJ da caixa sem nenhum contato ----------
+let cscPaj = null, cscTramite = null, cscTipo = 'tramite';
+function cscTogglePrazo() {
+    const sel = document.getElementById('csc-tramitar');
+    document.getElementById('csc-prazo-wrap').style.display = (sel && sel.value) ? '' : 'none';
+}
+function cscFavsRender() {
+    const sel = document.getElementById('csc-tramitar');
+    const box = document.getElementById('csc-tramitar-favs');
+    if (!sel || !box) return;
+    box.innerHTML = '';
+    (_GRUPOS_FAV || []).forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge' + (sel.value === g ? ' ativo' : '');
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; cscTogglePrazo(); cscFavsRender(); };
+        box.appendChild(b);
+    });
+}
+async function cscCarregarGrupos() {
+    const sel = document.getElementById('csc-tramitar');
+    if (!sel) return;
+    if (!_GRUPOS_CACHE) {
+        try { const r = await fetch('/api/grupos-unidade'); const d = await r.json();
+              _GRUPOS_CACHE = (d && d.grupos) ? d.grupos : []; _GRUPOS_FAV = (d && d.favoritos) ? d.favoritos : []; }
+        catch (e) { _GRUPOS_CACHE = []; }
+    }
+    sel.innerHTML = '<option value="">— Não tramitar —</option>';
+    (_GRUPOS_CACHE || []).forEach(g => { const o = document.createElement('option'); o.value = g; o.textContent = g; sel.appendChild(o); });
+    sel.onchange = () => { cscTogglePrazo(); cscFavsRender(); };
+    cscFavsRender(); cscTogglePrazo();
+}
+// Badges de prazos pré-definidos + "Urgente" (mesmo estilo do modal Gravar). Setam o
+// input de prazo e limpam "sem prazo". Construídos uma vez (guard dataset.built).
+function cscBuildPrazoBadges() {
+    const wrap = document.getElementById('csc-prazo-badges');
+    if (!wrap || wrap.dataset.built) return;
+    const pr = document.getElementById('csc-prazo');
+    const sem = document.getElementById('csc-sem-prazo');
+    const setPrazo = (v) => { sem.checked = false; pr.disabled = false; pr.value = v; };
+    (PRAZOS_PREDEF || []).forEach(v => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge'; b.textContent = v + ' dias';
+        b.onclick = () => setPrazo(v);
+        wrap.appendChild(b);
+    });
+    const urg = document.createElement('button');
+    urg.type = 'button'; urg.className = 'prazo-badge urgente'; urg.textContent = '⚡ Urgente';
+    urg.title = 'Concluir com urgência (prazo 0)';
+    urg.onclick = () => setPrazo(0);
+    wrap.appendChild(urg);
+    wrap.dataset.built = '1';
+}
+function concluirSemContatoAbrir(btn) {
+    cscPaj = btn.dataset.paj; cscTramite = btn.dataset.tramite || ''; cscTipo = btn.dataset.tipo || 'tramite';
+    document.getElementById('csc-paj').textContent = btn.dataset.pajnum || '';
+    document.getElementById('csc-desc').value = '';
+    document.getElementById('csc-sem-prazo').checked = true;
+    const pr = document.getElementById('csc-prazo'); pr.value = 15; pr.disabled = true;
+    document.getElementById('csc-erro').style.display = 'none';
+    cscBuildPrazoBadges();
+    cscCarregarGrupos();
+    document.getElementById('csc-modal').style.display = 'flex';
+}
+function concluirSemContatoFechar() { document.getElementById('csc-modal').style.display = 'none'; }
+async function concluirSemContatoConfirmar() {
+    if (!(await window.garantirSisdpu())) return;
+    const grupo = document.getElementById('csc-tramitar').value || '';
+    const semPrazo = document.getElementById('csc-sem-prazo').checked;
+    const prazo = grupo ? (semPrazo ? 'sem' : parseInt(document.getElementById('csc-prazo').value, 10)) : null;
+    const desc = document.getElementById('csc-desc').value.trim();
+    const erro = document.getElementById('csc-erro');
+    const btn = document.getElementById('csc-ok'); const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = 'Concluindo…';
+    try {
+        const r = await fetch('/api/paj/concluir-sem-contato', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ slug: CAIXA_SLUG, paj_norm: cscPaj, id_tramite: cscTramite,
+                                   tipo: cscTipo, tramitar_grupo: grupo, prazo: prazo, tram_descricao: desc }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) { location.reload(); }
+        else { erro.textContent = 'Não foi possível concluir: ' + (d.erro || d.detalhe || 'erro'); erro.style.display = 'block'; btn.disabled = false; btn.innerHTML = orig; }
+    } catch (e) { erro.textContent = 'Erro: ' + e; erro.style.display = 'block'; btn.disabled = false; btn.innerHTML = orig; }
+}
 
 // ---------- Gravar para envio (fila) — por TRÂMITE ----------
 let gravaPajAtual = null;
@@ -1840,8 +1988,9 @@ function movRender(movs) {
     const lista = document.getElementById('mov-lista');
     lista.innerHTML = movs.length ? '' : '<div class="text-tertiary" style="font-size:13px;padding:12px 0;">Sem movimentações.</div>';
     movs.forEach(m => {
-        const cab = '[' + (m.seq ?? '') + '] ' + waEsc(m.data || '') +
-            (m.tipo ? ' · ' + waEsc(m.tipo) : '') + (m.fases ? ' · ' + waEsc(m.fases) : '');
+        const cab = '[' + (m.seq ?? '') + '] ' + waEsc(m.data || '')
+            + (m.fases ? ' · <span class="mov-fase">' + waEsc(m.fases) + '</span>' : '')
+            + (m.usuario ? ' · <span class="mov-user">' + waEsc(m.usuario) + '</span>' : '');
         const div = document.createElement('div');
         div.className = 'mov-item' + (m.sel ? '' : ' mov-off');
         div.innerHTML = '<label class="mov-cab-line"><input type="checkbox" class="mov-cb">' +
@@ -1850,7 +1999,7 @@ function movRender(movs) {
         cb.value = (m.seq ?? '');
         cb.checked = !!m.sel;
         cb.onchange = () => div.classList.toggle('mov-off', !cb.checked);
-        div.querySelector('.mov-cab').textContent = cab;
+        div.querySelector('.mov-cab').innerHTML = cab;
         div.querySelector('.mov-desc').textContent = m.descricao || '(sem descrição)';
         lista.appendChild(div);
     });

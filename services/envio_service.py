@@ -34,7 +34,8 @@ MEIOS: dict[str, str] = {
 # Rótulos de TODOS os meios (mensagem + encaminhamento: telefone/carta), só para EXIBIÇÃO
 # (tooltip/legenda no histórico). ⚠️ NÃO usar `MEIOS` p/ isso — vários fluxos filtram
 # `m in MEIOS` para pegar SÓ meios de mensagem (telefone/carta são tratados à parte).
-MEIOS_ROTULOS: dict[str, str] = {**MEIOS, "telefone": "Ligação telefônica", "carta": "Carta"}
+MEIOS_ROTULOS: dict[str, str] = {**MEIOS, "telefone": "Ligação telefônica", "carta": "Carta",
+                                 "sem_contato": "Concluído sem contato"}
 
 # Meios SELECIONÁVEIS ao gravar/configurar. E-mail ainda NÃO implementado (depende de
 # configuração externa) → fica de fora POR ORA. O rótulo continua em MEIOS para exibir

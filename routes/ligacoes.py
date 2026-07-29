@@ -149,6 +149,20 @@ async def api_correspondencia_atualizar_endereco(payload: dict = Body(...)):
     return JSONResponse(r, status_code=200 if r.get("ok") else 400)
 
 
+@router.post("/api/correspondencia/atualizar-endereco-cep", response_class=JSONResponse)
+async def api_correspondencia_atualizar_endereco_cep(payload: dict = Body(...)):
+    """Atualiza o endereço do assistido no SISDPU trocando SÓ o CEP (modal de CEP desmembrado
+    na expedição): resolve o CEP novo, mantém número/complemento. Playwright — pode demorar."""
+    p = payload or {}
+    try:
+        r = await svc.atualizar_endereco_por_cep(
+            p.get("slug", ""), p.get("paj_norm", ""), p.get("id_tramite", ""),
+            p.get("tipo", "tramite"), p.get("cep", ""))
+    except Exception as e:  # noqa: BLE001
+        r = {"ok": False, "erro": str(e)}
+    return JSONResponse(r, status_code=200 if r.get("ok") else 400)
+
+
 @router.post("/api/correspondencia/expedir", response_class=JSONResponse)
 async def api_correspondencia_expedir(payload: dict = Body(...)):
     """Expede a carta pelos Correios (SMT) e, se postada (modo real), movimenta +
@@ -185,7 +199,8 @@ async def api_correspondencia_expedir_stream(payload: dict = Body(...)):
     p = payload or {}
     gen = svc.expedir_correspondencia_stream(
         p.get("slug", ""), p.get("paj_norm", ""), p.get("id_tramite", ""),
-        tipo=p.get("tipo", "tramite"), forcar=bool(p.get("forcar")))
+        tipo=p.get("tipo", "tramite"), forcar=bool(p.get("forcar")),
+        cep_override=p.get("cep_override", "") or "")
     return StreamingResponse(
         disparos_service.stream_e_salvar(gen, "carta"),
         media_type="text/event-stream",

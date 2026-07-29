@@ -19,6 +19,11 @@
 .cep-div    { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
 .cep-loc    { color:var(--c-addr); background:color-mix(in srgb,var(--c-addr) 14%,transparent); border-color:color-mix(in srgb,var(--c-addr) 50%,transparent); }
 .cep-erro   { color:#a06500; background:color-mix(in srgb,#f59e0b 12%,transparent); border-color:color-mix(in srgb,#f59e0b 45%,transparent); }
+/* Badges por serviço de CEP (✓/✗ ViaCEP · ✓/✗ OpenCEP) — prévia de qual serviço achou o CEP */
+.prov-badge { display:inline-block; font-size:10px; font-weight:700; padding:1px 7px; border-radius:999px; white-space:nowrap; border:1px solid transparent; }
+.prov-ok  { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border-color:color-mix(in srgb,#16a34a 45%,transparent); }
+.prov-nao { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+.prov-off { color:#a06500; background:color-mix(in srgb,#f59e0b 12%,transparent); border-color:color-mix(in srgb,#f59e0b 45%,transparent); }
 /* Selos da coluna Endereço (cadastrado no PAJ = cinza; envio = amarelo) */
 .end-bloco { margin-bottom:8px; }
 .end-selo { display:inline-block; font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
@@ -99,11 +104,11 @@
                         <span class="end-selo end-selo-env">Endereço de Envio</span>
                         <div class="end-txt end-txt-envio">{% if it.corr_endereco_envio %}{{ it.corr_endereco_envio }}{% else %}<span class="text-tertiary">— (defina validando o endereço)</span>{% endif %}</div>
                     </div>
-                    {% if it.corr_val_badge %}
-                    <div><span class="cep-badge {{ it.corr_val_badge.cls }}">{{ it.corr_val_badge.txt }}</span></div>
-                    {% else %}
-                    <div><span class="cep-badge cep-neutro">endereço não validado</span></div>
-                    {% endif %}
+                    <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;">
+                        {% if it.corr_val_badge %}<span class="cep-badge {{ it.corr_val_badge.cls }}">{{ it.corr_val_badge.txt }}</span>
+                        {% else %}<span class="cep-badge cep-neutro">endereço não validado</span>{% endif %}
+                        <span class="cep-prov" style="display:inline-flex;gap:5px;flex-wrap:wrap;">{% for p in (it.corr_val_provedores or []) %}<span class="prov-badge prov-{{ p.st }}" title="{% if p.st == 'ok' %}CEP encontrado neste serviço{% elif p.st == 'off' %}Serviço indisponível no momento{% else %}CEP não encontrado neste serviço{% endif %}">{{ p.mark }} {{ p.nome }}</span>{% endfor %}</span>
+                    </div>
                 </td>
                 <td class="text-secondary" style="font-size:12px;">
                     {{ it.corr_em | data_hora_br }}
@@ -253,6 +258,29 @@
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">
         <button class="btn-subtle" onclick="cartaEditarFechar()">Cancelar</button>
         <button class="btn-accent" onclick="cartaEditarSalvar()">Salvar texto</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: CEP não identificado nos Correios (informar o CEP desmembrado) -->
+<div id="cep-desm-modal" class="endr-overlay" style="display:none;z-index:4200;">
+  <div class="fluent-card endr-dialog" style="max-width:min(560px,94vw);min-width:auto;">
+    <h3 class="font-display" style="font-size:18px;margin:0 0 8px;">CEP não identificado nos Correios</h3>
+    <p class="text-secondary" style="font-size:13.5px;margin:0 0 8px;line-height:1.5;">
+        Na página aberta do SMT Correios, faça a consulta manual do CEP (ícone da lupa) para
+        verificar se ele não foi desmembrado.
+    </p>
+    <p class="text-secondary" style="font-size:13.5px;margin:0 0 10px;font-weight:600;">
+        Insira o CEP novo (desmembrado) para prosseguir:
+    </p>
+    <input type="text" id="cep-desm-input" class="busca-input" placeholder="Novo CEP (ex.: 81260-045)"
+           maxlength="9" style="width:190px;" oninput="this.value=this.value.replace(/[^0-9-]/g,'')">
+    <div id="cep-desm-erro" class="text-tertiary" style="display:none;font-size:12.5px;color:var(--c-red,#dc2626);margin-top:6px;"></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;flex-wrap:wrap;">
+        <button class="btn-subtle" onclick="cepDesmCancelar()">Cancelar envio</button>
+        <button class="btn-subtle" id="cep-desm-atualizar" onclick="cepDesmAtualizarSisdpu()"
+                title="Grava o CEP novo no cadastro do assistido no SISDPU (opcional).">Atualizar endereço no SISDPU</button>
+        <button class="btn-accent" onclick="cepDesmProsseguir()">Prosseguir com envio da carta</button>
     </div>
   </div>
 </div>
@@ -461,12 +489,89 @@ function _cepBadge(tr, cls, txt) {
     const el = tr && tr.querySelector('.cep-badge');
     if (el) { el.className = 'cep-badge ' + cls; el.textContent = txt; }
 }
+// Badges por serviço de CEP (✓/✗ ViaCEP · ✓/✗ OpenCEP) ao lado do badge de validação.
+function _provBadges(tr, provedores) {
+    const box = tr && tr.querySelector('.cep-prov');
+    if (!box) return;
+    box.innerHTML = '';
+    const nomes = { viacep: 'ViaCEP', opencep: 'OpenCEP' };
+    ['viacep', 'opencep'].forEach(k => {
+        const st = provedores && provedores[k];   // 'ok' | 'nao' | 'off' | undefined
+        if (!st) return;
+        const b = document.createElement('span');
+        b.className = 'prov-badge prov-' + st;
+        b.textContent = (st === 'ok' ? '✓ ' : '✗ ') + (nomes[k] || k);
+        b.title = st === 'ok' ? 'CEP encontrado neste serviço'
+                : (st === 'off' ? 'Serviço indisponível no momento' : 'CEP não encontrado neste serviço');
+        box.appendChild(b);
+    });
+}
 // Atualiza o bloco "Endereço de Envio" na hora (após validar). Vazio → placeholder.
 function _setEnvio(tr, txt) {
     const el = tr && tr.querySelector('.end-txt-envio');
     if (!el) return;
     if (txt && txt.trim()) el.textContent = txt;
     else el.innerHTML = '<span class="text-tertiary">— (defina validando o endereço)</span>';
+}
+// Modal "CEP não identificado nos Correios" (informar o CEP desmembrado e reenviar).
+let _cepDesmBtn = null;
+function cepDesmAbrir(btn) {
+    _cepDesmBtn = btn;
+    document.getElementById('cep-desm-input').value = '';
+    const e = document.getElementById('cep-desm-erro'); if (e) e.style.display = 'none';
+    document.getElementById('cep-desm-modal').style.display = 'flex';
+    setTimeout(() => { const i = document.getElementById('cep-desm-input'); if (i) i.focus(); }, 50);
+}
+function cepDesmFechar() { document.getElementById('cep-desm-modal').style.display = 'none'; }
+function cepDesmCancelar() {
+    cepDesmFechar();
+    if (window.sseFechar) window.sseFechar();
+    const tr = _cepDesmBtn && _cepDesmBtn.closest('tr');
+    if (tr) {
+        _cepBadge(tr, 'cep-div', '⚠ CEP não identificado nos correios. Verifique se o CEP não foi desmembrado.');
+        _habilitarExpedir(tr, true);
+    }
+    _cepDesmBtn = null;
+}
+function cepDesmProsseguir() {
+    const inp = document.getElementById('cep-desm-input');
+    const cep = (inp.value || '').replace(/\D/g, '');
+    const err = document.getElementById('cep-desm-erro');
+    if (cep.length !== 8) { err.textContent = 'Informe um CEP válido com 8 dígitos.'; err.style.display = 'block'; return; }
+    const btn = _cepDesmBtn; _cepDesmBtn = null;
+    cepDesmFechar();
+    if (window.sseFechar) window.sseFechar();
+    expedirCarta(btn, true, cep);   // reenvia com o CEP corrigido (dispensa a conferência)
+}
+// "Atualizar endereço no SISDPU" (opcional): grava o CEP novo no cadastro do assistido — igual
+// ao botão do modal de conferência de endereço, mas montando o endereço a partir do CEP novo.
+async function cepDesmAtualizarSisdpu() {
+    const inp = document.getElementById('cep-desm-input');
+    const cep = (inp.value || '').replace(/\D/g, '');
+    const err = document.getElementById('cep-desm-erro');
+    if (cep.length !== 8) { err.style.color = 'var(--c-red,#dc2626)'; err.textContent = 'Informe um CEP válido com 8 dígitos.'; err.style.display = 'block'; return; }
+    if (!_cepDesmBtn) return;
+    if (!(await window.garantirSisdpu())) return;
+    const btn = _cepDesmBtn;
+    const b = document.getElementById('cep-desm-atualizar'); const orig = b.innerHTML;
+    b.disabled = true; b.textContent = 'Atualizando…';
+    err.style.display = 'none';
+    try {
+        const r = await fetch('/api/correspondencia/atualizar-endereco-cep', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
+                                   id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite', cep: cep }) });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok && d.sisdpu_ok) {
+            err.style.color = 'var(--c-ok,#16a34a)';
+            err.textContent = '✓ Endereço atualizado no SISDPU. Você já pode prosseguir com o envio.';
+        } else {
+            err.style.color = 'var(--c-red,#dc2626)';
+            err.textContent = 'Não foi possível atualizar no SISDPU: ' + (d.sisdpu_detalhe || d.erro || 'erro');
+        }
+        err.style.display = 'block';
+    } catch (e) { err.style.color = 'var(--c-red,#dc2626)'; err.textContent = 'Erro: ' + e; err.style.display = 'block'; }
+    finally { b.disabled = false; b.innerHTML = orig; }
 }
 function _habilitarExpedir(tr, divergente) {
     const b = tr && tr.querySelector('.btn-expedir');
@@ -492,8 +597,9 @@ async function validarEndereco(btn) {
         // Reflete o "Endereço de Envio" na hora (o backend já o definiu ao validar): quando o
         // endereço é válido, o envio passa a corresponder ao endereço cadastrado no PAJ.
         _setEnvio(tr, d.endereco_envio_txt || '');
+        _provBadges(tr, d.provedores);   // ✓/✗ ViaCEP · ✓/✗ OpenCEP
         if (d.cep_invalido)     { _cepBadge(tr, 'cep-div', '⚠ CEP não encontrado — corrija o endereço'); endrAbrir(tr, d); }
-        else if (!d.verificado) { _cepBadge(tr, 'cep-erro', '⚠ CEP não verificado (ViaCEP indisponível) — confira manualmente'); _habilitarExpedir(tr, true); if (revalidar) endrAbrir(tr, d); }
+        else if (!d.verificado) { _cepBadge(tr, 'cep-erro', '⚠ CEP não verificado (serviços de CEP indisponíveis) — confira manualmente'); _habilitarExpedir(tr, true); if (revalidar) endrAbrir(tr, d); }
         else if (d.divergente)  { _cepBadge(tr, 'cep-div', '⚠ Diverge do CEP em: ' + _campos(d) + ' — corrija'); endrAbrir(tr, d); }
         else if (d.cep_localidade) { _cepBadge(tr, 'cep-loc', 'ⓘ CEP de localidade — usará o logradouro do cadastro'); _habilitarExpedir(tr, false); if (revalidar) endrAbrir(tr, d); }
         else                    { _cepBadge(tr, 'cep-ok', '✓ Endereço validado'); _habilitarExpedir(tr, false); if (revalidar) endrAbrir(tr, d); }
@@ -544,7 +650,7 @@ function endrAbrir(tr, d) {
         st.textContent = 'ⓘ CEP de localidade — usará o logradouro do cadastro. Endereço válido; edite se precisar e clique em Validar.';
     } else if (!d.verificado) {
         st.style.color = '#a06500';
-        st.textContent = '⚠ Não foi possível verificar o CEP agora (ViaCEP indisponível). Edite se precisar e clique em Validar.';
+        st.textContent = '⚠ Não foi possível verificar o CEP agora (serviços de CEP indisponíveis). Edite se precisar e clique em Validar.';
     } else {
         st.style.color = 'var(--c-zap)';
         st.textContent = '✓ Endereço confere com o CEP. Edite se precisar e clique em Validar para atualizar.';
@@ -600,7 +706,7 @@ async function endrValidarEditado() {
             _endrHabilitar(true);
         } else if (!d.verificado) {
             st.style.color = '#a06500';
-            st.textContent = '⚠ Não foi possível verificar o CEP agora (ViaCEP indisponível). Você pode atualizar assim mesmo.';
+            st.textContent = '⚠ Não foi possível verificar o CEP agora (serviços de CEP indisponíveis). Você pode atualizar assim mesmo.';
             _endrHabilitar(true);
         } else {
             st.style.color = 'var(--c-zap)';
@@ -660,7 +766,7 @@ async function endrSalvarEnvio() {
     } catch (e) { btn.disabled = false; btn.innerHTML = orig; st.style.color = 'var(--c-red)'; st.textContent = '✗ Erro: ' + e; }
 }
 // Expede a carta pelos Correios (+ movimentação/juntada/tramitação no sucesso).
-async function expedirCarta(btn, forcar) {
+async function expedirCarta(btn, forcar, cepOverride) {
     if (btn.dataset.validado !== '1') { alert('Valide o endereço antes de expedir.'); return; }
     const real = (btn.dataset.modo === 'real');
     const divergente = (btn.dataset.divergente === '1');
@@ -683,7 +789,8 @@ async function expedirCarta(btn, forcar) {
     // Log AO VIVO (SSE): mostra as etapas no site dos Correios e depois mov./tram. no SISDPU.
     const d = await window.enviarComPopup('/api/correspondencia/expedir/stream',
         { slug: btn.dataset.slug, paj_norm: btn.dataset.paj,
-          id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite', forcar: !!forcar },
+          id_tramite: btn.dataset.tramite, tipo: btn.dataset.tipo || 'tramite', forcar: !!forcar,
+          cep_override: cepOverride || '' },
         real ? '— expedindo a carta pelos Correios…' : '— simulando (não posta)…');
     if (d.ok && d.status === 'expedido') {
         // sucesso: o popup mostra tudo; recarrega ao fechar para refletir a saída da fila.
@@ -698,6 +805,11 @@ async function expedirCarta(btn, forcar) {
             + 'Pelo CEP:  ' + (d.resolvido || '—') + '\n\n'
             + 'Confira. Deseja expedir MESMO ASSIM (com o endereço do CEP)?');
         if (ok) { window.sseFechar(); expedirCarta(btn, true); }
+    } else if (!d.ok && d.status === 'cep_nao_identificado') {
+        // Correios não reconheceu o CEP → abre o modal para o usuário consultar o CEP novo
+        // (desmembrado) na página do SMT e reenviar com ele.
+        restore();
+        cepDesmAbrir(btn);
     } else {
         restore();
     }
