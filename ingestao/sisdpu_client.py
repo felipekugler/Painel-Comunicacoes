@@ -1716,15 +1716,53 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
     # ---------- FASE 2: CONCLUIR na caixa do usuário ----------
     await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
     await _wait_pf_ajax(page); await page.wait_for_timeout(700)
+    # O trâmite admitido pode DEMORAR a aparecer na caixa do usuário (admit é AJAX; em
+    # máquina/rede mais lenta atrasa). Poll com reload até ~6s antes de marcar os checkboxes.
+    for _tent in range(4):
+        faltam = [i for i in ids if not await page.evaluate(_JS_TRAMITE_NA_CAIXA, i)]
+        if not faltam:
+            break
+        _log.info("concluir_paj: aguardando %s aparecer(em) na caixa do usuário (tentativa %d)…",
+                  faltam, _tent + 1)
+        await page.wait_for_timeout(1200)
+        await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
+        await _wait_pf_ajax(page); await page.wait_for_timeout(500)
     marcados = 0
     for i in ids:
         try:
-            if await page.evaluate(_JS_TRAMITE_NA_CAIXA, i) and await page.evaluate(_JS_MARCA_CHECKBOX, i):
+            na = await page.evaluate(_JS_TRAMITE_NA_CAIXA, i)
+            mk = (await page.evaluate(_JS_MARCA_CHECKBOX, i)) if na else False
+            if na and mk:
                 marcados += 1
+            else:
+                _log.warning("concluir_paj: trâmite %s não marcado (na_caixa=%s, checkbox=%s)", i, na, mk)
         except Exception as e:  # noqa: BLE001
             _log.warning("concluir_paj: marcar %s falhou: %s", i, e)
+    _log.info("concluir_paj: %d/%d checkbox(es) marcado(s) → Concluir", marcados, len(ids))
     if marcados:
         await page.evaluate(_JS_CLICA_BTN_CONCLUIR)
+        await page.wait_for_timeout(900)
+        # ⚠️ O SISDPU costuma abrir um DIÁLOGO de confirmação ("Deseja concluir o(s) trâmite(s)?")
+        # após o btnConcluir. Se não confirmarmos, a conclusão NÃO se efetiva (era a causa do
+        # '0/1 concluído' intermitente). Confirmamos clicando o botão afirmativo do diálogo.
+        with contextlib.suppress(Exception):
+            dlgs = await _dialogos_visiveis(page)
+            if dlgs:
+                _log.info("concluir_paj: diálogo pós-Concluir: %s", dlgs)
+                clicado = await page.evaluate(r"""() => {
+                    const vis = d => { const s=getComputedStyle(d); const r=d.getBoundingClientRect();
+                        return s.display!=='none' && s.visibility!=='hidden' && r.width>0 && r.height>0; };
+                    const AFIRM = /^(sim|confirmar|concluir|ok|continuar)$/i;
+                    for (const dlg of document.querySelectorAll('.ui-confirm-dialog,.ui-dialog')) {
+                        if (!vis(dlg)) continue;
+                        for (const b of dlg.querySelectorAll('button, a.ui-button')) {
+                            const t=(b.innerText||'').replace(/\s+/g,' ').trim();
+                            if (AFIRM.test(t)) { b.click(); return t; }
+                        }
+                    }
+                    return '';
+                }""")
+                _log.info("concluir_paj: confirmação do diálogo clicada = %r", clicado)
         await _wait_pf_ajax(page, timeout=15000); await page.wait_for_timeout(1300)
 
     # ---------- VERIFICAÇÃO: sumiu da caixa do usuário E da caixa de grupo ----------
