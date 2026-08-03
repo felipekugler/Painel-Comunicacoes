@@ -8,13 +8,39 @@
 Estas rotas são LIVRES (não passam pelo cadeado) — ver o middleware em app.py.
 """
 
+import contextlib
+from pathlib import Path
+
 from fastapi import APIRouter, Body, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.background import BackgroundTask
 
 from services import credenciais_service
 
 router = APIRouter()
+
+_LOGS_DIR = Path(__file__).resolve().parent.parent / "logs"
+
+
+@router.get("/api/diagnostico/log", response_class=PlainTextResponse)
+async def api_diagnostico_log(filtro: str = "concluir_paj", linhas: int = 300):
+    """Mostra as últimas linhas do log do painel pelo NAVEGADOR (sem precisar achar o arquivo).
+    Abra: /api/diagnostico/log  (filtra 'concluir_paj') ou  /api/diagnostico/log?filtro=&linhas=500
+    (tudo). Lê logs/app.log + os rotacionados recentes. Somente leitura."""
+    linhas = max(1, min(int(linhas or 300), 5000))
+    filtro = (filtro or "").strip().lower()
+    conteudo: list[str] = []
+    with contextlib.suppress(Exception):
+        arqs = sorted(_LOGS_DIR.glob("app.log*"))
+        for a in arqs[-3:]:                       # hoje + até 2 rotacionados recentes
+            with contextlib.suppress(Exception):
+                conteudo.extend(a.read_text(encoding="utf-8", errors="replace").splitlines())
+    if filtro:
+        conteudo = [ln for ln in conteudo if filtro in ln.lower()]
+    if not conteudo:
+        return ("(sem linhas" + (f" contendo '{filtro}'" if filtro else "") +
+                f" — pasta de log: {_LOGS_DIR})")
+    return "\n".join(conteudo[-linhas:])
 
 
 @router.get("/desbloquear", response_class=HTMLResponse)

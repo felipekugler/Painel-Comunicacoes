@@ -37,8 +37,10 @@
         </p>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex:1;max-width:560px;min-width:280px;justify-content:flex-end;">
-        <input id="hist-busca" type="text" class="busca-input" style="flex:1;" placeholder="Pesquisar (PAJ, assistido, caixa, mensagem…)"
-               oninput="histFiltrar()" autocomplete="off">
+        <input id="hist-busca" type="text" name="hist-filtro" class="busca-input" style="flex:1;" placeholder="Pesquisar (PAJ, assistido, caixa, mensagem…)"
+               oninput="histFiltrar()" autocomplete="off" autocorrect="off" spellcheck="false"
+               data-lpignore="true" data-1p-ignore data-form-type="other"
+               readonly onfocus="this.removeAttribute('readonly')">
         {% if registros %}
         <button class="btn-subtle" style="white-space:nowrap;color:var(--c-red);border-color:color-mix(in srgb,var(--c-red) 40%,transparent);"
                 onclick="histLimparAbrir()">Limpar histórico</button>

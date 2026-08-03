@@ -1668,6 +1668,38 @@ _JS_CLICA_BTN_CONCLUIR = r"""() => {
     const b = document.querySelector('[id="tabView:caixaEntradaTab1Form:btnConcluir"]');
     if (!b) return false; b.click(); return true;
 }"""
+# DIAGNÓSTICO: o que está VISÍVEL nas caixas agora (ids, contagem, paginador) — p/ detectar
+# quando o trâmite existe mas está em OUTRA PÁGINA (paginação) ou a aba não renderizou.
+_JS_DIAG_CAIXAS = r"""() => {
+    const info = {caixa_rows:0, caixa_rks:[], grupo_rows:0, grupo_rks:[], paginadores:[]};
+    const vis = e => { const r=e.getBoundingClientRect(); return r.width>0 && r.height>0; };
+    const cx = document.querySelector('[id="tabView:caixaEntradaTab1Form:tramites"]');
+    if (cx) {
+        const rows = cx.querySelectorAll('tbody tr[data-rk]');
+        info.caixa_rows = rows.length;
+        info.caixa_rks = [...rows].map(r=>r.getAttribute('data-rk')).slice(0,60);
+    }
+    const grp = [...document.querySelectorAll('tr[data-rk]')].filter(tr =>
+        [...tr.querySelectorAll('a,button')].some(a => (a.textContent||'').replace(/\s+/g,' ').trim().toLowerCase()==='admitir'));
+    info.grupo_rows = grp.length;
+    info.grupo_rks = grp.map(r=>r.getAttribute('data-rk')).slice(0,60);
+    info.paginadores = [...document.querySelectorAll('.ui-paginator')].filter(vis)
+        .map(p => (p.textContent||'').replace(/\s+/g,' ').trim().slice(0,80));
+    // TODOS os data-rk presentes na página (mesmo sem link "Admitir") — p/ detectar id divergente.
+    info.todos_rks = [...document.querySelectorAll('tr[data-rk]')].map(r=>r.getAttribute('data-rk')).slice(0,80);
+    return info;
+}"""
+# DIAGNÓSTICO DIRECIONADO: para cada id-alvo, diz se a linha existe, em que tabela e quais ações
+# tem (revela id divergente x seletor do 'Admitir'/checkbox errado).
+_JS_DIAG_ALVO = r"""(ids) => ids.map(idt => {
+    const tr = document.querySelector('tr[data-rk="'+idt+'"]');
+    if (!tr) return {id: idt, presente: false};
+    const acoes = [...tr.querySelectorAll('a,button')]
+        .map(a => (a.textContent||'').replace(/\s+/g,' ').trim()).filter(Boolean).slice(0,10);
+    const dt = tr.closest('.ui-datatable');
+    const hdr = dt ? ((dt.querySelector('.ui-datatable-header strong, .ui-datatable-header')||{}).textContent||'') : '';
+    return {id: idt, presente: true, tabela: hdr.replace(/\s+/g,' ').trim().slice(0,60), acoes};
+})"""
 
 
 async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
@@ -1701,32 +1733,44 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
         return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO, "resultados": res}
     await page.evaluate(_JS_ATIVA_ABA_GRUPO)
     await _wait_pf_ajax(page); await page.wait_for_timeout(900)
+    with contextlib.suppress(Exception):
+        diag = await page.evaluate(_JS_DIAG_CAIXAS)
+        _log.info("concluir_paj: caixa de GRUPO — %d linha(s) c/ Admitir; rks_grupo=%s; todos_rks=%s; paginador=%s",
+                  diag.get("grupo_rows"), diag.get("grupo_rks"), diag.get("todos_rks"), diag.get("paginadores"))
+        alvo = await page.evaluate(_JS_DIAG_ALVO, ids)
+        _log.info("concluir_paj: ALVO(s) na tela do grupo: %s", alvo)
     for i in ids:
         try:
             if await page.evaluate(_JS_TRAMITE_NO_GRUPO, i):
                 if await page.evaluate(_JS_ADMITIR_TRAMITE, i):
-                    await _wait_pf_ajax(page, timeout=15000); await page.wait_for_timeout(800)
+                    # Espera generosa após admitir (o admit é AJAX + a máquina pode estar lenta
+                    # por causa do streaming do AnyDesk consumindo CPU).
+                    await _wait_pf_ajax(page, timeout=20000); await page.wait_for_timeout(1500)
                     res[i]["admitido"] = True
             else:
-                # não está no grupo — talvez já tenha sido admitido antes; segue p/ conclusão
+                # não está no grupo (página visível) — talvez já admitido antes OU em outra página
                 res[i]["admitido"] = None
         except Exception as e:  # noqa: BLE001
             _log.warning("concluir_paj: admitir %s falhou: %s", i, e)
 
     # ---------- FASE 2: CONCLUIR na caixa do usuário ----------
     await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
-    await _wait_pf_ajax(page); await page.wait_for_timeout(700)
-    # O trâmite admitido pode DEMORAR a aparecer na caixa do usuário (admit é AJAX; em
-    # máquina/rede mais lenta atrasa). Poll com reload até ~6s antes de marcar os checkboxes.
-    for _tent in range(4):
+    await _wait_pf_ajax(page); await page.wait_for_timeout(1000)
+    # O trâmite admitido pode DEMORAR a aparecer na caixa do usuário (admit é AJAX; máquina lenta
+    # /CPU carregada pelo AnyDesk atrasa). Poll GENEROSO com reload até ~20s antes de marcar.
+    for _tent in range(8):
         faltam = [i for i in ids if not await page.evaluate(_JS_TRAMITE_NA_CAIXA, i)]
         if not faltam:
             break
-        _log.info("concluir_paj: aguardando %s aparecer(em) na caixa do usuário (tentativa %d)…",
+        _log.info("concluir_paj: aguardando %s aparecer(em) na caixa do usuário (tentativa %d/8)…",
                   faltam, _tent + 1)
-        await page.wait_for_timeout(1200)
+        await page.wait_for_timeout(1800)
         await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
-        await _wait_pf_ajax(page); await page.wait_for_timeout(500)
+        await _wait_pf_ajax(page); await page.wait_for_timeout(700)
+    with contextlib.suppress(Exception):
+        diag = await page.evaluate(_JS_DIAG_CAIXAS)
+        _log.info("concluir_paj: caixa do USUÁRIO — %d linha(s); rks=%s; paginador=%s",
+                  diag.get("caixa_rows"), diag.get("caixa_rks"), diag.get("paginadores"))
     marcados = 0
     for i in ids:
         try:
@@ -1734,6 +1778,7 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
             mk = (await page.evaluate(_JS_MARCA_CHECKBOX, i)) if na else False
             if na and mk:
                 marcados += 1
+                res[i]["marcado"] = True         # marcamos DE FATO o checkbox deste trâmite
             else:
                 _log.warning("concluir_paj: trâmite %s não marcado (na_caixa=%s, checkbox=%s)", i, na, mk)
         except Exception as e:  # noqa: BLE001
@@ -1765,7 +1810,12 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
                 _log.info("concluir_paj: confirmação do diálogo clicada = %r", clicado)
         await _wait_pf_ajax(page, timeout=15000); await page.wait_for_timeout(1300)
 
-    # ---------- VERIFICAÇÃO: sumiu da caixa do usuário E da caixa de grupo ----------
+    # ---------- VERIFICAÇÃO ----------
+    # ⚠️ ANTES: `concluido = não está na caixa E não está no grupo` — dava FALSO POSITIVO quando o
+    # trâmite não era LOCALIZADO em nenhuma das duas (ex.: está em OUTRA PÁGINA do paginador, ou a
+    # aba não renderizou): o painel dizia "1/1 concluído" sem ter concluído nada. AGORA exigimos
+    # EVIDÊNCIA POSITIVA: só é "concluído" se REALMENTE marcamos o checkbox do trâmite E ele saiu
+    # da caixa do usuário. Se nunca foi marcado (não localizado), é FALHA (fica visível + "refazer").
     await page.goto(cx_url, wait_until="domcontentloaded", timeout=30000)
     await _wait_pf_ajax(page); await page.wait_for_timeout(600)
     na_caixa = {i: await page.evaluate(_JS_TRAMITE_NA_CAIXA, i) for i in ids}
@@ -1773,7 +1823,15 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
     await _wait_pf_ajax(page); await page.wait_for_timeout(800)
     no_grupo = {i: await page.evaluate(_JS_TRAMITE_NO_GRUPO, i) for i in ids}
     for i in ids:
-        res[i]["concluido"] = not na_caixa[i] and not no_grupo[i]
+        if res[i].get("marcado"):
+            # marcamos e clicamos Concluir → concluído se saiu da caixa do usuário
+            res[i]["concluido"] = not na_caixa[i]
+        else:
+            # não localizado p/ marcar → NÃO declarar concluído (evita o falso positivo)
+            res[i]["concluido"] = False
+            _log.warning("concluir_paj: trâmite %s NÃO concluído — não foi localizado p/ marcar "
+                         "(na_caixa=%s, no_grupo=%s). Provável paginação/aba ou id divergente.",
+                         i, na_caixa[i], no_grupo[i])
 
     concluidos = [i for i in ids if res[i]["concluido"]]
     if len(concluidos) == len(ids):
