@@ -48,6 +48,7 @@ async def configuracoes(request: Request):
         layout_pendentes=config_service.get_layout_pendentes(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         prazo_tramitacao_padrao=config_service.get_prazo_tramitacao_padrao(),
+        feriados=config_service.get_feriados(),
         carta_cabecalho=config_service.get_carta_cabecalho(),
         carta_rodape=config_service.get_carta_rodape(),
         carta_prazo_pos_entrega=config_service.get_carta_prazo_pos_entrega(),
@@ -203,6 +204,25 @@ async def set_prazo_tramitacao_padrao(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "dias": config_service.set_prazo_tramitacao_padrao(n)}
+
+
+@router.post("/api/config/feriados", response_class=JSONResponse)
+async def add_feriado(payload: dict = Body(...)):
+    """Cadastra um feriado/dia de recesso (data 'DD/MM/AAAA' + descrição opcional). Datas
+    de prazo de tramitação que caírem nele são adiadas para o próximo dia útil."""
+    p = payload or {}
+    data = str(p.get("data", "")).strip()
+    if not data:
+        return JSONResponse({"ok": False, "erro": "Informe a data."}, status_code=400)
+    feriados = config_service.add_feriado(data, p.get("descricao", ""))
+    if not any(f["data"] == data for f in feriados):
+        return JSONResponse({"ok": False, "erro": "Data inválida (use DD/MM/AAAA)."}, status_code=400)
+    return {"ok": True, "feriados": feriados}
+
+
+@router.post("/api/config/feriados/del", response_class=JSONResponse)
+async def del_feriado(payload: dict = Body(...)):
+    return {"ok": True, "feriados": config_service.del_feriado((payload or {}).get("data", ""))}
 
 
 @router.post("/api/config/carta-cabecalho", response_class=JSONResponse)

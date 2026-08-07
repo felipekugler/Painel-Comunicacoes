@@ -189,6 +189,73 @@ def set_prazo_tramitacao_padrao(n: int) -> int:
     return d["prazo_tramitacao_padrao"]
 
 
+# ---------------- feriados / dias não úteis (ajuste da data de conclusão) ----------------
+# Sábados e domingos já são tratados como não úteis automaticamente (regra fixa); aqui só
+# cadastramos os dias ADICIONAIS (feriados, recesso forense) — pedido da usuária Larissa
+# (07/08/2026): a tramitação estava caindo em fim de semana; agora a data calculada é
+# adiada até o PRÓXIMO DIA ÚTIL (ver painel_comunicacoes_service._proximo_dia_util).
+def _valida_data_br(s: str) -> str | None:
+    """Valida e normaliza uma data 'DD/MM/AAAA'. None se inválida/malformada."""
+    import datetime as _dt
+    s = (s or "").strip()
+    m = re.match(r"^(\d{2})/(\d{2})/(\d{4})$", s)
+    if not m:
+        return None
+    try:
+        _dt.date(int(m.group(3)), int(m.group(2)), int(m.group(1)))
+    except ValueError:
+        return None
+    return s
+
+
+def get_feriados() -> list[dict]:
+    """Feriados/dias de recesso cadastrados, para além dos sábados/domingos (automáticos).
+    Cada item: {data:'DD/MM/AAAA', descricao}. Ordenado por data (mais próximo primeiro)."""
+    bruto = ler_config().get("feriados", []) or []
+    itens = []
+    for it in bruto:
+        if not isinstance(it, dict):
+            continue
+        data = _valida_data_br(it.get("data", ""))
+        if data:
+            itens.append({"data": data, "descricao": (it.get("descricao") or "").strip()})
+    itens.sort(key=lambda x: tuple(reversed(x["data"].split("/"))))  # ordena por AAAA-MM-DD
+    return itens
+
+
+def add_feriado(data: str, descricao: str = "") -> list[dict]:
+    dnorm = _valida_data_br(data)
+    if not dnorm:
+        return get_feriados()
+    d = ler_config()
+    atuais = get_feriados()
+    if not any(f["data"] == dnorm for f in atuais):
+        atuais.append({"data": dnorm, "descricao": (descricao or "").strip()})
+    d["feriados"] = atuais
+    _gravar(d)
+    return get_feriados()
+
+
+def del_feriado(data: str) -> list[dict]:
+    dnorm = _valida_data_br(data) or (data or "").strip()
+    d = ler_config()
+    d["feriados"] = [f for f in get_feriados() if f["data"] != dnorm]
+    _gravar(d)
+    return get_feriados()
+
+
+def get_feriados_datas() -> set:
+    """Conjunto de `datetime.date` dos feriados cadastrados — para o cálculo de prazos
+    (ver painel_comunicacoes_service._proximo_dia_util)."""
+    import datetime as _dt
+    out = set()
+    for f in get_feriados():
+        dd, mm, aaaa = f["data"].split("/")
+        with contextlib.suppress(Exception):
+            out.add(_dt.date(int(aaaa), int(mm), int(dd)))
+    return out
+
+
 # ---------------- Correspondências / Expedição de carta (Correios) ----------------
 CARTA_PRAZO_POS_ENTREGA_PADRAO = 5           # dias após a previsão de entrega
 CARTA_CAIXA_TRAMITACAO_PADRAO = "01 - PREV_AGENDA/AGUARDAR"

@@ -2387,6 +2387,21 @@ def _descricao_tramitacao(mov_seq) -> str:
     return f"Mensagem enviada pelo Painel de Comunicações{ref}"
 
 
+def _dia_util(d, feriados: set) -> bool:
+    """True se `d` (datetime.date) é dia útil: não é sábado/domingo (automático) nem um
+    feriado/dia de recesso cadastrado em Configurações."""
+    return d.weekday() < 5 and d not in feriados
+
+
+def _proximo_dia_util(d, feriados: set):
+    """Avança `d` (datetime.date) até o próximo dia útil, pulando fins de semana e os
+    feriados cadastrados. Pedido da usuária Larissa (07/08/2026): a tramitação estava
+    caindo em sábado/domingo; agora a data é sempre adiada para o 1º dia útil seguinte."""
+    while not _dia_util(d, feriados):
+        d += _dt.timedelta(days=1)
+    return d
+
+
 def _prazo_tramitacao(prazo_envio) -> tuple[str, str, int]:
     """Calcula a data de 'Nova conclusão em' da tramitação a partir do prazo (em
     dias) informado no envio. Decisão do usuário:
@@ -2411,8 +2426,12 @@ def _prazo_tramitacao(prazo_envio) -> tuple[str, str, int]:
     else:
         dias = p
         desc = f"Aguardar retorno do assistido — prazo de {p} dia{'s' if p != 1 else ''}."
-    data = (_dt.date.today() + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
-    return data, desc, dias
+    calc = _dt.date.today() + _dt.timedelta(days=dias)
+    feriados = config_service.get_feriados_datas()
+    if not _dia_util(calc, feriados):
+        calc = _proximo_dia_util(calc, feriados)
+        desc += " (adiado para o próximo dia útil — cairia em fim de semana/feriado)"
+    return calc.strftime("%d/%m/%Y"), desc, dias
 
 
 async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: str,
@@ -3771,7 +3790,8 @@ async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: s
     inteiro_teor = "\n\n".join(p for p in [cabecalho, corpo, rodape] if p).strip()
     dias = config_service.get_carta_prazo_pos_entrega()
     base = _parse_data_br(previsao) or _dt.date.today()
-    data_aguardar = (base + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
+    calc_aguardar = _proximo_dia_util(base + _dt.timedelta(days=dias), config_service.get_feriados_datas())
+    data_aguardar = calc_aguardar.strftime("%d/%m/%Y")
     desc_mov = _montar_descricao_carta(assistido, end, lote, previsao, inteiro_teor)
     # Dois anexos, com nomes UNIFORMES no SISDPU (o `nome` vira o nome do arquivo + a
     # descrição do documento): "Carta" e "Comprovante da postagem".

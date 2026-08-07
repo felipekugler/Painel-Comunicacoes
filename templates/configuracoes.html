@@ -503,6 +503,33 @@
         {% if not grupos_unidade %}
         <p class="text-tertiary" style="font-size:12px;margin:10px 0 0;">A lista de caixas ainda não foi carregada. Abra o modal "Gravar para envio" uma vez (ou sincronize) para o painel buscar as caixas do SISDPU.</p>
         {% endif %}
+
+        <div class="grava-sep" style="margin:20px 0 16px;"></div>
+
+        <h3 style="font-size:14.5px;font-weight:600;margin:0 0 4px;">Dias não úteis / Feriados</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
+            Sempre que a data de <em>"Nova conclusão em"</em> calculada cair num dia não útil, o painel a
+            <strong>adia para o próximo dia útil</strong> — quando há expediente para dar seguimento.
+            <strong>Sábados e domingos</strong> já são identificados automaticamente; cadastre aqui os
+            <strong>feriados e dias de recesso</strong> adicionais.
+        </p>
+        <div id="feriados-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;max-width:420px;">
+            {% for f in feriados %}
+            <div class="prazo-chip" data-data="{{ f.data }}" style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <span><strong>{{ f.data }}</strong>{% if f.descricao %} — {{ f.descricao }}{% endif %}</span>
+                <button title="Remover" onclick="delFeriado(this.parentNode.dataset.data)">✕</button>
+            </div>
+            {% endfor %}
+            <span id="feriados-vazio" class="text-tertiary" style="font-size:13px;{% if feriados %}display:none;{% endif %}">Nenhum feriado cadastrado.</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label for="novo-feriado-data" style="font-size:14px;">Data:</label>
+            <input type="date" id="novo-feriado-data" class="wa-input" style="width:150px;">
+            <label for="novo-feriado-desc" style="font-size:14px;">Descrição (opcional):</label>
+            <input type="text" id="novo-feriado-desc" class="wa-input" style="width:220px;" placeholder="ex.: Natal, Recesso forense">
+            <button class="btn-accent" onclick="addFeriado()">Adicionar</button>
+            <span id="feriado-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
@@ -1077,6 +1104,20 @@ async function delGrupoFav(g){
     const r=await fetch('/api/config/grupos-favoritos/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo:g})});
     const d=await r.json();
     if(d.ok){ toast('Caixa favorita removida'); location.reload(); }
+}
+async function addFeriado(){
+    const elData=document.getElementById('novo-feriado-data'); const elDesc=document.getElementById('novo-feriado-desc');
+    const st=document.getElementById('feriado-status');
+    if(!elData.value){ st.textContent='Informe a data.'; return; }
+    const [aaaa,mm,dd]=elData.value.split('-'); const dataBr=dd+'/'+mm+'/'+aaaa;
+    const r=await fetch('/api/config/feriados',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:dataBr,descricao:elDesc.value})});
+    const d=await r.json();
+    if(d.ok){ toast('Feriado adicionado'); location.reload(); } else { st.textContent=d.erro||'Falha ao adicionar.'; }
+}
+async function delFeriado(data){
+    const r=await fetch('/api/config/feriados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+    const d=await r.json();
+    if(d.ok){ toast('Feriado removido'); location.reload(); }
 }
 async function toggleCaixa(grupo, on){
     const r=await fetch('/api/config/caixa',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({grupo,on})});
