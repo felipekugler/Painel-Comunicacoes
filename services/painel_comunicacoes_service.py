@@ -31,7 +31,7 @@ from ingestao import sisdpu_client
 from services import analise_service, config_service
 from services.texto_util import colapsar_paragrafos, remover_emojis
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICAÇÕES/Projeto
+BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICACOES/Projeto
 # Dados sincronizados FORA da pasta Projeto (ao lado dela).
 DADOS_DIR = BASE_DIR.parent / "dados"
 CONTATOS_DIR = DADOS_DIR / "_contatos"

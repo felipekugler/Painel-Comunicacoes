@@ -33,7 +33,7 @@ from routes.seguranca import router as seguranca_router
 BASE_DIR = Path(__file__).resolve().parent
 PID_FILE = BASE_DIR / ".server.pid"
 LOGS_DIR = BASE_DIR / "logs"
-# PAINEL COMUNICAÇÕES roda na porta 8002 para coexistir com o PAINEL SISDPU (8001)
+# PAINEL COMUNICACOES roda na porta 8002 para coexistir com o PAINEL SISDPU (8001)
 # na mesma maquina sem conflito de porta.
 PORT = 8002
 

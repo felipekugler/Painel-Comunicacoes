@@ -25,7 +25,7 @@ import shutil
 import uuid
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICAÇÕES/Projeto
+BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICACOES/Projeto
 DADOS_DIR = BASE_DIR.parent / "dados"
 HIST_DIR = DADOS_DIR / "_historico"
 HIST_FILE = HIST_DIR / "mensagens.jsonl"

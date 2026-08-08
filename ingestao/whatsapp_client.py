@@ -10,7 +10,7 @@ IMPORTANTE sobre HEADED x HEADLESS:
   - Depois de logado uma vez (QR), a sessão fica no user_data_dir e pode ser reaberta
     (inclusive headless para desenvolvimento/captura de seletores).
 
-Sessão isolada em `<PAINEL COMUNICAÇÕES>/dados/_whatsapp_profile` — separada do SISDPU.
+Sessão isolada em `<PAINEL COMUNICACOES>/dados/_whatsapp_profile` — separada do SISDPU.
 Só UM processo pode usar o perfil por vez (Chromium tranca o user_data_dir).
 """
 
@@ -25,7 +25,7 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
-# <Projeto>/ingestao/whatsapp_client.py -> profile em <PAINEL COMUNICAÇÕES>/dados/_whatsapp_profile
+# <Projeto>/ingestao/whatsapp_client.py -> profile em <PAINEL COMUNICACOES>/dados/_whatsapp_profile
 _PROJ = Path(__file__).resolve().parents[1]
 WA_PROFILE_DIR = _PROJ.parent / "dados" / "_whatsapp_profile"
 

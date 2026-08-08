@@ -1,6 +1,6 @@
 """Rotas das caixas do Painel de Comunicações (multi-caixa).
 
-- GET  /                                  -> redireciona p/ a 1ª caixa habilitada
+- GET  /                                  -> redireciona p/ "Caixas Sincronizadas"
 - GET  /caixa/{slug}                      -> dashboard de uma caixa
 - GET  /api/caixa/{slug}/sincronizar/stream -> sync da caixa (SSE, tempo real)
 - POST /api/paj/{paj_norm}/whatsapp       -> escolha de WhatsApp (compartilhada)
@@ -22,10 +22,10 @@ router = APIRouter()
 
 @router.get("/")
 async def home():
-    caixas = config_service.listar_caixas_habilitadas()
-    if caixas:
-        return RedirectResponse(f"/caixa/{caixas[0]['slug']}")
-    return RedirectResponse("/configuracoes")
+    """Abertura do painel: sempre cai em "Caixas Sincronizadas" (pedido do usuário
+    08/08/2026) — mesmo sem nenhuma caixa habilitada (a própria página orienta a
+    habilitar em Configurações nesse caso)."""
+    return RedirectResponse("/caixas")
 
 
 @router.get("/caixas", response_class=HTMLResponse)

@@ -19,7 +19,7 @@ import json
 import uuid
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICAÇÕES/Projeto
+BASE_DIR = Path(__file__).resolve().parents[1]  # .../PAINEL COMUNICACOES/Projeto
 DADOS_DIR = BASE_DIR.parent / "dados"
 DISP_DIR = DADOS_DIR / "_disparos"
 DISP_FILE = DISP_DIR / "disparos.jsonl"
