@@ -526,12 +526,14 @@
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
             <label for="novo-feriado-inicio" style="font-size:14px;">De:</label>
             <input type="date" id="novo-feriado-inicio" class="wa-input" style="width:150px;">
-            <label for="novo-feriado-fim" style="font-size:14px;">Até <span class="text-tertiary" style="font-weight:400;">(opcional)</span>:</label>
+            <label for="novo-feriado-fim" style="font-size:14px;">Até:</label>
             <input type="date" id="novo-feriado-fim" class="wa-input" style="width:150px;">
-            <label for="novo-feriado-desc" style="font-size:14px;">Descrição (opcional):</label>
-            <input type="text" id="novo-feriado-desc" class="wa-input" style="width:220px;" placeholder="ex.: Natal, Recesso forense">
             <button class="btn-accent" onclick="addFeriado()">Adicionar</button>
             <span id="feriado-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;">
+            <label for="novo-feriado-desc" style="font-size:14px;">Descrição (opcional):</label>
+            <input type="text" id="novo-feriado-desc" class="wa-input" style="width:280px;" placeholder="ex.: Natal, Recesso forense">
         </div>
         <p class="text-tertiary" style="font-size:11.5px;margin-top:8px;">Deixe "Até" em branco para cadastrar um único dia.</p>
     </div>
