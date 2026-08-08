@@ -1,6 +1,5 @@
 """Cliente SISDPU via Playwright headless (async).
 
-Portado de dpu-workspace-main/dpuscript/mcp_servers/sisdpu/client.py.
 Mantido como funcoes modulo-level com estado global de browser/page para
 simplificar uso; concorrencia de sincronizacao e' serializada por um
 asyncio.Lock em services/sync_service.py.

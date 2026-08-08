@@ -23,7 +23,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from config import OFICIO_DESCRICAO
+from config import UNIDADE_DESCRICAO
 from routes.configuracoes import router as configuracoes_router
 from routes.dashboard import router as dashboard_router
 from routes.historico import router as historico_router
@@ -66,7 +66,7 @@ app.state.jinja = jinja2.Environment(
     auto_reload=True,
 )
 app.state.jinja.globals["app_version"] = APP_VERSION
-app.state.jinja.globals["oficio_descricao"] = OFICIO_DESCRICAO
+app.state.jinja.globals["unidade_descricao"] = UNIDADE_DESCRICAO
 # Menu dinamico: caixas habilitadas + contagem de PAJs (usado pela sidebar).
 from services import painel_comunicacoes_service as _ds  # noqa: E402
 

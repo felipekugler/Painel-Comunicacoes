@@ -1,6 +1,9 @@
-# DPU-script-SIS
+# Painel de Comunicações
 
-Interface web para o pipeline **dpuscript** — sistema de monitoramento para Defensores Públicos Federais.
+Painel web para **servidores da DPU** organizarem, de forma centralizada, o contato com
+assistidos que aguardam alguma providência — avisos de perícia, pedidos de documentos,
+orientações — por **quatro meios**: Aplicativo do SISDPU, WhatsApp, ligação telefônica e
+carta (expedida pelos Correios).
 
 > Desenvolvido para uso interno na DPU. Projeto pessoal, sem vínculo institucional oficial.
 
@@ -8,37 +11,41 @@ Interface web para o pipeline **dpuscript** — sistema de monitoramento para De
 
 ## O que é
 
-O **DPU-script-SIS** é um painel web para Defensores/as Públicos/as Federais que usam o **SISDPU**. Centraliza num só lugar: organização e acompanhamento da caixa de entrada, triagem, gestão de prazos processuais, controle de peças.
+O painel lê as **caixas de grupo do SISDPU** que você escolher, identifica em cada PAJ o
+que precisa ser comunicado, ajuda a redigir a mensagem (com apoio opcional de IA), realiza
+o contato pelo meio escolhido e **documenta tudo de volta no SISDPU** — movimentação,
+tramitação e conclusão — deixando um histórico completo com comprovantes.
 
-O sistema tem dois blocos:
+### Principais recursos
 
-### Pipeline de ingestão (botão "Sincronizar caixa")
-
-1. Autentica no SISDPU via Playwright headless usando credenciais do `.env`
-2. Identifica novos PAJs e novas movimentações na caixa do defensor
-3. Baixa peças em PDF e extrai texto — com **OCR automático** (Tesseract) em documentos escaneados
-4. **Detecta prazos processuais** aplicando regras de rito (cível, JEF, penal, administrativo), dobra DPU, dias úteis vs. corridos e recesso forense
-
-### Painel web (FastAPI + DaisyUI/Alpine)
-
-- **Dashboard** com lista de todos os PAJs e filtros por foro, classificação e ofício
-- **Detalhe do PAJ** — movimentações, peças baixadas (com texto extraído), notas pessoais
-- **Prazos** — aba dedicada aos prazos detectados, com integração opcional ao Google Calendar
-- **Watchlist** — PAJs marcados como acompanhamento prioritário, com motivo
-- **Pipeline monitor** — histórico e logs das sincronizações já realizadas
-- **Chat com Claude Code (via CLI, sem API paga)** — triagem assistida com skills dedicadas + chat livre persistente por PAJ
-- **Busca textual** em movimentações e peças
-- **Geração de DOCX/PDF** via scripts externos do workspace do defensor
+- **Multi-caixa**: gerencia quantas caixas de grupo forem habilitadas, cada uma com seus
+  próprios textos e parágrafos padrão.
+- **Quatro meios de contato**: Aplicativo SISDPU, WhatsApp (com QR Code próprio), Ligação
+  telefônica (central de tentativas) e Carta (expedição real pelos Correios/e-Carta, com
+  validação de CEP por múltiplos serviços).
+- **Modo com IA (opcional)**: usa o **Claude Code CLI** já instalado na máquina — sem API
+  paga — para resumir a tramitação e sugerir a mensagem. Sem ele, o painel roda em Modo
+  Simples (100% manual).
+- **Cofre de credenciais**: usuário/senha do SISDPU e dos Correios ficam cifrados em disco,
+  protegidos por uma senha-mestra — nada em texto plano.
+- **Concluir sem contato**: PAJ já tratado é concluído direto da caixa, sem precisar de
+  nenhuma mensagem.
+- **Dias não úteis / feriados**: prazos de tramitação são ajustados automaticamente para o
+  próximo dia útil (fins de semana, feriados e recessos cadastrados).
+- **Histórico e reenvio**: todo contato realizado fica registrado com log passo a passo,
+  comprovantes e a opção de reenviar por outro meio.
 
 ---
 
 ## Pré-requisitos
 
+- **Windows 10/11** (validado em Windows 11) — outras plataformas Unix-like devem funcionar,
+  mas o fluxo é testado em Windows.
 - **Python 3.11+**
-- **Workspace Ofício Geral** — a pasta onde ficam `PAJs/`, `Peças Feitas/`, `gerar_docx.py`, `gerar_peticao.py` e o `CLAUDE.md` do Defensor
-- **Claude Code** com modelo Max (claude-opus ou claude-sonnet) — a elaboração das peças é feita pelo Claude via CLI, não por API paga
-- **Playwright + Chromium** — para sincronizar a caixa SISDPU automaticamente
-- **Tesseract OCR (idioma `por`)** — para extrair texto de PDFs escaneados das peças baixadas
+- **Google Chrome** — usado pelo Playwright (SISDPU, Correios) e pelo WhatsApp Web.
+- **Conta de acesso ao SISDPU**, vinculada às caixas de grupo que serão geridas.
+- **Claude Code (CLI)** — opcional, só para o Modo com IA. Sem ele, o painel roda em Modo
+  Simples.
 
 ---
 
@@ -46,12 +53,12 @@ O sistema tem dois blocos:
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/tuliorm/DPU-script-SIS.git
-cd DPU-script-SIS
+git clone https://github.com/felipekugler/Painel-Comunicacoes.git
+cd Painel-Comunicacoes
 
-# 2. Crie o ambiente virtual (requer Python 3.11+)
+# 2. Crie o ambiente virtual (Python 3.11+)
 python -m venv .venv            # Windows
-# python3.12 -m venv .venv      # macOS/Linux (use o 3.11+ do Homebrew; o python3 do sistema no macOS é 3.9)
+# python3.11 -m venv .venv      # macOS/Linux
 .venv\Scripts\activate          # Windows
 # source .venv/bin/activate     # macOS/Linux
 
@@ -61,109 +68,76 @@ pip install -r requirements.txt
 # 4. Instale o Chromium do Playwright
 python -m playwright install chromium
 
-# 5. Instale o Tesseract OCR (idioma "por")
-#   Windows: baixe em https://github.com/UB-Mannheim/tesseract/wiki
-#            marque "Portuguese"; caminho padrao C:\Program Files\Tesseract-OCR\
-#   macOS:   brew install tesseract tesseract-lang
-#   Linux:   sudo apt install tesseract-ocr tesseract-ocr-por
-# Verifique (precisa estar no PATH):
-tesseract --version
-
-# 6. Configure o .env
+# 5. (Opcional) Configure o .env
 copy .env.example .env       # Windows
 # cp .env.example .env       # macOS/Linux
-# Edite .env e preencha:
-#   OFICIO_GERAL    = caminho para o workspace do Defensor
-#   SISDPU_USERNAME = seu usuario do SISDPU
-#   SISDPU_PASSWORD = sua senha do SISDPU
 ```
 
----
-
-## Configuração
-
-Edite o arquivo `.env`:
-
-```env
-OFICIO_GERAL=C:\Users\<seu_usuario>\Desktop\Ofício Geral
-# macOS/Linux: OFICIO_GERAL=/Users/<seu_usuario>/Desktop/Ofício Geral
-OFICIO_DESCRICAO=2ª Categoria - DPU/UF
-SISDPU_USERNAME=seu.usuario
-SISDPU_PASSWORD=sua.senha
-```
-
-`OFICIO_GERAL` aponta para a pasta do Defensor — é onde ficam `PAJs/`, `Peças Feitas/`, os scripts `gerar_docx.py` / `gerar_peticao.py` e o `CLAUDE.md`. `OFICIO_DESCRICAO` é apenas o texto exibido na sidebar (cosmético). As credenciais SISDPU são usadas pela funcionalidade "Sincronizar caixa" do dashboard.
+A maior parte da configuração (credenciais, caixas, textos padrão, feriados, modo de
+envio) é feita **pela própria interface web**, não pelo `.env` — veja `.env.example` para
+o que ainda vale a pena ajustar antes de subir o servidor.
 
 ---
 
 ## Uso
 
 ```bash
-# Iniciar o servidor (porta 8001)
+# Iniciar o servidor (porta 8002)
 .venv\Scripts\python.exe app.py     # Windows
 # .venv/bin/python app.py           # macOS/Linux
 
 # Acessar no navegador
-# http://localhost:8001
+# http://localhost:8002
 ```
 
-O painel mostra todos os PAJs detectados em `OFICIO_GERAL/PAJs/PAJ-*/`. Para cada PAJ você pode:
-- Ver os detalhes extraídos do SISDPU (cabeçalho + movimentações)
-- Ver peças baixadas em PDF (com texto extraído via OCR quando necessário)
-- Acessar `.txt` extraídos e o `PROMPT_MAX.md` gerado dinamicamente
-- Acionar a elaboração de peças pelo Claude via chat
-- Gerar DOCX/PDF a partir de um `.txt` usando `gerar_docx.py` / `gerar_peticao.py`
+No Windows, o atalho `Painel-Comunicacoes.bat` faz a mesma coisa (e mata uma instância
+anterior antes de subir uma nova).
 
-**Sincronizar caixa:** o botão "Sincronizar caixa" no dashboard autentica no SISDPU via Playwright, lê a caixa de entrada, extrai movimentações, baixa peças em PDF e roda OCR. O progresso aparece em tempo real num modal com log de eventos (SSE).
+No primeiro acesso a uma função do SISDPU, o painel pede para cadastrar usuário/senha e
+criar uma senha-mestra — as credenciais ficam cifradas em disco a partir daí.
 
 ---
 
 ## Estrutura
 
 ```
-DPU-script-SIS/
-├── app.py              # FastAPI + Uvicorn
-├── config.py           # Configurações (lê .env)
-├── ingestao/           # Pipeline de sincronização da caixa SISDPU
-│   ├── sisdpu_client.py  # Playwright headless
-│   ├── ocr.py            # Fitz + Tesseract
-│   ├── parser.py         # sisdpu.txt → metadata.json
-│   └── sincronizador.py  # orquestrador
-├── routes/             # Endpoints (dashboard, PAJs, chat, docgen, sync)
-├── services/           # Lógica de negócio
-├── templates/          # HTML (Jinja2 + DaisyUI + Alpine.js)
-├── static/             # CSS e JS estáticos
+Painel-Comunicacoes/
+├── app.py                          # FastAPI + Uvicorn (porta 8002)
+├── config.py                       # Configuração mínima (lê .env)
+├── ingestao/                       # Clientes externos (Playwright)
+│   ├── sisdpu_client.py              # Scraping/ações no SISDPU
+│   ├── whatsapp_client.py            # WhatsApp Web (perfil persistente)
+│   └── correios_client.py            # Expedição de carta (SMT/e-Carta)
+├── routes/                         # Endpoints FastAPI
+├── services/                       # Lógica de negócio (config, envio, análise IA…)
+├── templates/                      # HTML (Jinja2)
+├── static/                         # CSS e JS estáticos
+├── Painel-Comunicacoes.bat         # Lançador (Windows)
+├── WhatsApp-Login.bat              # Login do WhatsApp por QR Code
 └── requirements.txt
 ```
 
----
-
-## Workspace Ofício Geral
-
-Este painel lê os dados da pasta apontada por `OFICIO_GERAL`, que contém:
-- `PAJs/PAJ-YYYY-NNN-XXXXX/` — uma subpasta por PAJ (NNN = código de 3 dígitos da unidade) com `sisdpu.txt`, `metadata.json`, `Arquivos/`, peças geradas
-- `Peças Feitas/` — peças anteriores do Defensor (usadas como contexto no PROMPT_MAX)
-- `CLAUDE.md` — instruções do Defensor para o Claude Code
-- `gerar_docx.py` e `gerar_peticao.py` — scripts que o botão "Gerar DOCX/PDF" invoca
+Os dados (contatos, histórico, comprovantes, credenciais cifradas) ficam numa pasta
+`dados/` **ao lado** de `Projeto/`, criada sozinha na primeira execução.
 
 ---
 
 ## Tecnologias
 
 - **Backend:** FastAPI + Uvicorn
-- **Frontend:** DaisyUI (Tailwind CSS) + Alpine.js + HTMX
-- **Ingestão:** Playwright (SISDPU), PyMuPDF, Tesseract OCR
-- **IA:** Claude Code (claude-opus/sonnet) via CLI — sem API paga
+- **Frontend:** Jinja2 + CSS/JS próprios (sem framework de build)
+- **Automação:** Playwright (SISDPU, WhatsApp Web, Correios)
+- **Segurança:** `cryptography` (cofre de credenciais cifrado por senha-mestra)
+- **IA (opcional):** Claude Code (CLI) — sem API paga
 
 ---
 
 ## Aviso
 
-Este projeto foi desenvolvido para uso pessoal por um Defensor Público Federal. Cada usuário é responsável, por sua conta e risco, do uso que for feito, sob sua exclusiva responsabilidade. O sistema funciona, mas ainda está em desenvolvimento e testes, por isso erros podem acontecer, sendo igualmente de responsabilidade do próprio usuário.
-
-Ele **não armazena dados de assistidos** — os arquivos de processos ficam apenas na máquina local do Defensor e são ignorados pelo Git. Consulte o `.gitignore` para confirmar o que é e não é versionado.
-
-Contribuições são bem-vindas. Abra uma issue ou PR.
+Ferramenta de apoio interno, em desenvolvimento. O uso é de responsabilidade do próprio
+servidor e deve observar as normas de sigilo e proteção de dados. Os dados dos assistidos
+ficam apenas na máquina local onde o painel roda — nunca em nuvem — e são ignorados pelo
+Git (consulte o `.gitignore`).
 
 ---
 

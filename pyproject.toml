@@ -23,7 +23,6 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"_migrar_pajs.py" = ["F401", "F841", "B"]  # script legado de migracao
 "stop.py" = ["B"]
 # Embarca regex JS pra extrair dados do SISDPU; o `：` (fullwidth colon) e' intencional
 # — labels do SISDPU usam tanto ":" ASCII quanto "：" dependendo da fonte/encoding
