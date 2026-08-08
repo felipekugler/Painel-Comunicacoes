@@ -208,21 +208,24 @@ async def set_prazo_tramitacao_padrao(payload: dict = Body(...)):
 
 @router.post("/api/config/feriados", response_class=JSONResponse)
 async def add_feriado(payload: dict = Body(...)):
-    """Cadastra um feriado/dia de recesso (data 'DD/MM/AAAA' + descrição opcional). Datas
-    de prazo de tramitação que caírem nele são adiadas para o próximo dia útil."""
+    """Cadastra um feriado/dia de recesso — um único dia OU um PERÍODO (data_inicio +
+    data_fim, ex.: recesso forense) — + descrição opcional. Datas de prazo de tramitação
+    que caírem dentro são adiadas para o próximo dia útil."""
     p = payload or {}
-    data = str(p.get("data", "")).strip()
-    if not data:
-        return JSONResponse({"ok": False, "erro": "Informe a data."}, status_code=400)
-    feriados = config_service.add_feriado(data, p.get("descricao", ""))
-    if not any(f["data"] == data for f in feriados):
-        return JSONResponse({"ok": False, "erro": "Data inválida (use DD/MM/AAAA)."}, status_code=400)
-    return {"ok": True, "feriados": feriados}
+    ini = str(p.get("data_inicio") or p.get("data") or "").strip()
+    fim = str(p.get("data_fim") or "").strip()
+    if not config_service.valida_data_br(ini):
+        return JSONResponse({"ok": False, "erro": "Data de início inválida (use DD/MM/AAAA)."}, status_code=400)
+    if fim and not config_service.valida_data_br(fim):
+        return JSONResponse({"ok": False, "erro": "Data de fim inválida (use DD/MM/AAAA)."}, status_code=400)
+    return {"ok": True, "feriados": config_service.add_feriado(ini, fim, p.get("descricao", ""))}
 
 
 @router.post("/api/config/feriados/del", response_class=JSONResponse)
 async def del_feriado(payload: dict = Body(...)):
-    return {"ok": True, "feriados": config_service.del_feriado((payload or {}).get("data", ""))}
+    p = payload or {}
+    return {"ok": True, "feriados": config_service.del_feriado(
+        p.get("data_inicio") or p.get("data", ""), p.get("data_fim", ""))}
 
 
 @router.post("/api/config/carta-cabecalho", response_class=JSONResponse)

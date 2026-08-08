@@ -511,25 +511,29 @@
             Sempre que a data de <em>"Nova conclusão em"</em> calculada cair num dia não útil, o painel a
             <strong>adia para o próximo dia útil</strong> — quando há expediente para dar seguimento.
             <strong>Sábados e domingos</strong> já são identificados automaticamente; cadastre aqui os
-            <strong>feriados e dias de recesso</strong> adicionais.
+            <strong>feriados</strong> (um dia) e os <strong>períodos não úteis</strong> (feriadões e recesso
+            judiciário — ex.: 20/12 a 06/01) adicionais.
         </p>
-        <div id="feriados-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;max-width:420px;">
+        <div id="feriados-lista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;max-width:460px;">
             {% for f in feriados %}
-            <div class="prazo-chip" data-data="{{ f.data }}" style="display:flex;align-items:center;justify-content:space-between;width:100%;">
-                <span><strong>{{ f.data }}</strong>{% if f.descricao %} — {{ f.descricao }}{% endif %}</span>
-                <button title="Remover" onclick="delFeriado(this.parentNode.dataset.data)">✕</button>
+            <div class="prazo-chip" data-inicio="{{ f.data_inicio }}" data-fim="{{ f.data_fim }}" style="display:flex;align-items:center;justify-content:space-between;width:100%;">
+                <span><strong>{{ f.data_inicio }}{% if f.data_fim != f.data_inicio %} a {{ f.data_fim }}{% endif %}</strong>{% if f.descricao %} — {{ f.descricao }}{% endif %}</span>
+                <button title="Remover" onclick="delFeriado(this.parentNode.dataset.inicio, this.parentNode.dataset.fim)">✕</button>
             </div>
             {% endfor %}
             <span id="feriados-vazio" class="text-tertiary" style="font-size:13px;{% if feriados %}display:none;{% endif %}">Nenhum feriado cadastrado.</span>
         </div>
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-            <label for="novo-feriado-data" style="font-size:14px;">Data:</label>
-            <input type="date" id="novo-feriado-data" class="wa-input" style="width:150px;">
+            <label for="novo-feriado-inicio" style="font-size:14px;">De:</label>
+            <input type="date" id="novo-feriado-inicio" class="wa-input" style="width:150px;">
+            <label for="novo-feriado-fim" style="font-size:14px;">Até <span class="text-tertiary" style="font-weight:400;">(opcional)</span>:</label>
+            <input type="date" id="novo-feriado-fim" class="wa-input" style="width:150px;">
             <label for="novo-feriado-desc" style="font-size:14px;">Descrição (opcional):</label>
             <input type="text" id="novo-feriado-desc" class="wa-input" style="width:220px;" placeholder="ex.: Natal, Recesso forense">
             <button class="btn-accent" onclick="addFeriado()">Adicionar</button>
             <span id="feriado-status" class="text-tertiary" style="font-size:12px;"></span>
         </div>
+        <p class="text-tertiary" style="font-size:11.5px;margin-top:8px;">Deixe "Até" em branco para cadastrar um único dia.</p>
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
@@ -1105,17 +1109,18 @@ async function delGrupoFav(g){
     const d=await r.json();
     if(d.ok){ toast('Caixa favorita removida'); location.reload(); }
 }
+function _dataIsoParaBr(iso){ if(!iso) return ''; const [aaaa,mm,dd]=iso.split('-'); return dd+'/'+mm+'/'+aaaa; }
 async function addFeriado(){
-    const elData=document.getElementById('novo-feriado-data'); const elDesc=document.getElementById('novo-feriado-desc');
-    const st=document.getElementById('feriado-status');
-    if(!elData.value){ st.textContent='Informe a data.'; return; }
-    const [aaaa,mm,dd]=elData.value.split('-'); const dataBr=dd+'/'+mm+'/'+aaaa;
-    const r=await fetch('/api/config/feriados',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:dataBr,descricao:elDesc.value})});
+    const elIni=document.getElementById('novo-feriado-inicio'); const elFim=document.getElementById('novo-feriado-fim');
+    const elDesc=document.getElementById('novo-feriado-desc'); const st=document.getElementById('feriado-status');
+    if(!elIni.value){ st.textContent='Informe a data de início.'; return; }
+    const r=await fetch('/api/config/feriados',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({data_inicio:_dataIsoParaBr(elIni.value),data_fim:_dataIsoParaBr(elFim.value),descricao:elDesc.value})});
     const d=await r.json();
     if(d.ok){ toast('Feriado adicionado'); location.reload(); } else { st.textContent=d.erro||'Falha ao adicionar.'; }
 }
-async function delFeriado(data){
-    const r=await fetch('/api/config/feriados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+async function delFeriado(dataInicio, dataFim){
+    const r=await fetch('/api/config/feriados/del',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data_inicio:dataInicio,data_fim:dataFim})});
     const d=await r.json();
     if(d.ok){ toast('Feriado removido'); location.reload(); }
 }

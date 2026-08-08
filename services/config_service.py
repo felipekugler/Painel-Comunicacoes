@@ -194,7 +194,7 @@ def set_prazo_tramitacao_padrao(n: int) -> int:
 # cadastramos os dias ADICIONAIS (feriados, recesso forense) — pedido da usuária Larissa
 # (07/08/2026): a tramitação estava caindo em fim de semana; agora a data calculada é
 # adiada até o PRÓXIMO DIA ÚTIL (ver painel_comunicacoes_service._proximo_dia_util).
-def _valida_data_br(s: str) -> str | None:
+def valida_data_br(s: str) -> str | None:
     """Valida e normaliza uma data 'DD/MM/AAAA'. None se inválida/malformada."""
     import datetime as _dt
     s = (s or "").strip()
@@ -208,51 +208,79 @@ def _valida_data_br(s: str) -> str | None:
     return s
 
 
+def _data_br_para_date(s: str):
+    """'DD/MM/AAAA' -> datetime.date, ou None se inválida."""
+    import datetime as _dt
+    dd, mm, aaaa = s.split("/")
+    with contextlib.suppress(Exception):
+        return _dt.date(int(aaaa), int(mm), int(dd))
+    return None
+
+
 def get_feriados() -> list[dict]:
-    """Feriados/dias de recesso cadastrados, para além dos sábados/domingos (automáticos).
-    Cada item: {data:'DD/MM/AAAA', descricao}. Ordenado por data (mais próximo primeiro)."""
+    """Feriados/dias de recesso cadastrados (dias ou PERÍODOS), para além dos sábados/domingos
+    (automáticos). Cada item: {data_inicio, data_fim: 'DD/MM/AAAA', descricao} — data_inicio ==
+    data_fim para um único dia. Migra sozinho o formato antigo (chave 'data', dia único).
+    Ordenado pela data de início (mais próxima primeiro)."""
     bruto = ler_config().get("feriados", []) or []
     itens = []
     for it in bruto:
         if not isinstance(it, dict):
             continue
-        data = _valida_data_br(it.get("data", ""))
-        if data:
-            itens.append({"data": data, "descricao": (it.get("descricao") or "").strip()})
-    itens.sort(key=lambda x: tuple(reversed(x["data"].split("/"))))  # ordena por AAAA-MM-DD
+        ini = valida_data_br(it.get("data_inicio") or it.get("data") or "")
+        fim = valida_data_br(it.get("data_fim") or "") or ini
+        if not ini or not fim:
+            continue
+        d_ini, d_fim = _data_br_para_date(ini), _data_br_para_date(fim)
+        if d_ini and d_fim and d_fim < d_ini:  # datas trocadas — corrige a ordem
+            ini, fim = fim, ini
+        itens.append({"data_inicio": ini, "data_fim": fim, "descricao": (it.get("descricao") or "").strip()})
+    itens.sort(key=lambda x: tuple(reversed(x["data_inicio"].split("/"))))  # ordena por AAAA-MM-DD
     return itens
 
 
-def add_feriado(data: str, descricao: str = "") -> list[dict]:
-    dnorm = _valida_data_br(data)
-    if not dnorm:
+def add_feriado(data_inicio: str, data_fim: str = "", descricao: str = "") -> list[dict]:
+    """Cadastra um dia (data_fim vazio/igual a data_inicio) ou um PERÍODO não útil
+    (ex.: recesso forense 20/12 a 06/01). Datas trocadas são corrigidas automaticamente."""
+    ini = valida_data_br(data_inicio)
+    if not ini:
         return get_feriados()
+    fim = valida_data_br(data_fim) or ini
+    d_ini, d_fim = _data_br_para_date(ini), _data_br_para_date(fim)
+    if d_ini and d_fim and d_fim < d_ini:
+        ini, fim = fim, ini
     d = ler_config()
     atuais = get_feriados()
-    if not any(f["data"] == dnorm for f in atuais):
-        atuais.append({"data": dnorm, "descricao": (descricao or "").strip()})
+    if not any(f["data_inicio"] == ini and f["data_fim"] == fim for f in atuais):
+        atuais.append({"data_inicio": ini, "data_fim": fim, "descricao": (descricao or "").strip()})
     d["feriados"] = atuais
     _gravar(d)
     return get_feriados()
 
 
-def del_feriado(data: str) -> list[dict]:
-    dnorm = _valida_data_br(data) or (data or "").strip()
+def del_feriado(data_inicio: str, data_fim: str = "") -> list[dict]:
+    ini = valida_data_br(data_inicio) or (data_inicio or "").strip()
+    fim = valida_data_br(data_fim) or ini
     d = ler_config()
-    d["feriados"] = [f for f in get_feriados() if f["data"] != dnorm]
+    d["feriados"] = [f for f in get_feriados() if not (f["data_inicio"] == ini and f["data_fim"] == fim)]
     _gravar(d)
     return get_feriados()
 
 
 def get_feriados_datas() -> set:
-    """Conjunto de `datetime.date` dos feriados cadastrados — para o cálculo de prazos
-    (ver painel_comunicacoes_service._proximo_dia_util)."""
+    """Conjunto de `datetime.date` de TODOS os dias não úteis cadastrados (expandindo os
+    períodos dia a dia) — para o cálculo de prazos (ver
+    painel_comunicacoes_service._proximo_dia_util). Períodos longos (recesso) são baratos
+    de expandir (poucas dezenas de dias)."""
     import datetime as _dt
     out = set()
     for f in get_feriados():
-        dd, mm, aaaa = f["data"].split("/")
-        with contextlib.suppress(Exception):
-            out.add(_dt.date(int(aaaa), int(mm), int(dd)))
+        d_ini, d_fim = _data_br_para_date(f["data_inicio"]), _data_br_para_date(f["data_fim"])
+        if not d_ini or not d_fim:
+            continue
+        dias = (d_fim - d_ini).days
+        for i in range(max(dias, 0) + 1):
+            out.add(d_ini + _dt.timedelta(days=i))
     return out
 
 
