@@ -863,7 +863,10 @@ async def _resolver_conflito_login(page: Page) -> bool:
     if not est.get("conflitoLogin"):
         _cred.marcar_conectado()
         return True
-    _log.info("notificar_assistido: conflito de sessão detectado — clicando 'Desbloquear'.")
+    # ⚠️ rótulo GENÉRICO de propósito: _resolver_conflito_login é chamada por várias
+    # funções (movimentar_paj, tramitar_paj, concluir_paj, notificar_assistido) — o rótulo
+    # antigo dizia sempre "notificar_assistido", mascarando a origem real no log.
+    _log.info("conflito de sessão detectado — clicando 'Desbloquear'.")
     btn = page.locator('[id$="confirmTramitacao"]').first  # botão "Desbloquear"
     with contextlib.suppress(Exception):
         if await btn.count():
@@ -1730,12 +1733,25 @@ async def concluir_paj(id_tramites: list[str], dry_run: bool = False) -> dict:
     await _wait_pf_ajax(page); await page.wait_for_timeout(600)
     if not await _resolver_conflito_login(page):
         return {"ok": False, "status": "falha", "detalhe": _MSG_CONFLITO_SESSAO, "resultados": res}
-    await page.evaluate(_JS_ATIVA_ABA_GRUPO)
+    clicou = await page.evaluate(_JS_ATIVA_ABA_GRUPO)
     await _wait_pf_ajax(page); await page.wait_for_timeout(900)
+    # A aba "Caixa de Entrada do Grupo" pode ter DEZENAS de sub-tabelas (uma por caixa de
+    # grupo do usuário, ~200+ linhas somadas) — renderiza bem mais devagar que a caixa do
+    # usuário. ⚠️ BUG achado ao vivo (2026-08-20): esperar só 900ms fixos às vezes pega a
+    # aba AINDA VAZIA (grupo_rows=0), levando a "trâmite não localizado" por timing, não por
+    # ausência real (na 2ª tentativa, com mais tempo decorrido, achou certinho). Agora faz
+    # POLL (até ~8s extra) até aparecer ALGUMA linha com "Admitir", antes de seguir.
+    diag = {}
+    for _ in range(16):
+        with contextlib.suppress(Exception):
+            diag = await page.evaluate(_JS_DIAG_CAIXAS)
+        if diag.get("grupo_rows"):
+            break
+        await page.wait_for_timeout(500)
+    _log.info("concluir_paj: aba do grupo clicada=%s · caixa de GRUPO — %d linha(s) c/ Admitir; "
+              "rks_grupo=%s; todos_rks=%s; paginador=%s", clicou,
+              diag.get("grupo_rows"), diag.get("grupo_rks"), diag.get("todos_rks"), diag.get("paginadores"))
     with contextlib.suppress(Exception):
-        diag = await page.evaluate(_JS_DIAG_CAIXAS)
-        _log.info("concluir_paj: caixa de GRUPO — %d linha(s) c/ Admitir; rks_grupo=%s; todos_rks=%s; paginador=%s",
-                  diag.get("grupo_rows"), diag.get("grupo_rks"), diag.get("todos_rks"), diag.get("paginadores"))
         alvo = await page.evaluate(_JS_DIAG_ALVO, ids)
         _log.info("concluir_paj: ALVO(s) na tela do grupo: %s", alvo)
     for i in ids:

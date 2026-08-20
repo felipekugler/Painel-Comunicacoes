@@ -3672,12 +3672,31 @@ async def expedir_correspondencia(slug: str, paj_norm: str, id_tramite: str,
 async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: str,
                                          tipo: str = "tramite", forcar: bool = False,
                                          cep_override: str = ""):
-    """Expede a carta pelos Correios (SMT) e, em caso de POSTAGEM (modo real), movimenta
-    o PAJ na fase 'Ofício/Carta/Comunicação expedida' + junta os DOIS PDFs (carta + comprovante
-    da postagem) e TRAMITA para a caixa de aguardo (prazo = previsão de entrega + N dias). Governado
-    pelo modo do meio 'correspondencia': SIMULADO percorre o assistente e para no Resumo (não posta).
-    GERA eventos SSE do log AO VIVO — sub-passos no site dos Correios e depois movimentação/tramitação
-    no SISDPU — e, por último, {"done": True, "resultado": {...}}."""
+    """Entrada pública: serializa expedições de carta (e contra qualquer outra operação
+    exclusiva — sync/refazer/etc.) num ÚNICO grupo, via o MESMO `_sync_lock` usado no resto
+    do painel. ⚠️ CORREÇÃO 2026-08-20: antes desta trava, duas expedições disparadas quase
+    ao mesmo tempo (ou uma expedição + uma sincronização) disputavam o MESMO navegador dos
+    Correios/SISDPU (singletons) concorrentemente — risco real de misturar dados entre
+    cartas. Agora ENFILEIRA (`_entrar_exclusivo_fila`, fila justa FIFO) em vez de recusar:
+    uma 2ª expedição clicada durante a 1ª espera a vez e roda em seguida, sozinha."""
+    if not _pode_exclusivo():
+        yield {"level": "muted", "msg": "Aguardando outra operação em andamento (fila)…"}
+    async with _entrar_exclusivo_fila():
+        async for ev in _expedir_carta_sem_trava(slug, paj_norm, id_tramite, tipo, forcar, cep_override):
+            yield ev
+
+
+async def _expedir_carta_sem_trava(slug: str, paj_norm: str, id_tramite: str,
+                                   tipo: str = "tramite", forcar: bool = False,
+                                   cep_override: str = ""):
+    """Implementação de fato — SEMPRE chamar via `expedir_correspondencia_stream` (que
+    aplica a trava exclusiva). Expede a carta pelos Correios (SMT) e, em caso de POSTAGEM
+    (modo real), movimenta o PAJ na fase 'Ofício/Carta/Comunicação expedida' + junta os DOIS
+    PDFs (carta + comprovante da postagem) e TRAMITA para a caixa de aguardo (prazo = previsão
+    de entrega + N dias). Governado pelo modo do meio 'correspondencia': SIMULADO percorre o
+    assistente e para no Resumo (não posta). GERA eventos SSE do log AO VIVO — sub-passos no
+    site dos Correios e depois movimentação/tramitação no SISDPU — e, por último,
+    {"done": True, "resultado": {...}}."""
     from ingestao import correios_client, sisdpu_client
     from services import historico_service
     log: list = []
@@ -3873,7 +3892,8 @@ async def expedir_correspondencia_stream(slug: str, paj_norm: str, id_tramite: s
             "concluido_status": concluido_status,
             "status": "enviado" if mov_ok else "parcial",
             "detalhe": f"Carta expedida (Lote {lote or '—'}; previsão {previsao or '—'}).",
-            "comprovante": comp_nome, "carta_pdf": carta_nome, "log": log,
+            "comprovante": comp_nome, "carta_pdf": carta_nome, "lote": lote,
+            "previsao_entrega": previsao, "log": log,
             "respondido": False, "respondido_em": "", "baixado": False, "baixado_em": "", "obs": "",
         })
     # NÃO chamar _salvar_sessao_log aqui: a sessão do disparo (log ao vivo) é persistida pelo
@@ -4292,6 +4312,19 @@ def _id_processo_do_registro(rec: dict) -> str:
 def _mov_anexos_do_registro(rec: dict) -> list[dict]:
     """Reconstrói os anexos da movimentação (documentos da mensagem + comprovante) a
     partir do registro do histórico, para o 'refazer'."""
+    if rec.get("meio") == "carta":
+        # Carta usa esquema PRÓPRIO (nomes fixos, pasta de Correios) — NÃO o de
+        # anexos/comprovantes do WhatsApp/App tratado abaixo.
+        itens: list[dict] = []
+        if rec.get("carta_pdf"):
+            p = COMPROVANTES_CARTA_DIR / rec["carta_pdf"]
+            if p.exists():
+                itens.append({"nome": "Carta.pdf", "caminho": str(p), "tipo": "pdf"})
+        if rec.get("comprovante"):
+            p = COMPROVANTES_CARTA_DIR / rec["comprovante"]
+            if p.exists():
+                itens.append({"nome": "Comprovante da postagem.pdf", "caminho": str(p), "tipo": "pdf"})
+        return itens
     itens: list[dict] = []
     for a in (rec.get("anexos") or []):
         cam = caminho_anexo(rec.get("paj_norm", ""), rec.get("anexo_tipo", "tramite"),
@@ -4344,6 +4377,20 @@ async def refazer_movimentacao(historico_id: str) -> dict:
         descricao = _montar_descricao_mov(
             _meios.get(rec.get("meio", ""), "WhatsApp"), rec.get("mensagem", ""), numeros,
             rec.get("prazo"), nomes, rec.get("tram_grupo") or "")
+    elif rec.get("meio") == "carta" and rec.get("lote") and rec.get("previsao_entrega"):
+        # A movimentação original pode ter sido registrada ANTES do comprovante ser
+        # capturado (Lote/Previsão em branco no texto guardado) — se já sabemos os
+        # valores agora (ex.: recuperados depois via /recuperar-comprovantes), atualiza
+        # o texto antes de refazer, para o registro do PAJ sair correto.
+        import html as _html
+        e = _html.escape
+        descricao = re.sub(r"(Lote/Mensagem SMT:\s*<strong>)[^<]*(</strong>)",
+                           rf"\g<1>{e(str(rec['lote']))}\g<2>", descricao)
+        descricao = re.sub(r"(Previsão de entrega:\s*)[^<]*(<)",
+                           rf"\g<1>{e(str(rec['previsao_entrega']))}\g<2>", descricao)
+    # Carta usa a fase específica "Ofício/Carta/Comunicação expedida"; demais meios
+    # usam o padrão (_FASE_MENSAGEM_ASSISTIDO) já assumido por movimentar_paj.
+    fase_kw = {"fase": _FASE_CARTA_EXPEDIDA} if rec.get("meio") == "carta" else {}
     mov_anexos = _mov_anexos_do_registro(rec)
     if not _pode_exclusivo():
         _log_passo(log_novo, "Refazer movimentação", None, "operação em andamento — tente de novo")
@@ -4352,7 +4399,8 @@ async def refazer_movimentacao(historico_id: str) -> dict:
     async with _entrar_exclusivo_fila():
         try:
             mov = await sisdpu_client.movimentar_paj(
-                [{"id": id_proc, "numero": paj}], descricao, anexos=mov_anexos, descricao_html=True)
+                [{"id": id_proc, "numero": paj}], descricao, anexos=mov_anexos,
+                descricao_html=True, **fase_kw)
         except Exception as e:  # noqa: BLE001
             mov = {"ok": False, "detalhe": f"exceção: {e}", "mov_seq": None}
     _log_passo(log_novo, "Refazer movimentação do PAJ", mov.get("ok"), mov.get("detalhe", ""))
@@ -4381,7 +4429,10 @@ async def refazer_tramitacao(historico_id: str) -> dict:
     _log_passo(log_novo, "Refazer tramitação — solicitado", None, "reprocessamento manual da tramitação")
     id_proc = _id_processo_do_registro(rec)
     paj = rec.get("paj", "")
-    grupo = rec.get("tram_grupo") or rec.get("tram_caixa") or ""
+    # Carta: a caixa de destino é a CONFIGURADA (não escolhida por envio) — não fica
+    # gravada em tram_grupo/tram_caixa enquanto a tramitação não tiver sido feita ainda.
+    grupo = (config_service.get_carta_caixa_tramitacao() if rec.get("meio") == "carta"
+             else (rec.get("tram_grupo") or rec.get("tram_caixa") or ""))
     if not id_proc:
         _log_passo(log_novo, "Refazer tramitação", False, "PAJ sem id de processo no registro")
         historico_service.atualizar(historico_id, {"log": log_novo})
@@ -4404,8 +4455,18 @@ async def refazer_tramitacao(historico_id: str) -> dict:
         _log_passo(log_novo, "Refazer tramitação", None, "operação em andamento — tente de novo")
         historico_service.atualizar(historico_id, {"log": log_novo})
         return {"ok": False, "erro": "Há uma operação em andamento. Aguarde e tente de novo."}
-    tram_desc = _descricao_tramitacao(rec.get("mov_seq"))
-    prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(rec.get("prazo"))
+    if rec.get("meio") == "carta":
+        # Prazo da carta = PREVISÃO DE ENTREGA (Correios) + N dias (config) — base
+        # diferente da tramitação genérica (que conta a partir de HOJE).
+        dias = config_service.get_carta_prazo_pos_entrega()
+        base = _parse_data_br(rec.get("previsao_entrega") or "") or _dt.date.today()
+        prazo_data = (base + _dt.timedelta(days=dias)).strftime("%d/%m/%Y")
+        tram_desc = f"Carta expedida. Aguardar retorno até {prazo_data}."
+        prazo_desc = tram_desc
+        prazo_dias = dias
+    else:
+        tram_desc = _descricao_tramitacao(rec.get("mov_seq"))
+        prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(rec.get("prazo"))
     async with _entrar_exclusivo_fila():
         try:
             tram = await sisdpu_client.tramitar_paj(

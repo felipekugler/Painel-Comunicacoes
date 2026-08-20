@@ -186,9 +186,9 @@
                 <td class="text-center col-compacta">
                     {% if r.concluido_status == 'concluido' %}
                         <span class="tram-link" title="{{ r.concluido_detalhe or 'Trâmite originário admitido e concluído' }}">Sim</span>
-                    {% elif r.concluido_status == 'falha' %}
+                    {% elif r.concluido_status in ('falha', 'nao_realizada') %}
                         <div style="display:flex;flex-direction:column;align-items:center;gap:3px;">
-                            <span class="tag-falha" title="{{ r.concluido_detalhe }}">falhou</span>
+                            <span class="tag-falha" title="{{ r.concluido_detalhe }}">{{ 'falhou' if r.concluido_status == 'falha' else 'não realizada' }}</span>
                             <button class="refazer-link" data-id="{{ r.id }}"
                                     onclick="refazerEtapa(this,'conclusao')">↻ refazer</button>
                         </div>

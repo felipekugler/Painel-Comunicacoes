@@ -638,6 +638,24 @@ async def _baixar_comprovante_do_lote(page: Page, lote: str, comprovante_dir: st
     return res
 
 
+async def _recarregar_criar(page: Page) -> None:
+    """Navega (RECARREGA de verdade, pelo menu) até a tela #/criar — 'Remessas enviadas no
+    dia'. Usada quando esperar a lista SPA reagir sozinha (Angular) NÃO é confiável o
+    bastante; um reload completo se mostrou mais robusto (ver _capturar_comprovante)."""
+    await page.goto(SMT_HOME, wait_until="domcontentloaded", timeout=20000)
+    await page.wait_for_timeout(600)
+    with contextlib.suppress(Exception):
+        await page.click("a#nav-menu", timeout=5000)
+    await page.wait_for_timeout(300)
+    await _click_texto(page, "MENSAGENS", tags="a")
+    await page.wait_for_timeout(300)
+    await _click_texto(page, "Criar Mensagens", tags="a")
+    await page.wait_for_timeout(1200)
+    with contextlib.suppress(Exception):
+        await page.click("div.cartao", timeout=8000)
+    await page.wait_for_timeout(1500)
+
+
 async def baixar_comprovantes_dia(comprovante_dir: str) -> dict:
     """RECUPERAÇÃO: navega até 'Remessas enviadas no dia' e baixa o comprovante de CADA remessa,
     extraindo o destinatário — para recasar comprovantes trocados ao PAJ certo. Não posta nada.
@@ -646,18 +664,7 @@ async def baixar_comprovantes_dia(comprovante_dir: str) -> dict:
     try:
         await _ensure_logged_in()
         page = await _get_page()
-        await page.goto(SMT_HOME, wait_until="domcontentloaded", timeout=20000)
-        await page.wait_for_timeout(600)
-        with contextlib.suppress(Exception):
-            await page.click("a#nav-menu", timeout=5000)
-        await page.wait_for_timeout(300)
-        await _click_texto(page, "MENSAGENS", tags="a")
-        await page.wait_for_timeout(300)
-        await _click_texto(page, "Criar Mensagens", tags="a")
-        await page.wait_for_timeout(1200)
-        with contextlib.suppress(Exception):
-            await page.click("div.cartao", timeout=8000)
-        await page.wait_for_timeout(1500)
+        await _recarregar_criar(page)
         lotes = await _ler_lotes(page)
         log.info("[correios] recuperação: %d remessa(s) no dia: %s", len(lotes), lotes)
         for lote in lotes:
@@ -691,8 +698,10 @@ async def _capturar_comprovante(page: Page, comprovante_dir: str, capt: dict | N
             break
         await page.wait_for_timeout(500)
     # 2) POLL até surgir um lote NOVO (não estava no snapshot) = a remessa recém-postada.
+    # ~5s (10×500ms): o reload logo abaixo se mostrou mais confiável que insistir esperando
+    # o Angular reagir sozinho — não vale a pena esticar essa espera inicial.
     novo_lote = ""
-    for _ in range(30):
+    for _ in range(10):
         agora = await _ler_lotes(page)
         novos = [x for x in agora if x not in antes]
         if novos:
@@ -700,12 +709,34 @@ async def _capturar_comprovante(page: Page, comprovante_dir: str, capt: dict | N
             break
         await page.wait_for_timeout(500)
     if not novo_lote:
-        # fallback (sem snapshot / lista não atualizou): maior lote da tela (o mais recente).
+        # ⚠️ CORREÇÃO 2026-08-20: o poll acima só espera o Angular reagir SOZINHO (sem
+        # reload) — em pelo menos um caso real isso não bastou (a lista ficou "presa" sem
+        # mostrar a remessa recém-postada mesmo após ~15s). Um RELOAD de verdade pelo menu
+        # (mesma navegação usada em `baixar_comprovantes_dia`, que sempre achou de primeira
+        # nesse mesmo cenário) é mais confiável do que insistir esperando no DOM atual.
+        log.warning("[correios] comprovante: não detectei lote NOVO após poll — recarregando #/criar…")
+        with contextlib.suppress(Exception):
+            await _recarregar_criar(page)
+            agora = await _ler_lotes(page)
+            novos = [x for x in agora if x not in antes]
+            if novos:
+                novo_lote = max(novos, key=lambda s: int(s))
+    if not novo_lote and not antes:
+        # fallback SÓ quando não havia snapshot prévio (nada a excluir) — 1º envio do dia,
+        # sem `lotes_antes`. ⚠️ NUNCA fazer isso quando `antes` não é vazio: com mais de uma
+        # carta no MESMO dia, "maior lote da tela" pode ser um lote de OUTRA carta já
+        # anexado a OUTRO PAJ — reanexar o PDF errado é pior do que não anexar nenhum
+        # (era exatamente o bug de comprovante trocado corrigido em 2026-07-27).
         with contextlib.suppress(Exception):
             todos = await _ler_lotes(page)
             if todos:
                 novo_lote = max(todos, key=lambda s: int(s))
-        log.warning("[correios] comprovante: não detectei lote NOVO — fallback lote=%s", novo_lote or "—")
+        log.warning("[correios] comprovante: não detectei lote NOVO (nem após reload) — fallback lote=%s",
+                   novo_lote or "—")
+    elif not novo_lote:
+        log.warning("[correios] comprovante: não detectei lote NOVO (nem após reload) — COM histórico prévio "
+                   "(%d lote(s) conhecido(s)), NÃO uso fallback 'maior da tela' (risco de pegar comprovante "
+                   "de OUTRA carta do dia). Comprovante ficará vazio — use a recuperação manual depois.", len(antes))
     res["lote"] = novo_lote
     # 3) marca o olho da linha do LOTE alvo (recém-postado) e clica-o por REFERÊNCIA.
     marcado = False
