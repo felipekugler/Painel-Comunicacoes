@@ -11,7 +11,7 @@ set ROOT=%~dp0
 cd /d "%ROOT%"
 
 set PYTHON=%ROOT%.venv\Scripts\python.exe
-set URL=http://127.0.0.1:8002/
+set URL=http://127.0.0.1:8003/
 
 rem Confere se o venv existe
 if not exist "%PYTHON%" (
@@ -21,8 +21,8 @@ if not exist "%PYTHON%" (
     goto :fim
 )
 
-rem Checa se o servidor ja esta rodando (netstat na porta 8002)
-netstat -ano -p TCP | findstr /R /C:":8002 .* LISTENING" >nul 2>&1
+rem Checa se o servidor ja esta rodando (netstat na porta 8003)
+netstat -ano -p TCP | findstr /R /C:":8003 .* LISTENING" >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
     echo Servidor ja esta rodando. Abrindo browser...
     call :abrirbrowser
@@ -33,14 +33,14 @@ rem Nao esta rodando — inicia em janela separada e abre o browser
 echo Iniciando Painel de Comunicações...
 start "Painel de Comunicações" /MIN "%PYTHON%" "%ROOT%app.py"
 
-rem Aguarda o servidor ficar pronto checando a porta 8002 (ate 30s), em vez de
+rem Aguarda o servidor ficar pronto checando a porta 8003 (ate 30s), em vez de
 rem uma espera fixa — em maquinas mais lentas (1a execucao, antivirus, HD lento)
 rem o servidor pode demorar mais que alguns segundos pra subir, e abrir o
 rem browser cedo demais da ERR_CONNECTION_REFUSED.
 echo Aguardando o servidor iniciar...
 set /A _tentativas=0
 :esperaservidor
-netstat -ano -p TCP | findstr /R /C:":8002 .* LISTENING" >nul 2>&1
+netstat -ano -p TCP | findstr /R /C:":8003 .* LISTENING" >nul 2>&1
 if %ERRORLEVEL% EQU 0 goto :servidorpronto
 set /A _tentativas+=1
 if %_tentativas% GEQ 30 (

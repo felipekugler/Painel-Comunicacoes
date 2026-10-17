@@ -4,7 +4,7 @@ Painel web para SERVIDORES da DPU: lista, para as caixas de grupo escolhidas, os
 PAJs que aguardam contato com o assistido, a providencia necessaria em cada um e
 o status do contato (por Aplicativo SISDPU e WhatsApp).
 
-Derivado do PAINEL SISDPU (do defensor); roda na porta 8002 para coexistir.
+Derivado do PAINEL SISDPU (do defensor); roda na porta 8003 para coexistir.
 Auto-gerencia processo: mata qualquer python na porta antes de iniciar,
 grava PID file. Evita duplicatas.
 """
@@ -33,9 +33,11 @@ from routes.seguranca import router as seguranca_router
 BASE_DIR = Path(__file__).resolve().parent
 PID_FILE = BASE_DIR / ".server.pid"
 LOGS_DIR = BASE_DIR / "logs"
-# PAINEL COMUNICACOES roda na porta 8002 para coexistir com o PAINEL SISDPU (8001)
-# na mesma maquina sem conflito de porta.
-PORT = 8002
+# PAINEL COMUNICACOES roda na porta 8003 para coexistir com o PAINEL SISDPU (8001)
+# e o PAINEL SISDPU 2.0 (8002) na mesma maquina sem conflito de porta. Era 8002
+# ate 17/10/2026: como cada painel encerra quem estiver na propria porta ao
+# subir (_cleanup_port), abrir este derrubava o Painel SISDPU 2.0 e vice-versa.
+PORT = 8003
 
 
 def _configurar_logging() -> None:

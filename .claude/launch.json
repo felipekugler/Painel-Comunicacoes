@@ -5,7 +5,7 @@
       "name": "painel-comunicacoes",
       "runtimeExecutable": ".venv/Scripts/python.exe",
       "runtimeArgs": ["app.py"],
-      "port": 8002
+      "port": 8003
     }
   ]
 }

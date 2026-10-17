@@ -82,12 +82,12 @@ o que ainda vale a pena ajustar antes de subir o servidor.
 ## Uso
 
 ```bash
-# Iniciar o servidor (porta 8002)
+# Iniciar o servidor (porta 8003)
 .venv\Scripts\python.exe app.py     # Windows
 # .venv/bin/python app.py           # macOS/Linux
 
 # Acessar no navegador
-# http://localhost:8002
+# http://localhost:8003
 ```
 
 No Windows, o atalho `Painel-Comunicacoes.bat` faz a mesma coisa (e mata uma instância
@@ -102,7 +102,7 @@ criar uma senha-mestra — as credenciais ficam cifradas em disco a partir daí.
 
 ```
 Painel-Comunicacoes/
-├── app.py                          # FastAPI + Uvicorn (porta 8002)
+├── app.py                          # FastAPI + Uvicorn (porta 8003)
 ├── config.py                       # Configuração mínima (lê .env)
 ├── ingestao/                       # Clientes externos (Playwright)
 │   ├── sisdpu_client.py              # Scraping/ações no SISDPU

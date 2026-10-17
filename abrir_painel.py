@@ -22,7 +22,7 @@ import subprocess
 import sys
 import webbrowser
 
-URL = "http://127.0.0.1:8002/"
+URL = "http://127.0.0.1:8003/"
 
 # Caminhos usuais do Chrome e do Edge no Windows (Edge está sempre presente no Win11).
 _CHROME_PATHS = [
