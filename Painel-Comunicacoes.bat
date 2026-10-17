@@ -33,9 +33,29 @@ rem Nao esta rodando — inicia em janela separada e abre o browser
 echo Iniciando Painel de Comunicações...
 start "Painel de Comunicações" /MIN "%PYTHON%" "%ROOT%app.py"
 
-rem Aguarda 4s pro servidor subir
-timeout /T 4 /NOBREAK >nul
+rem Aguarda o servidor ficar pronto checando a porta 8002 (ate 30s), em vez de
+rem uma espera fixa — em maquinas mais lentas (1a execucao, antivirus, HD lento)
+rem o servidor pode demorar mais que alguns segundos pra subir, e abrir o
+rem browser cedo demais da ERR_CONNECTION_REFUSED.
+echo Aguardando o servidor iniciar...
+set /A _tentativas=0
+:esperaservidor
+netstat -ano -p TCP | findstr /R /C:":8002 .* LISTENING" >nul 2>&1
+if %ERRORLEVEL% EQU 0 goto :servidorpronto
+set /A _tentativas+=1
+if %_tentativas% GEQ 30 (
+    echo [AVISO] O servidor esta demorando mais que o normal. Abrindo o navegador mesmo assim...
+    goto :servidorpronto
+)
+rem "ping" como espera de ~1s: ao contrario do "timeout", nao exige um console
+rem interativo (handle de entrada) — funciona tambem se o .bat for chamado de
+rem forma nao-interativa (outro script, tarefa agendada etc.), onde "timeout"
+rem falha de cara com "nao ha suporte para o redirecionamento de entrada" e o
+rem loop deixaria de esperar de verdade.
+ping -n 2 127.0.0.1 >nul
+goto :esperaservidor
 
+:servidorpronto
 echo Abrindo browser em %URL%
 call :abrirbrowser
 
