@@ -966,17 +966,21 @@
     </script>
 
     <!-- ===== Modal de ANEXOS (compartilhado: dashboard, prontos, histórico) ===== -->
-    <div id="anx-modal" class="wa-overlay" style="display:none;">
+    <div id="anx-modal" class="wa-overlay" style="display:none;" onclick="if(event.target===this)anxFechar()">
       <div class="fluent-card" style="width:50vw;max-height:86vh;overflow:auto;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
             <h3 class="font-display" style="font-size:18px;margin:0;">
                 Anexos — PAJ <span id="anx-paj" style="font-family:'Cascadia Code','Consolas',monospace;"></span>
             </h3>
-            <div id="anx-add-box">
-                <input type="file" id="anx-input" multiple style="display:none;"
-                       accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxUpload(this)">
-                <button class="btn-accent" style="padding:6px 14px;font-size:12px;white-space:nowrap;"
-                        onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
+            <div style="display:flex;align-items:center;gap:8px;">
+                <div id="anx-add-box">
+                    <input type="file" id="anx-input" multiple style="display:none;"
+                           accept=".doc,.docx,.odt,.png,.jpg,.jpeg,.gif,.pdf" onchange="anxUpload(this)">
+                    <button class="btn-accent" style="padding:6px 14px;font-size:12px;white-space:nowrap;"
+                            onclick="document.getElementById('anx-input').click()">+ Adicionar arquivo(s)</button>
+                </div>
+                <button class="btn-subtle" style="padding:6px 14px;font-size:12px;white-space:nowrap;"
+                        onclick="anxFechar()">Fechar</button>
             </div>
         </div>
         <p id="anx-hint" class="text-tertiary" style="font-size:12px;margin:4px 0 10px;">
