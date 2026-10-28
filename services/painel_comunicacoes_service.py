@@ -3292,18 +3292,30 @@ def contar_confirmacoes() -> dict:
     return {"total": len(listar_aguardando_confirmacao())}
 
 
-async def verificar_confirmacoes_stream():
+async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
     """Varre as pendências de confirmação (ver `listar_aguardando_confirmacao`): resolve
     o id_tramite ATUAL de cada uma na caixa de grupo para onde foi tramitada (pode ter
     mudado desde o envio) e lê o WhatsApp de cada número contatado em busca de uma
     resposta — SOMENTE LEITURA, nenhuma ação é tomada aqui. GERA eventos SSE (log ao
     vivo) e, por fim, {"done": True, "resultado": {"itens": [...]}} para a central
-    montar a lista com o botão "Confirmar recebimento" por item."""
+    montar a lista com o botão "Confirmar recebimento" por item.
+
+    `historico_ids` (opcional): restringe a varredura a ESSES ids só — usado quando o
+    usuário tem uma busca por PAJ ativa na tela e clica em "Verificar respostas"
+    (pedido do usuário, 2026-10-28: o botão deve agir só sobre o que está filtrado, não
+    sobre todas as pendências). Quando informado, IGNORA o corte de antiguidade (mesma
+    regra já aplicada à busca por PAJ — o usuário escolheu esses itens explicitamente)."""
     from ingestao import sisdpu_client, whatsapp_client
     from services import historico_service
-    pendentes = listar_aguardando_confirmacao()
+    if historico_ids:
+        ids_set = set(historico_ids)
+        pendentes = [r for r in _candidatos_confirmacao() if r["id"] in ids_set]
+    else:
+        pendentes = listar_aguardando_confirmacao()
     if not pendentes:
-        yield {"level": "info", "msg": "Nenhum envio por WhatsApp aguardando confirmação no momento."}
+        msg = ("Nenhum dos itens filtrados está mais pendente de confirmação."
+               if historico_ids else "Nenhum envio por WhatsApp aguardando confirmação no momento.")
+        yield {"level": "info", "msg": msg}
         yield {"done": True, "resultado": {"itens": []}}
         return
     yield {"level": "info", "msg": f"{len(pendentes)} envio(s) aguardando confirmação. Localizando as tramitações…"}

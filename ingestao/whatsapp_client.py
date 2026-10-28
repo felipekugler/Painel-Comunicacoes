@@ -217,6 +217,11 @@ async def _ir_para_busca_global(page) -> None:
                 break
 
 
+_JS_TEXTOS_RESULTADO_BUSCA = (
+    "(sel) => [...document.querySelectorAll(sel)].slice(0, 30).map(el => el.innerText || '')"
+)
+
+
 async def _descobrir_numeros_por_paj(page, paj: str) -> list[str]:
     """Busca "PAJ <numero>" (padrão validado AO VIVO pelo usuário, 2026-10-28 — mais
     confiável que só o número solto) na busca GLOBAL do WhatsApp e extrai os NÚMEROS
@@ -236,22 +241,46 @@ async def _descobrir_numeros_por_paj(page, paj: str) -> list[str]:
         await campo.fill("")
         await campo.fill(query)
         await page.wait_for_timeout(1500)
-        itens = page.locator(_SEL_RESULTADO_BUSCA)
-        n = await itens.count()
+        # Lê TODAS as linhas de resultado numa ÚNICA chamada JS — ler uma por uma via
+        # locator.nth(i).inner_text() fazia uma ida-e-volta ao navegador POR LINHA
+        # (até 30!), o que sozinho levava ~30s. Bug real de performance encontrado
+        # pelo usuário 2026-10-28 ("Abrir conversa"/"Atualizar agora" demorando muito).
+        textos = await page.evaluate(_JS_TEXTOS_RESULTADO_BUSCA, _SEL_RESULTADO_BUSCA)
         numeros: list[str] = []
-        for i in range(min(n, 30)):
-            texto = await itens.nth(i).inner_text() or ""
-            m = _RE_TEL_BR.search(texto)
+        for texto in textos or []:
+            m = _RE_TEL_BR.search(texto or "")
             if not m:
                 continue
             cand = normalizar_numero(m.group(0))
             if cand and cand not in numeros:
                 numeros.append(cand)
-        with contextlib.suppress(Exception):
-            await campo.fill("")  # limpa a busca p/ não atrapalhar o próximo uso da página
+        # NÃO limpa o campo de busca depois: fazer `campo.fill("")` aqui TRAVAVA por 30s
+        # até estourar o timeout do Playwright (a busca ativa deixa o campo num estado
+        # não-"actionable" para o fill) — erro real encontrado pelo usuário 2026-10-28
+        # ("Abrir conversa"/"Atualizar agora" demorando ~45s), mascarado até agora porque
+        # ficava dentro de um `contextlib.suppress(Exception)` que engolia o timeout sem
+        # abortar mais cedo. Desnecessário de qualquer forma: quem chama esta função
+        # sempre navega pra outra URL em seguida (`_abrir_numero_direto`), o que já
+        # descarta esse estado da busca.
         return numeros
     except Exception:  # noqa: BLE001
         return []
+
+
+def _chave_equivalencia_numero(numero_normalizado: str) -> str:
+    """Chave p/ tratar como "o MESMO número" duas representações que diferem só pelo
+    9º dígito extra que o Brasil acrescentou aos celulares — o WhatsApp às vezes
+    mostra/indexa o número SEM esse dígito (ex.: painel "Dados do contato": "+55 41
+    9602-2764", 8 dígitos de assinante) mesmo quando o número real tem 9 ("41
+    996022764") — ver `_capturar_contato_jpeg`. Comparar os digitos crus faria o
+    fluxo achar que são DOIS números diferentes e abrir/ler a MESMA conversa duas
+    vezes (bug relatado pelo usuário, 2026-10-28, com texto duplicado na movimentação).
+    Usa DDD + os ÚLTIMOS 8 dígitos (a parte que não muda entre as duas variantes) —
+    só para decidir equivalência; a abertura da conversa sempre usa o número como veio."""
+    d = re.sub(r"\D", "", numero_normalizado or "")
+    if d.startswith("55") and len(d) in (12, 13):
+        return d[2:4] + d[-8:]  # DDD + 8 últimos dígitos do assinante
+    return d[-8:] if len(d) >= 8 else d
 
 
 async def _ler_conversas_do_paj(page, numeros_registrados: list[str] | None, paj_ref: str,
@@ -261,12 +290,29 @@ async def _ler_conversas_do_paj(page, numeros_registrados: list[str] | None, paj
     ver comentário acima de `_SEL_BUSCA_GLOBAL`). Para cada candidato que abrir
     (com pelo menos 1 mensagem), lê via `_JS_LER_CHAT`.
     Retorna {ok, dumps: {numero: dump}, numeros_verificados: [...], detalhe}."""
-    candidatos = [normalizar_numero(n) for n in (numeros_registrados or []) if n]
-    candidatos = [n for n in candidatos if n]
+    # DEDUPLICA por EQUIVALÊNCIA (não só string exata): `numeros_registrados` costuma
+    # trazer 2-3 "variantes" do MESMO número (confirmado pelo WhatsApp, reconstruído
+    # com DDI, cadastrado cru) — e a busca pelo PAJ pode achar ainda outra variante
+    # (com/sem o 9º dígito — ver `_chave_equivalencia_numero`). Sem isso, cada
+    # variante abria a MESMA conversa de novo (navegação completa + espera,
+    # multiplicando o tempo à toa, e duplicando a resposta agregada). Bug real
+    # encontrado pelo usuário 2026-10-28.
+    candidatos: list[str] = []
+    chaves_vistas: set[str] = set()
+    for n in (numeros_registrados or []):
+        norm = normalizar_numero(n) if n else ""
+        if not norm:
+            continue
+        chave = _chave_equivalencia_numero(norm)
+        if chave not in chaves_vistas:
+            chaves_vistas.add(chave)
+            candidatos.append(norm)
     if paj_ref:
         await _ir_para_busca_global(page)
         for n in await _descobrir_numeros_por_paj(page, paj_ref):
-            if n not in candidatos:
+            chave = _chave_equivalencia_numero(n)
+            if chave not in chaves_vistas:
+                chaves_vistas.add(chave)
                 candidatos.append(n)
     if not candidatos:
         return {"ok": False, "dumps": {}, "numeros_verificados": [],

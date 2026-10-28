@@ -29,6 +29,7 @@
     </h3>
     <div id="sse-log" class="sse-log"></div>
     <div style="text-align:right;margin-top:12px;">
+        <button class="btn-subtle" id="sse-cancelar" onclick="sseCancelar()" style="display:none;color:#dc2626;">Cancelar</button>
         <button class="btn-subtle" id="sse-fechar" onclick="sseFechar()" style="display:none;">Fechar</button>
     </div>
   </div>
@@ -38,18 +39,28 @@
 // Consumidor SSE genérico: abre o popup, mostra o passo a passo e devolve o `resultado`
 // do evento final {done:true, resultado:{...}}. (Mesmo padrão do popup de envio dos outros meios.)
 window.sseFechar = function () { document.getElementById('sse-modal').style.display = 'none'; };
+// Aborta a verificação/envio em andamento (pedido do usuário, 2026-10-28). Fecha a
+// conexão SSE do lado do cliente — o servidor para de processar o PRÓXIMO item assim
+// que detecta a desconexão (o item que já estiver em andamento termina normalmente).
+let _sseController = null;
+window.sseCancelar = function () {
+    if (_sseController) _sseController.abort();
+};
 window.enviarComPopup = async function (url, corpo, tituloInicial) {
     const modal = document.getElementById('sse-modal');
     const log = document.getElementById('sse-log');
     const st = document.getElementById('sse-status');
     const fechar = document.getElementById('sse-fechar');
-    log.innerHTML = ''; st.textContent = tituloInicial || '— em andamento…'; fechar.style.display = 'none';
+    const cancelar = document.getElementById('sse-cancelar');
+    log.innerHTML = ''; st.textContent = tituloInicial || '— em andamento…';
+    fechar.style.display = 'none'; cancelar.style.display = '';
     modal.style.display = 'flex';
+    _sseController = new AbortController();
     let resultado = { ok: false, detalhe: 'sem retorno' };
     try {
         const resp = await fetch(url, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(corpo)
+            body: JSON.stringify(corpo), signal: _sseController.signal
         });
         const reader = resp.body.getReader(); const dec = new TextDecoder(); let buf = '';
         while (true) {
@@ -66,11 +77,15 @@ window.enviarComPopup = async function (url, corpo, tituloInicial) {
             }
         }
     } catch (e) {
-        const div = document.createElement('div'); div.className = 'sync-line sync-erro';
-        div.textContent = 'Erro: ' + e; log.appendChild(div); st.textContent = '— erro';
-        resultado = { ok: false, detalhe: String(e) };
+        const cancelado = e && e.name === 'AbortError';
+        const div = document.createElement('div'); div.className = 'sync-line ' + (cancelado ? 'sync-aviso' : 'sync-erro');
+        div.textContent = cancelado ? 'Cancelado pelo usuário.' : ('Erro: ' + e);
+        log.appendChild(div); st.textContent = cancelado ? '— cancelado' : '— erro';
+        resultado = cancelado ? { ok: true, cancelado: true, itens: resultado.itens || [] }
+                               : { ok: false, detalhe: String(e) };
     }
-    fechar.style.display = '';
+    _sseController = null;
+    cancelar.style.display = 'none'; fechar.style.display = '';
     return resultado;
 };
 </script>

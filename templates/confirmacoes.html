@@ -67,6 +67,8 @@
     <button class="btn-accent" id="conf-verificar-btn" onclick="confVerificar()">Verificar respostas</button>
     <span id="conf-status" class="text-tertiary" style="font-size:12.5px;"></span>
     <span style="flex:1;"></span>
+    <button class="btn-subtle" id="conf-filtro-respondidos-btn" onclick="confToggleSoRespondidos(this)"
+            title="Mostra só as linhas com Situação &quot;Respondido&quot;">Só respondidos</button>
     <input type="text" id="conf-busca-input" class="wa-input" style="width:260px;font-size:12.5px;"
            placeholder="Buscar PAJ (ignora o corte de antiguidade)…"
            onkeydown="if(event.key==='Enter'){ event.preventDefault(); confBuscarPaj(); }">
@@ -287,6 +289,29 @@ function _confPintarLinha(it) {
     // O mesmo PAJ pode estar visível em 2 lugares ao mesmo tempo (tabela de
     // pendentes + resultado de uma busca ativa) — repinta TODAS as cópias.
     document.querySelectorAll('.conf-row[data-id="' + it.historico_id + '"]').forEach(tr => _confPintarUmaLinha(tr, it));
+    _confAplicarFiltroSituacao();
+}
+
+// Filtro "Só respondidos" (botão ao lado da busca por PAJ) — esconde, na tabela
+// visível no momento (pendentes OU resultado de busca), qualquer linha cuja
+// Situação não seja "Respondido". Reaplicado depois de toda repintura (verificar
+// respostas, busca por PAJ, atualizar conversa) pra não ficar desatualizado.
+let confSoRespondidosAtivo = false;
+
+function confToggleSoRespondidos(btn) {
+    confSoRespondidosAtivo = !confSoRespondidosAtivo;
+    btn.classList.toggle('btn-accent', confSoRespondidosAtivo);
+    btn.classList.toggle('btn-subtle', !confSoRespondidosAtivo);
+    btn.textContent = confSoRespondidosAtivo ? '✕ Só respondidos' : 'Só respondidos';
+    _confAplicarFiltroSituacao();
+}
+
+function _confAplicarFiltroSituacao() {
+    document.querySelectorAll('.conf-row').forEach(tr => {
+        if (!confSoRespondidosAtivo) { tr.style.display = ''; return; }
+        const respondido = !!tr.querySelector('.conf-situacao-badge-cel .conf-ok');
+        tr.style.display = respondido ? '' : 'none';
+    });
 }
 
 function _confPintarUmaLinha(tr, it) {
@@ -410,6 +435,10 @@ function _confConstruirLinha(it) {
       + '</tr>';
 }
 
+// ids da busca por PAJ ativa na tela (null = sem busca ativa) — usado por confVerificar()
+// pra restringir "Verificar respostas" só ao que está filtrado (pedido do usuário, 2026-10-28).
+let confBuscaAtivaIds = null;
+
 async function confBuscarPaj() {
     const input = document.getElementById('conf-busca-input');
     const q = (input.value || '').trim();
@@ -417,6 +446,7 @@ async function confBuscarPaj() {
     const r = await fetch('/api/confirmacoes/buscar?paj=' + encodeURIComponent(q));
     const d = await r.json().catch(() => ({}));
     const itens = (d && d.itens) || [];
+    confBuscaAtivaIds = itens.map(it => it.id);
     document.getElementById('conf-pendentes-wrap').style.display = 'none';
     document.getElementById('conf-busca-wrap').style.display = 'block';
     document.getElementById('conf-busca-limpar-btn').style.display = 'inline-block';
@@ -424,9 +454,11 @@ async function confBuscarPaj() {
         ? (itens.length + ' resultado(s) para "' + q + '" — ignora o corte de antiguidade.')
         : ('Nenhum PAJ pendente de confirmação encontrado para "' + q + '".');
     document.getElementById('conf-busca-body').innerHTML = itens.map(_confConstruirLinha).join('');
+    _confAplicarFiltroSituacao();
 }
 
 function confLimparBusca() {
+    confBuscaAtivaIds = null;
     document.getElementById('conf-busca-input').value = '';
     document.getElementById('conf-busca-wrap').style.display = 'none';
     document.getElementById('conf-busca-limpar-btn').style.display = 'none';
@@ -436,12 +468,20 @@ function confLimparBusca() {
 async function confVerificar() {
     const btn = document.getElementById('conf-verificar-btn');
     const st = document.getElementById('conf-status');
-    btn.disabled = true; st.textContent = 'Verificando…';
-    const d = await window.enviarComPopup('/api/confirmacoes/verificar/stream', {}, '— verificando respostas no WhatsApp…');
-    btn.disabled = false; st.textContent = '';
+    const filtrado = !!(confBuscaAtivaIds && confBuscaAtivaIds.length);
+    btn.disabled = true;
+    st.textContent = filtrado ? 'Verificando (' + confBuscaAtivaIds.length + ' filtrado(s))…' : 'Verificando…';
+    const corpo = filtrado ? { historico_ids: confBuscaAtivaIds } : {};
+    const titulo = filtrado
+        ? '— verificando ' + confBuscaAtivaIds.length + ' item(ns) filtrado(s) no WhatsApp…'
+        : '— verificando respostas no WhatsApp…';
+    const d = await window.enviarComPopup('/api/confirmacoes/verificar/stream', corpo, titulo);
+    btn.disabled = false;
     const itens = (d && d.itens) || [];
     itens.forEach(_confPintarLinha);
-    if (!itens.length) st.textContent = 'Nenhum item aguardando confirmação.';
+    if (d && d.cancelado) { st.textContent = 'Verificação cancelada.'; return; }
+    st.textContent = '';
+    if (!itens.length) st.textContent = filtrado ? 'Nenhum dos itens filtrados está mais pendente.' : 'Nenhum item aguardando confirmação.';
 }
 
 function _confSemPendentesHtml() {

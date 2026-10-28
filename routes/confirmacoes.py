@@ -35,10 +35,12 @@ async def confirmacoes_page(request: Request):
 
 
 @router.post("/api/confirmacoes/verificar/stream")
-async def api_verificar_confirmacoes():
+async def api_verificar_confirmacoes(payload: dict = Body(default={})):
     """Lê o WhatsApp de cada pendência (SOMENTE LEITURA) e devolve, via SSE, a lista
-    pronta para a central exibir com o botão 'Confirmar recebimento' por item."""
-    gen = svc.verificar_confirmacoes_stream()
+    pronta para a central exibir com o botão 'Confirmar recebimento' por item.
+    Corpo opcional: {historico_ids: [...]} — restringe à busca por PAJ ativa na tela,
+    em vez de todas as pendências (pedido do usuário, 2026-10-28)."""
+    gen = svc.verificar_confirmacoes_stream(payload.get("historico_ids") or None)
     return StreamingResponse(
         disparos_service.stream_e_salvar(gen, "confirmacao_leitura"),
         media_type="text/event-stream",
