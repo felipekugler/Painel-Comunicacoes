@@ -457,8 +457,13 @@ async def _ler_popup_tramite(page: Page, id_tramite: str) -> dict:
     return dados or {}
 
 
-async def listar_caixa_grupo(nome_grupo: str = CAIXA_GRUPO_SEED) -> dict:
+async def listar_caixa_grupo(nome_grupo: str = CAIXA_GRUPO_SEED, enriquecer: bool = True) -> dict:
     """Lista os PAJs de UMA caixa de entrada de grupo (ex.: "01 - PREV_AJUIZADOS").
+
+    `enriquecer=False` pula a leitura do popup "Detalhes do trâmite" de cada
+    item (só preenche id_tramite/paj/etc. direto da tabela) — usar quando só
+    se precisa checar se um PAJ ainda está na caixa (bem mais rápido: a caixa
+    pode ter dezenas de itens de toda a equipe, e cada popup custa ~1-2s).
 
     A caixa de entrada do SISDPU tem uma aba "Caixa de Entrada do Grupo" que
     empilha varias caixas de grupo, cada uma renderizada como um datatable
@@ -523,7 +528,7 @@ async def listar_caixa_grupo(nome_grupo: str = CAIXA_GRUPO_SEED) -> dict:
     # (Antes só enriquecíamos PAJs com 2+ tramitações — candidatos a triagem —
     # para poupar tempo; agora priorizamos qualidade de análise.)
     itens = resultado.get("itens", []) or []
-    alvos = [it for it in itens if it.get("id_tramite")]
+    alvos = [it for it in itens if it.get("id_tramite")] if enriquecer else []
     if alvos:
         _log.info("listar_caixa_grupo(%s): enriquecendo %d tramitação(ões) via popup (todas).",
                   nome_grupo, len(alvos))

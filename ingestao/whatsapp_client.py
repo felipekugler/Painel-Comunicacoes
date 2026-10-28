@@ -143,6 +143,228 @@ async def _numero_invalido(page) -> bool:
         return False
 
 
+# Lê as ÚLTIMAS mensagens de um chat (nossa + do assistido), identificando as NOSSAS
+# pelo mesmo sinal já usado em _confirmar_enviado (ícone de saída "tail-out" — validado
+# ao vivo 2026-10-28: o WhatsApp Web atual marca mensagens enviadas por nós com
+# [data-icon="tail-out"] dentro da bolha; não há um "tail-in" equivalente confiável
+# para o lado recebido, então tratamos "tudo que vem DEPOIS da nossa última bolha"
+# como a resposta do assistido, em vez de tentar classificar bolha a bolha).
+# Uma ÚNICA leitura serve a DOIS propósitos (evita abrir duas sessões do WhatsApp
+# para a mesma conversa): "respostas" (só o que vem depois da nossa última mensagem,
+# usado por ler_respostas_apos_envio) e "mensagens" (a conversa INTEIRA, nossa/dele,
+# usada pelo celular simulado em obter_conversa — e cacheada no histórico a cada
+# "Verificar respostas", pedido do usuário em 2026-10-28, p/ "Abrir conversa" não
+# precisar abrir outra sessão toda vez).
+_JS_LER_CHAT = r"""
+(maxMsgs) => {
+    const main = document.querySelector('#main');
+    if (!main) return {erro: 'sem #main'};
+    const rows = [...main.querySelectorAll('[data-id]')].slice(-maxMsgs);
+    const autorDe = (preplain) => {
+        const i = preplain.indexOf('] ');
+        if (i < 0) return '';
+        return preplain.slice(i + 2).replace(/:\s*$/, '').trim();
+    };
+    const itens = rows.map(el => {
+        const tailOut = !!el.querySelector('[data-icon="tail-out"]');
+        const copyable = el.querySelector('.copyable-text');
+        const preplain = copyable ? (copyable.getAttribute('data-pre-plain-text') || '') : '';
+        const autor = autorDe(preplain);
+        const mHora = preplain.match(/\[(\d{2}:\d{2}),/);
+        let hora = mHora ? mHora[1] : '';
+        let texto = (el.innerText || '').trim();
+        const mFim = texto.match(/(\d{2}:\d{2})\s*$/);
+        if (!hora && mFim) hora = mFim[1];
+        if (hora) texto = texto.replace(new RegExp('\\n?\\s*' + hora + '\\s*$'), '').trim();
+        const temMidia = !!el.querySelector('[data-icon="document-PDF-icon"], [data-icon="media-play"], img');
+        return {tailOut, preplain, autor, hora, texto, temMidia};
+    });
+    // O ícone "tail-out" (mensagem enviada por nós) só aparece na PRIMEIRA bolha de
+    // uma sequência seguida do mesmo remetente — as seguintes ficam "agrupadas" sem
+    // o ícone, mas o atributo de data/autor (data-pre-plain-text) aparece em TODAS.
+    // Por isso usamos o NOME do autor (constante em toda sequência nossa, inclusive
+    // em mensagens de outro PAJ enviadas em seguida), e não só o ícone, para não
+    // confundir uma continuação de mensagem NOSSA com uma resposta do assistido.
+    let nomeNosso = '';
+    for (const it of itens) { if (it.tailOut && it.autor) nomeNosso = it.autor; }
+    // Mídia/anexo SEM legenda não tem .copyable-text (preplain vazio) — sem autor E
+    // às vezes sem tail-out (bolha agrupada), não dá pra saber a direção por esses
+    // sinais. Nesse caso herda a direção da mensagem ANTERIOR — MAS só se o horário
+    // for COMPATÍVEL (poucos minutos de diferença), ou seja, só se fizer parte da
+    // MESMA rodada de envio; um gap grande não herda (evita herdar de algo distante
+    // no tempo). Sem essa checagem/sem horário em algum dos dois lados: não herda,
+    // cai no valor seguro (não-nossa). Bug real encontrado ao vivo 2026-10-28: um PDF
+    // nosso sem legenda, mandado logo após outra mensagem nossa, aparecia como se
+    // fosse do assistido no celular simulado (a confirmação de leitura não era afetada,
+    // pois o filtro de "respostas" já exige autor identificado — só o visual errava).
+    const JANELA_MESMA_RODADA_MIN = 2;
+    const horaParaMin = (h) => {
+        const m = /^(\d{2}):(\d{2})$/.exec(h || '');
+        return m ? (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) : null;
+    };
+    let anteriorEhNossa = null;
+    let anteriorHoraMin = null;
+    const ehNossaPorIdx = itens.map(it => {
+        let ehNossa;
+        const horaMin = horaParaMin(it.hora);
+        if (it.tailOut) {
+            ehNossa = true;
+        } else if (it.autor) {
+            ehNossa = (!!nomeNosso && it.autor === nomeNosso);
+        } else {
+            let diff = (anteriorHoraMin !== null && horaMin !== null) ? Math.abs(horaMin - anteriorHoraMin) : null;
+            if (diff !== null) diff = Math.min(diff, 1440 - diff);  // virada de meia-noite
+            const mesmaRodada = anteriorEhNossa !== null && diff !== null && diff <= JANELA_MESMA_RODADA_MIN;
+            ehNossa = mesmaRodada ? anteriorEhNossa : false;
+        }
+        anteriorEhNossa = ehNossa;
+        if (horaMin !== null) anteriorHoraMin = horaMin;
+        return ehNossa;
+    });
+    let ultimoNossoIdx = -1;
+    itens.forEach((it, i) => { if (ehNossaPorIdx[i]) ultimoNossoIdx = i; });
+    const depois = ultimoNossoIdx >= 0 ? itens.slice(ultimoNossoIdx + 1) : [];
+    const respostas = depois.filter(it => it.autor && it.autor !== nomeNosso);
+    const mensagens = itens
+        .map((it, i) => ({ nossa: !!ehNossaPorIdx[i],
+                       texto: it.texto || (it.temMidia ? '[mídia/anexo]' : ''), hora: it.hora, temMidia: it.temMidia }))
+        .filter(it => it.texto || it.temMidia);
+    return {
+        total_lido: itens.length,
+        achou_nossa_mensagem: ultimoNossoIdx >= 0,
+        respostas: respostas.map(it => ({texto: it.texto, preplain: it.preplain})),
+        mensagens,
+    };
+}
+"""
+
+
+async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headless: bool = True) -> dict:
+    """Lê, no chat de `numero`, as mensagens recebidas DEPOIS da NOSSA última mensagem
+    enviada — para checar se o assistido respondeu confirmando o recebimento (ex.:
+    "OK"). Operação SOMENTE LEITURA: não digita nem envia nada.
+
+    Retorna {ok, tem_resposta, texto_resposta, data_resposta, confirmou, mensagens, detalhe}:
+      - tem_resposta: True se há ao menos uma mensagem do assistido após a nossa;
+      - texto_resposta: texto concatenado das mensagens de resposta (p/ conferência manual);
+      - data_resposta: 'DD/MM/AAAA HH:MM' extraída da última resposta, se disponível;
+      - confirmou: True sempre que há QUALQUER resposta do assistido após a nossa
+        mensagem (a direção já é identificada com segurança pelo autor — não exige
+        mais bater com uma palavra específica como "OK"). É só uma PRÉ-SELEÇÃO; a
+        decisão final é sempre do usuário (ver central de Confirmações de leitura).
+      - mensagens: a conversa INTEIRA lida nesta mesma sessão (nossa/dele/texto/hora)
+        — permite cachear a conversa completa sem abrir outra sessão do WhatsApp só
+        para o botão "Abrir conversa" (ver `obter_conversa_whatsapp` no serviço)."""
+    intl = normalizar_numero(numero)
+    if not intl:
+        return {"ok": False, "detalhe": "Número vazio/inválido."}
+    async with async_playwright() as p:
+        ctx = await abrir_contexto(p, headless=headless)
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        try:
+            url = f"{WA_URL}/send?phone={intl}"
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            aberto = False
+            for _ in range(30):
+                await page.wait_for_timeout(1000)
+                if await _numero_invalido(page):
+                    return {"ok": False, "detalhe": f"Número {intl} não está no WhatsApp."}
+                if await page.locator(_SEL_COMPOSE).count():
+                    aberto = True
+                    break
+            if not aberto:
+                return {"ok": False, "detalhe": "Conversa não abriu (timeout)."}
+            await page.wait_for_timeout(800)  # deixa o histórico da conversa renderizar
+            dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "detalhe": f"exceção ao ler o chat: {e}"}
+        finally:
+            with contextlib.suppress(Exception):
+                await ctx.close()
+
+    if dump.get("erro"):
+        return {"ok": False, "detalhe": dump["erro"]}
+    mensagens = dump.get("mensagens") or []
+    if not dump.get("achou_nossa_mensagem"):
+        return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
+                "confirmou": False, "mensagens": mensagens,
+                "detalhe": "Não encontrei nossa última mensagem enviada nas últimas "
+                           f"{max_mensagens} mensagens do chat — pode haver mais conversa "
+                           "depois do envio; confira manualmente."}
+    respostas = dump.get("respostas") or []
+    if not respostas:
+        return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
+                "confirmou": False, "mensagens": mensagens, "detalhe": "Ainda sem resposta do assistido."}
+    # Cada resposta vira uma linha "HH:MM texto" (hora ANTES do texto — pedido do
+    # usuário). O innerText da bolha já traz o próprio horário no FINAL (jeito que o
+    # WhatsApp renderiza); tiramos essa linha duplicada e prefixamos com a hora do
+    # preplain (mais confiável; cai para a do innerText quando o preplain faltar —
+    # acontece em bolhas agrupadas sem legenda, ex.: mídia sem texto).
+    linhas_resposta = []
+    for r in respostas:
+        texto = (r.get("texto") or "").strip()
+        if not texto:
+            continue
+        m_hora = re.search(r"\[(\d{2}:\d{2}),", r.get("preplain") or "")
+        hora = m_hora.group(1) if m_hora else ""
+        if not hora:
+            m_fim = re.search(r"(\d{2}:\d{2})\s*$", texto)
+            hora = m_fim.group(1) if m_fim else ""
+        if hora:
+            texto = re.sub(r"\n?\s*" + re.escape(hora) + r"\s*$", "", texto).strip()
+        if not texto:
+            continue
+        linhas_resposta.append(f"{hora} {texto}" if hora else texto)
+    texto_resposta = "\n".join(linhas_resposta).strip()
+    data_resposta = ""
+    for r in reversed(respostas):  # última data-hora disponível (preplain pode faltar em bolhas agrupadas)
+        m = re.search(r"\[(\d{2}:\d{2}), (\d{2}/\d{2}/\d{4})\]", r.get("preplain") or "")
+        if m:
+            data_resposta = f"{m.group(2)} {m.group(1)}"
+            break
+    confirmou = bool(texto_resposta)
+    return {"ok": True, "tem_resposta": True, "texto_resposta": texto_resposta,
+            "data_resposta": data_resposta, "confirmou": confirmou, "mensagens": mensagens, "detalhe": ""}
+
+
+async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = True) -> dict:
+    """Lê a conversa INTEIRA (nossas mensagens + respostas) com `numero`, para exibição
+    num celular simulado — ex.: botão "Abrir conversa"/"Atualizar agora" na central de
+    Confirmações de leitura (leitura ao vivo; o caminho "normal" é o cache gravado por
+    `ler_respostas_apos_envio` a cada "Verificar respostas" — ver `obter_conversa_whatsapp`
+    no serviço). Operação SOMENTE LEITURA: não digita nem envia nada.
+    Retorna {ok, numero, mensagens:[{nossa,texto,hora}], detalhe}."""
+    intl = normalizar_numero(numero)
+    if not intl:
+        return {"ok": False, "detalhe": "Número vazio/inválido."}
+    async with async_playwright() as p:
+        ctx = await abrir_contexto(p, headless=headless)
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        try:
+            url = f"{WA_URL}/send?phone={intl}"
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            aberto = False
+            for _ in range(30):
+                await page.wait_for_timeout(1000)
+                if await _numero_invalido(page):
+                    return {"ok": False, "detalhe": f"Número {intl} não está no WhatsApp."}
+                if await page.locator(_SEL_COMPOSE).count():
+                    aberto = True
+                    break
+            if not aberto:
+                return {"ok": False, "detalhe": "Conversa não abriu (timeout)."}
+            await page.wait_for_timeout(800)
+            dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "detalhe": f"exceção ao ler o chat: {e}"}
+        finally:
+            with contextlib.suppress(Exception):
+                await ctx.close()
+    if dump.get("erro"):
+        return {"ok": False, "detalhe": dump["erro"]}
+    return {"ok": True, "numero": intl, "mensagens": dump.get("mensagens") or [], "detalhe": ""}
+
+
 async def _confirmar_enviado(page, texto: str = "", timeout_seg: int = 20) -> bool:
     """Confirma que a mensagem SAIU. O DOM do WhatsApp é ofuscado (classes atômicas
     da Meta); em vez de classes instáveis, checamos:
@@ -327,15 +549,46 @@ async def _capturar_conversa_fatias(page, baseline_h) -> list[bytes]:
             if prox <= pos:
                 break
             pos = prox
-        for pos in posicoes:
-            await page.evaluate(_JS_CONV_SET_SCROLL, pos)
-            await page.wait_for_timeout(500)  # deixa o WhatsApp renderizar (lista virtualizada)
+        for i, pos in enumerate(posicoes):
+            if i == len(posicoes) - 1:
+                # ÚLTIMA fatia: é onde está a resposta/mensagem mais recente — o que
+                # importa de verdade para quem vai ler o PDF depois. NÃO confia no
+                # "bottom" calculado acima (reflow do zoom pode deixá-lo impreciso em
+                # alguns pixels, cortando a última linha); força o scroll para o
+                # MÁXIMO de verdade (o navegador satura o valor), duas vezes, com
+                # espera maior — garante a mensagem mais recente sempre visível por
+                # inteiro. Bug relatado pelo usuário 2026-10-28 (resposta cortada).
+                await page.evaluate(_JS_CONV_SET_SCROLL, 10_000_000)
+                await page.wait_for_timeout(700)
+                await page.evaluate(_JS_CONV_SET_SCROLL, 10_000_000)
+                await page.wait_for_timeout(600)
+            else:
+                await page.evaluate(_JS_CONV_SET_SCROLL, pos)
+                await page.wait_for_timeout(500)  # deixa o WhatsApp renderizar (lista virtualizada)
             with contextlib.suppress(Exception):
                 fatias.append(bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85)))
     finally:
         with contextlib.suppress(Exception):
             await page.evaluate("()=>{document.body.style.zoom='';}")  # restaura o zoom
     return fatias or [bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85))]
+
+
+async def _capturar_contato_jpeg(page) -> bytes | None:
+    """Screenshot do painel "Dados do contato" (abre, captura, fecha) — página 1 dos
+    PDFs gerados a partir da conversa (comprovante de envio e PDF da resposta)."""
+    contato = None
+    with contextlib.suppress(Exception):
+        await page.locator("#main header").first.click()
+        await page.wait_for_function(
+            r"""() => /Dados do contato|Dados da empresa/i.test(document.body.innerText||'')""",
+            timeout=6000)
+        await page.wait_for_timeout(1200)
+        h = await page.evaluate_handle(_JS_DRAWER_CONTATO)
+        el = h.as_element()
+        if el:
+            contato = await el.screenshot(type="jpeg", quality=85)
+        await page.keyboard.press("Escape")  # fecha o painel
+    return bytes(contato) if contato else None
 
 
 async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
@@ -347,19 +600,8 @@ async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
     destino = None
     try:
         conv = await _capturar_conversa_fatias(page, baseline_h)
-        contato = None
-        with contextlib.suppress(Exception):
-            await page.locator("#main header").first.click()
-            await page.wait_for_function(
-                r"""() => /Dados do contato|Dados da empresa/i.test(document.body.innerText||'')""",
-                timeout=6000)
-            await page.wait_for_timeout(1200)
-            h = await page.evaluate_handle(_JS_DRAWER_CONTATO)
-            el = h.as_element()
-            if el:
-                contato = await el.screenshot(type="jpeg", quality=85)
-            await page.keyboard.press("Escape")  # fecha o painel
-        jpegs = ([bytes(contato)] if contato else []) + list(conv)
+        contato = await _capturar_contato_jpeg(page)
+        jpegs = ([contato] if contato else []) + list(conv)
         if jpegs:
             ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
             ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -367,10 +609,68 @@ async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
             Path(comprovante_dir).mkdir(parents=True, exist_ok=True)
             destino = str(Path(comprovante_dir) / nome)
             _jpegs_to_pdf(jpegs, destino)
-    except Exception as e:  # noqa: BLE001
-        _log.warning("falha ao gerar comprovante: %r", e)
+    except Exception:  # noqa: BLE001
         destino = None
     return destino
+
+
+async def _capturar_resposta(page, destino_dir: str, paj_ref: str = "") -> str | None:
+    """Gera o PDF da RESPOSTA do assistido (mesmo formato do comprovante de envio):
+    página 1 = Dados do contato; páginas seguintes = as últimas telas da conversa
+    (onde está a resposta mais recente — sem baseline de envio, então
+    `_capturar_conversa_fatias` cai no modo "últimas 2 telas"). Para anexar à
+    movimentação que registra a resposta no PAJ (pedido do usuário, 2026-10-28).
+    Nome: Resposta_Whats_Painel_[PAJ_]AAAA-MM-DD_HH-MM-SS.pdf."""
+    destino = None
+    try:
+        conv = await _capturar_conversa_fatias(page, None)
+        contato = await _capturar_contato_jpeg(page)
+        jpegs = ([contato] if contato else []) + list(conv)
+        if jpegs:
+            ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
+            ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            nome = f"Resposta_Whats_Painel_{ref + '_' if ref else ''}{ts}.pdf"
+            Path(destino_dir).mkdir(parents=True, exist_ok=True)
+            destino = str(Path(destino_dir) / nome)
+            _jpegs_to_pdf(jpegs, destino)
+    except Exception:  # noqa: BLE001
+        destino = None
+    return destino
+
+
+async def capturar_pdf_resposta(numero: str, destino_dir: str, paj_ref: str = "",
+                                 headless: bool = True) -> str | None:
+    """Abre o chat de `numero` e gera o PDF da resposta do assistido (ver
+    `_capturar_resposta`) — usado por `confirmar_recebimento` para anexar a resposta
+    à movimentação que a registra no PAJ. Operação SOMENTE LEITURA (não digita nem
+    envia nada). Retorna o caminho do PDF, ou None se não conseguir — nunca levanta;
+    a movimentação segue normalmente mesmo sem o anexo."""
+    intl = normalizar_numero(numero)
+    if not intl:
+        return None
+    async with async_playwright() as p:
+        ctx = await abrir_contexto(p, headless=headless)
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+        try:
+            url = f"{WA_URL}/send?phone={intl}"
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            aberto = False
+            for _ in range(30):
+                await page.wait_for_timeout(1000)
+                if await _numero_invalido(page):
+                    return None
+                if await page.locator(_SEL_COMPOSE).count():
+                    aberto = True
+                    break
+            if not aberto:
+                return None
+            await page.wait_for_timeout(800)
+            return await _capturar_resposta(page, destino_dir, paj_ref)
+        except Exception:  # noqa: BLE001
+            return None
+        finally:
+            with contextlib.suppress(Exception):
+                await ctx.close()
 
 
 async def enviar_mensagem(

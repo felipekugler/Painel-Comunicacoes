@@ -523,6 +523,17 @@
                 <span style="flex:1;min-width:0;">Correspondências</span>
                 {% if _corr.total %}<span class="text-tertiary" style="font-size:12px;">({{ _corr.total }})</span>{% endif %}
             </a>
+            {# ===== Confirmações de leitura (WhatsApp) — item PRINCIPAL do menu (não é
+                    subitem de "Prontos para Envio", por isso SEM a classe nav-sub),
+                    SEMPRE visível ===== #}
+            {% set _conf = contar_confirmacoes() %}
+            <a href="/confirmacoes" class="nav-item {% if request.url.path == '/confirmacoes' %}active{% endif %}">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" style="color:var(--c-zap);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                </svg>
+                <span style="flex:1;min-width:0;">Confirmações de leitura</span>
+                {% if _conf.total %}<span class="text-tertiary" style="font-size:12.5px;">({{ _conf.total }})</span>{% endif %}
+            </a>
         </nav>
 
         <!-- Histórico de contatos (rodapé, logo acima de "Configurações") -->

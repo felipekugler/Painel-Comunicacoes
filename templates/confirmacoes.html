@@ -1,0 +1,532 @@
+{% extends "base.html" %}
+{% block title %}Confirmações de leitura{% endblock %}
+
+{% block content %}
+<style>
+.conf-badge { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 10px; border-radius:999px; white-space:nowrap; border:1px solid transparent; }
+.conf-ok    { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border-color:color-mix(in srgb,#16a34a 45%,transparent); }
+.conf-sem   { color:var(--text-tertiary); background:transparent; border-color:var(--stroke); }
+.conf-erro  { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+.conf-resposta { font-size:12px; color:var(--text-secondary); text-align:left; }
+.conf-acao-cel { display:flex; flex-direction:column; gap:5px; align-items:stretch; }
+.conf-acao-cel .conf-lote-linha { display:flex; gap:5px; }
+.conf-acao-cel .conf-lote-linha button { flex:1; }
+.conf-row-selecionada { background:color-mix(in srgb, var(--accent) 7%, transparent); }
+#conf-lote-bar { display:none; align-items:center; gap:12px; padding:10px 16px; margin-bottom:14px;
+                 background:color-mix(in srgb, var(--accent) 6%, transparent);
+                 border-color:color-mix(in srgb, var(--accent) 30%, transparent); }
+.conf-logs-details summary { cursor:pointer; font-size:13px; color:var(--text-secondary); font-weight:600;
+                              padding:6px 0; list-style:none; }
+.conf-logs-details summary::-webkit-details-marker { display:none; }
+.conf-logs-details summary::before { content:'▸ '; }
+.conf-logs-details[open] summary::before { content:'▾ '; }
+.conf-resposta-texto { display:block; white-space:pre-wrap; text-align:left; }
+.conf-abrir-conversa-btn { display:inline-block; margin-top:6px; font-size:11px; padding:3px 10px; border-radius:999px;
+    border:1px solid var(--stroke-strong); background:transparent; color:var(--text-secondary); cursor:pointer; white-space:nowrap; }
+.conf-abrir-conversa-btn:hover { background:var(--layer-alt); }
+/* Celular simulado (mesmo estilo do "Sistema de Substituições") — cores fixas de
+   WhatsApp (não seguem tema claro/escuro do painel, igual ao app real). */
+#conf-chat-modal { position:fixed; inset:0; z-index:3500; background:rgba(0,0,0,.5);
+                    display:none; align-items:center; justify-content:center; padding:20px; }
+.conf-cel-dialog { width:100%; max-width:380px; padding:18px; }
+.conf-cel { background:#111; border-radius:28px; padding:12px; }
+.conf-cel-topo { background:#075e54; color:#fff; border-radius:18px 18px 0 0; padding:10px 14px;
+                 display:flex; gap:8px; align-items:center; font-size:13px; }
+.conf-chat { background:#efeae2; height:440px; overflow-y:auto; padding:10px; display:flex;
+             flex-direction:column; gap:6px; border-radius:0 0 18px 18px; }
+.conf-bolha { max-width:85%; padding:6px 9px 4px; border-radius:8px; font-size:13px; line-height:1.35;
+              box-shadow:0 1px 1px rgba(0,0,0,.08); white-space:pre-wrap; }
+.conf-bolha.nossa { background:#d9fdd3; align-self:flex-end; }
+.conf-bolha.dele  { background:#fff; align-self:flex-start; }
+.conf-bolha .h { display:block; text-align:right; font-size:10px; color:#667781; margin-top:2px; }
+</style>
+
+<div class="mb-6">
+    <h1 class="font-display" style="font-size:28px;margin:0;display:flex;align-items:center;gap:10px;">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.7" stroke="currentColor" style="width:26px;height:26px;color:var(--c-zap);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+        </svg>
+        Confirmações de leitura
+        <span class="pill-quad" id="conf-pend-count" style="font-size:14px;" title="Envios por WhatsApp aguardando confirmação">{{ pendentes|length }}</span>
+    </h1>
+    <p class="text-secondary mt-1" style="font-size:13px;">
+        PAJs contatados por WhatsApp e que aguardam confirmação de recebimento. Clique em
+        <strong>"Verificar respostas"</strong> para o painel ler o WhatsApp de cada contato para
+        verificar se houve resposta. Após, decida se deve ser movimentado e concluído o PAJ.
+    </p>
+</div>
+
+<div class="mb-3" style="display:flex;align-items:center;gap:10px;">
+    <button class="btn-accent" id="conf-verificar-btn" onclick="confVerificar()">Verificar respostas</button>
+    <span id="conf-status" class="text-tertiary" style="font-size:12.5px;"></span>
+</div>
+
+<div id="conf-lote-bar" class="fluent-card">
+    <span style="font-size:13px;font-weight:600;"><span id="conf-lote-count">0</span> selecionado(s) para registrar em bloco</span>
+    <button class="btn-accent" style="padding:5px 14px;font-size:12.5px;" onclick="confExecutarLote()">Registrar respostas nos PAJs</button>
+    <button class="btn-subtle" style="padding:5px 14px;font-size:12.5px;" onclick="confLimparLote()">Limpar seleção</button>
+</div>
+
+<div id="conf-pendentes-wrap">
+{% if not pendentes %}
+<div class="fluent-card text-tertiary" style="padding:24px;text-align:center;font-size:13.5px;">Nenhum envio por WhatsApp aguardando confirmação no momento.</div>
+{% else %}
+<div class="fluent-card" style="overflow-x:auto;">
+    <table class="fluent-table" id="conf-pendentes-table">
+        <thead>
+            <tr>
+                <th style="width:8rem;">PAJ</th>
+                <th>Assistido</th>
+                <th style="width:9rem;">Número</th>
+                <th style="width:7rem;">Mov.</th>
+                <th style="width:12rem;">Caixa</th>
+                <th style="min-width:22rem;">Resposta</th>
+                <th style="width:8rem;">Situação</th>
+                <th style="width:16rem;">Ação</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for it in pendentes %}
+            {% set verificado = it.verif_em is defined and it.verif_em %}
+            {% set habilitado = verificado and it.verif_pronto_para_concluir and it.verif_confirmou and not it.verif_erro %}
+            <tr class="conf-row" data-id="{{ it.id }}"
+                data-texto-resposta="{{ it.verif_texto_resposta or '' }}"
+                data-data-resposta="{{ it.verif_data_resposta or '' }}">
+                <td>
+                    {% if it.url_detalhe %}
+                    <a href="{{ it.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+                       title="Abrir o PAJ no SISDPU"
+                       style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</a>
+                    {% else %}
+                    <span style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</span>
+                    {% endif %}
+                </td>
+                <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
+                <td class="text-secondary" style="font-size:12.5px;">{{ (it.numeros or [])|first or "—" }}</td>
+                <td class="text-secondary" style="font-size:12.5px;">{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
+                <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ it.tram_caixa or "—" }}</td>
+                <td class="conf-resposta conf-resposta-cel {{ '' if verificado and not it.verif_erro else 'text-tertiary' }}">
+                    <span class="conf-resposta-texto">{%- if it.verif_erro -%}{{ it.verif_erro }}
+                        {%- elif verificado -%}{{ it.verif_texto_resposta if it.verif_tem_resposta else '(sem resposta ainda)' }}
+                        {%- else -%}Clique em "Verificar respostas"…
+                        {%- endif -%}</span>
+                    <button class="conf-abrir-conversa-btn" onclick="confAbrirConversa('{{ it.id }}', this)"
+                            title="Abrir a conversa completa do WhatsApp">📱 Abrir conversa</button>
+                </td>
+                <td class="conf-situacao-cel">
+                    <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+                        <span class="conf-badge {{ 'conf-erro' if it.prazo_expirado else 'conf-sem' }}"
+                              title="Enviado em {{ it.ts | data_hora_br if it.ts else '—' }}{% if it.prazo %} · prazo de {{ it.prazo }} dia{{ 's' if it.prazo != 1 else '' }}{% if it.prazo_expirado %} (expirado){% endif %}{% endif %}">
+                            {{ it.dias_decorridos if it.dias_decorridos is not none else '—' }} dia{{ 's' if it.dias_decorridos != 1 else '' }}
+                        </span>
+                        {% if it.prazo == 0 %}
+                        <span class="conf-badge conf-erro" title="Mensagem enviada com marcação de urgência (prazo 0 dias)">Urgente</span>
+                        {% endif %}
+                        <span class="conf-situacao-badge-cel">
+                            {%- if it.verif_erro -%}
+                            <span class="conf-badge conf-erro" title="{{ it.verif_erro }}">Erro</span>
+                            {%- elif verificado and it.verif_confirmou -%}
+                            <span class="conf-badge conf-ok" title="{{ ('Respondido em ' + it.verif_data_resposta) if it.verif_data_resposta else '' }}">Respondido</span>
+                            {%- elif verificado -%}
+                            <span class="conf-badge conf-sem" title="{{ 'Há resposta, mas sem texto legível para conferir.' if it.verif_tem_resposta else 'Ainda sem resposta.' }}">Não</span>
+                            {%- else -%}
+                            <span class="conf-badge conf-sem">não verificado</span>
+                            {%- endif -%}
+                        </span>
+                    </div>
+                </td>
+                <td class="conf-acao-cel">
+                    {% set motivo_desabilitado = 'Verifique as respostas primeiro' if not verificado else (it.verif_erro or (('Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.' if it.verif_tem_resposta else 'Ainda sem resposta do assistido — não é possível confirmar.') if it.verif_pronto_para_concluir else 'Trâmite não localizado na caixa de destino — confira manualmente.')) %}
+                    <button class="btn-accent conf-confirmar-btn" style="padding:5px 12px;font-size:12.5px;white-space:nowrap;" {{ '' if habilitado else 'disabled' }}
+                            onclick="confConfirmar('{{ it.id }}', this)"
+                            title="{{ 'Movimenta o PAJ e conclui a tramitação da caixa de aguardo.' if habilitado else motivo_desabilitado }}">Registrar resposta no PAJ</button>
+                    <div class="conf-lote-linha">
+                        <button class="btn-subtle conf-lote-btn" style="padding:4px 8px;font-size:11.5px;white-space:nowrap;" {{ '' if habilitado else 'disabled' }}
+                                title="{{ 'Adiciona à confirmação em bloco.' if habilitado else motivo_desabilitado }}"
+                                onclick="confToggleLote('{{ it.id }}', this)">Incluir em bloco</button>
+                        <button class="btn-subtle conf-remover-btn" style="padding:4px 8px;font-size:11.5px;color:#dc2626;"
+                                title="Tira da lista, sem mexer no SISDPU"
+                                onclick="confRemover('{{ it.id }}', this)">Remover</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+</div>
+
+<div class="mb-6" style="margin-top:34px;">
+    <h2 class="font-display" style="font-size:18px;margin:0 0 10px;display:flex;align-items:center;gap:8px;">
+        Confirmações registradas
+        <span class="pill-quad" id="conf-reg-count" style="font-size:13px;">{{ confirmadas|length }}</span>
+    </h2>
+    <div class="fluent-card" style="overflow-x:auto;">
+        <table class="fluent-table" id="conf-registradas-table">
+            <thead>
+                <tr>
+                    <th style="width:8rem;">PAJ</th>
+                    <th>Assistido</th>
+                    <th style="width:7rem;">Mov.</th>
+                    <th>Resposta do assistido</th>
+                    <th style="width:11rem;">Confirmado em</th>
+                </tr>
+            </thead>
+            <tbody id="conf-registradas-body">
+                {% if not confirmadas %}
+                <tr id="conf-reg-empty"><td colspan="5" class="text-tertiary" style="text-align:center;padding:18px;">Nenhuma confirmação registrada ainda.</td></tr>
+                {% endif %}
+                {% for it in confirmadas %}
+                <tr>
+                    <td>
+                        {% if it.url_detalhe %}
+                        <a href="{{ it.url_detalhe }}" target="_blank" rel="noopener" class="accent-link"
+                           title="Abrir o PAJ no SISDPU"
+                           style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</a>
+                        {% else %}
+                        <span style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</span>
+                        {% endif %}
+                    </td>
+                    <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
+                    <td class="text-secondary" style="font-size:12.5px;">{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
+                    <td class="conf-resposta">
+                        <span class="conf-resposta-texto">{{ it.confirmacao_resposta or "—" }}</span>
+                        <button class="conf-abrir-conversa-btn" onclick="confAbrirConversa('{{ it.id }}', this)"
+                                title="Abrir a conversa completa do WhatsApp">📱 Abrir conversa</button>
+                    </td>
+                    <td class="text-secondary" style="font-size:12px;">{{ it.confirmacao_em | data_hora_br if it.confirmacao_em else "—" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+{% include "_sse_log.html" %}
+
+<div id="conf-chat-modal" onclick="if(event.target===this)confFecharConversa()">
+  <div class="fluent-card conf-cel-dialog">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+        <h3 class="font-display" style="font-size:16px;margin:0;">Conversa — <span id="conf-cel-assistido"></span></h3>
+        <button class="btn-subtle" style="padding:4px 10px;" onclick="confFecharConversa()">Fechar</button>
+    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+        <span class="text-tertiary" style="font-size:11.5px;" id="conf-cel-atualizado"></span>
+        <button class="conf-abrir-conversa-btn" style="margin-top:0;" onclick="confAtualizarConversa(this)">↻ Atualizar agora</button>
+    </div>
+    <div class="conf-cel">
+      <div class="conf-cel-topo"><span>📱</span><span id="conf-cel-numero"></span></div>
+      <div class="conf-chat" id="conf-chat-body"></div>
+    </div>
+  </div>
+</div>
+
+<details class="conf-logs-details" style="margin-top:26px;">
+    <summary>Log dos últimos envios (histórico técnico)</summary>
+    {% include "_disparos.html" %}
+</details>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function _confBadge(td, cls, txt) { td.innerHTML = '<span class="conf-badge ' + cls + '">' + txt + '</span>'; }
+function _confEsc(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// `texto_resposta` chega como "HH:MM texto" por linha (ver whatsapp_client); só a
+// EXIBIÇÃO ganha o traço — o dado usado na movimentação do SISDPU fica sem traço.
+function _confFormatarResposta(texto) {
+    if (!texto) return texto;
+    return texto.split('\n').map(l => l.replace(/^(\d{2}:\d{2})\s+/, '$1 - ')).join('\n');
+}
+
+let confLote = {}; // historico_id -> {historico_id, texto_resposta, data_resposta}
+
+// Linhas de "Confirmações registradas" vindas prontas do servidor (carregamento da
+// página) também precisam do traço — só as adicionadas ao vivo (confMoverParaRegistradas)
+// já nascem formatadas. ⚠️ Só no .conf-resposta-texto (nunca no td inteiro — o td
+// também tem o botão "Abrir conversa", que um td.textContent=... apagaria).
+document.querySelectorAll('#conf-registradas-body tr:not(#conf-reg-empty) .conf-resposta-texto').forEach(span => {
+    span.textContent = _confFormatarResposta(span.textContent);
+});
+
+function _confPintarLinha(it) {
+    const tr = document.querySelector('.conf-row[data-id="' + it.historico_id + '"]');
+    if (!tr) return;
+    const respCel = tr.querySelector('.conf-resposta-cel');
+    const respTexto = respCel.querySelector('.conf-resposta-texto');
+    const sitCel = tr.querySelector('.conf-situacao-badge-cel');
+    const btn = tr.querySelector('.conf-confirmar-btn');
+    const loteBtn = tr.querySelector('.conf-lote-btn');
+    tr.dataset.textoResposta = it.texto_resposta || '';
+    tr.dataset.dataResposta = it.data_resposta || '';
+    if (it.erro) {
+        respTexto.textContent = it.erro;
+        respCel.classList.add('text-tertiary');
+        _confBadge(sitCel, 'conf-erro', 'Erro');
+        sitCel.title = it.erro;
+        btn.disabled = true; btn.title = it.erro;
+        loteBtn.disabled = true; loteBtn.title = it.erro;
+        return;
+    }
+    respCel.classList.remove('text-tertiary');
+    respTexto.textContent = it.tem_resposta ? _confFormatarResposta(it.texto_resposta || '') : '(sem resposta ainda)';
+    if (it.confirmou) {
+        _confBadge(sitCel, 'conf-ok', 'Respondido');
+        sitCel.title = it.data_resposta ? ('Respondido em ' + it.data_resposta) : '';
+    } else {
+        _confBadge(sitCel, 'conf-sem', 'Não');
+        sitCel.title = it.tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.';
+    }
+    if (!it.pronto_para_concluir) {
+        btn.disabled = true;
+        btn.title = 'Trâmite não localizado na caixa de destino — confira manualmente.';
+        loteBtn.disabled = true;
+        loteBtn.title = btn.title;
+    } else if (!it.confirmou) {
+        btn.disabled = true;
+        btn.title = it.tem_resposta
+            ? 'Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.'
+            : 'Ainda sem resposta do assistido — não é possível confirmar.';
+        loteBtn.disabled = true;
+        loteBtn.title = btn.title;
+    } else {
+        btn.disabled = false; btn.title = 'Movimenta o PAJ e conclui a tramitação da caixa de aguardo.';
+        btn.onclick = () => confConfirmar(it.historico_id, btn);
+        loteBtn.disabled = false; loteBtn.title = 'Adiciona à confirmação em bloco.';
+    }
+}
+
+async function confVerificar() {
+    const btn = document.getElementById('conf-verificar-btn');
+    const st = document.getElementById('conf-status');
+    btn.disabled = true; st.textContent = 'Verificando…';
+    const d = await window.enviarComPopup('/api/confirmacoes/verificar/stream', {}, '— verificando respostas no WhatsApp…');
+    btn.disabled = false; st.textContent = '';
+    const itens = (d && d.itens) || [];
+    itens.forEach(_confPintarLinha);
+    if (!itens.length) st.textContent = 'Nenhum item aguardando confirmação.';
+}
+
+function _confSemPendentesHtml() {
+    return '<div class="fluent-card text-tertiary" style="padding:24px;text-align:center;font-size:13.5px;">Nenhum envio por WhatsApp aguardando confirmação no momento.</div>';
+}
+
+function _confAjustaContadorPend(delta) {
+    const el = document.getElementById('conf-pend-count');
+    if (!el) return;
+    el.textContent = Math.max(0, (parseInt(el.textContent || '0', 10) || 0) + delta);
+}
+
+function _confRemoveLinhaPendente(tr) {
+    delete confLote[tr.dataset.id];
+    confAtualizaBarraLote();
+    tr.remove();
+    _confAjustaContadorPend(-1);
+    const tbody = document.querySelector('#conf-pendentes-table tbody');
+    if (!tbody || !tbody.querySelector('tr')) {
+        document.getElementById('conf-pendentes-wrap').innerHTML = _confSemPendentesHtml();
+    }
+}
+
+function confMoverParaRegistradas(tr, historicoId, info) {
+    const emptyRow = document.getElementById('conf-reg-empty');
+    if (emptyRow) emptyRow.remove();
+    const agora = new Date();
+    const quando = agora.toLocaleDateString('pt-BR') + ' ' +
+        agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const newTr = document.createElement('tr');
+    newTr.innerHTML = '<td>' + tr.cells[0].innerHTML + '</td>'
+        + '<td>' + tr.cells[1].innerHTML + '</td>'
+        + '<td class="text-secondary" style="font-size:12.5px;">' + tr.cells[3].innerHTML + '</td>'
+        + '<td class="conf-resposta">'
+          + '<span class="conf-resposta-texto">' + (_confEsc(_confFormatarResposta(info.texto_resposta)) || '—') + '</span> '
+          + '<button class="conf-abrir-conversa-btn" onclick="confAbrirConversa(\'' + historicoId + '\', this)" '
+          + 'title="Abrir a conversa completa do WhatsApp">📱 Abrir conversa</button></td>'
+        + '<td class="text-secondary" style="font-size:12px;">' + quando + '</td>';
+    document.getElementById('conf-registradas-body').prepend(newTr);
+    const regCount = document.getElementById('conf-reg-count');
+    regCount.textContent = (parseInt(regCount.textContent || '0', 10) || 0) + 1;
+    _confRemoveLinhaPendente(tr);
+}
+
+async function confConfirmar(historicoId, btn) {
+    if (!(await window.garantirSisdpu())) return;
+    if (!confirm('Confirmar o recebimento? Isso vai MOVIMENTAR o PAJ no SISDPU (fase "Juntada de '
+               + 'documento") e CONCLUIR a tramitação da caixa de aguardo. Esta ação é real e não '
+               + 'pode ser desfeita pelo painel.')) return;
+    const tr = btn.closest('tr');
+    const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Confirmando…';
+    const corpo = { texto_resposta: tr.dataset.textoResposta || '', data_resposta: tr.dataset.dataResposta || '' };
+    try {
+        const r = await fetch('/api/confirmacoes/' + encodeURIComponent(historicoId) + '/confirmar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo)
+        });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) {
+            confMoverParaRegistradas(tr, historicoId, corpo);
+        } else {
+            alert('Não foi possível confirmar: ' + (d.erro || 'erro'));
+            btn.disabled = false; btn.innerHTML = orig;
+        }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; btn.innerHTML = orig; }
+}
+
+let confConversaAtualId = '';
+
+// "2026-10-28T03:48:12" -> "28/10/2026 03:48"
+function _confDataHoraBr(iso) {
+    const m = (iso || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : '';
+}
+
+function _confRenderConversa(d) {
+    document.getElementById('conf-cel-assistido').textContent = d.assistido || '—';
+    document.getElementById('conf-cel-numero').textContent = d.numero || '';
+    const atEl = document.getElementById('conf-cel-atualizado');
+    const quando = _confDataHoraBr(d.cache_em);
+    atEl.textContent = quando ? ('Atualizado em ' + quando) : '';
+    const body = document.getElementById('conf-chat-body');
+    body.innerHTML = '';
+    const mensagens = d.mensagens || [];
+    if (!mensagens.length) {
+        body.innerHTML = '<p style="color:#667781;text-align:center;margin-top:40%;font-size:12px;">Nenhuma mensagem encontrada.</p>';
+    } else {
+        mensagens.forEach(m => {
+            const div = document.createElement('div');
+            div.className = 'conf-bolha ' + (m.nossa ? 'nossa' : 'dele');
+            const texto = document.createElement('span');
+            texto.textContent = m.texto || '';
+            div.appendChild(texto);
+            if (m.hora) {
+                const h = document.createElement('span');
+                h.className = 'h';
+                h.textContent = m.hora;
+                div.appendChild(h);
+            }
+            body.appendChild(div);
+        });
+    }
+    document.getElementById('conf-chat-modal').style.display = 'flex';
+    body.scrollTop = body.scrollHeight;
+}
+
+async function confAbrirConversa(historicoId, btn) {
+    confConversaAtualId = historicoId;
+    const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Carregando…';
+    try {
+        const r = await fetch('/api/confirmacoes/' + encodeURIComponent(historicoId) + '/conversa', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forcar: false })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { alert('Não foi possível abrir a conversa: ' + (d.erro || 'erro')); return; }
+        _confRenderConversa(d);
+    } catch (e) {
+        alert('Erro: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
+
+async function confAtualizarConversa(btn) {
+    if (!confConversaAtualId) return;
+    const orig = btn.textContent; btn.disabled = true; btn.textContent = 'Lendo o WhatsApp…';
+    try {
+        const r = await fetch('/api/confirmacoes/' + encodeURIComponent(confConversaAtualId) + '/conversa', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ forcar: true })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!d.ok) { alert('Não foi possível atualizar: ' + (d.erro || 'erro')); return; }
+        _confRenderConversa(d);
+        // Reverificação veio junto (item ainda pendente) — repinta a linha na tabela
+        // de pendentes (Situação/Resposta/botões), sem precisar de "Verificar respostas"
+        // em lote. Se a linha não existir mais ali (já confirmada/removida), é no-op.
+        if (d.verificacao) _confPintarLinha(d.verificacao);
+    } catch (e) {
+        alert('Erro: ' + e);
+    } finally {
+        btn.disabled = false; btn.textContent = orig;
+    }
+}
+
+function confFecharConversa() { document.getElementById('conf-chat-modal').style.display = 'none'; }
+
+async function confRemover(historicoId, btn) {
+    if (!confirm('Remover este PAJ da lista de pendentes de verificação? Isso NÃO faz nenhuma '
+               + 'ação no SISDPU — só para de monitorar por aqui.')) return;
+    btn.disabled = true;
+    try {
+        const r = await fetch('/api/confirmacoes/' + encodeURIComponent(historicoId) + '/remover', { method: 'POST' });
+        const d = await r.json().catch(() => ({}));
+        if (d.ok) {
+            _confRemoveLinhaPendente(btn.closest('tr'));
+        } else {
+            alert('Não foi possível remover: ' + (d.erro || 'erro'));
+            btn.disabled = false;
+        }
+    } catch (e) { alert('Erro: ' + e); btn.disabled = false; }
+}
+
+function confAtualizaBarraLote() {
+    const bar = document.getElementById('conf-lote-bar');
+    const n = Object.keys(confLote).length;
+    document.getElementById('conf-lote-count').textContent = n;
+    bar.style.display = n > 0 ? 'flex' : 'none';
+}
+
+function confToggleLote(historicoId, btn) {
+    const tr = btn.closest('tr');
+    if (confLote[historicoId]) {
+        delete confLote[historicoId];
+        btn.textContent = 'Incluir em bloco';
+        tr.classList.remove('conf-row-selecionada');
+    } else {
+        confLote[historicoId] = {
+            historico_id: historicoId,
+            texto_resposta: tr.dataset.textoResposta || '',
+            data_resposta: tr.dataset.dataResposta || '',
+        };
+        btn.textContent = 'Remover do bloco';
+        tr.classList.add('conf-row-selecionada');
+    }
+    confAtualizaBarraLote();
+}
+
+function confLimparLote() {
+    Object.keys(confLote).forEach(hid => {
+        const tr = document.querySelector('.conf-row[data-id="' + hid + '"]');
+        if (tr) {
+            tr.classList.remove('conf-row-selecionada');
+            const btn = tr.querySelector('.conf-lote-btn');
+            if (btn) btn.textContent = 'Incluir em bloco';
+        }
+    });
+    confLote = {};
+    confAtualizaBarraLote();
+}
+
+async function confExecutarLote() {
+    const itens = Object.values(confLote);
+    if (!itens.length) return;
+    if (!(await window.garantirSisdpu())) return;
+    if (!confirm('Confirmar o recebimento de ' + itens.length + ' PAJ(s) em bloco? Cada um vai MOVIMENTAR '
+               + 'o PAJ no SISDPU e CONCLUIR a tramitação da caixa de aguardo. Esta ação é real e não pode '
+               + 'ser desfeita pelo painel.')) return;
+    const d = await window.enviarComPopup('/api/confirmacoes/confirmar-lote/stream', { itens }, '— confirmando em bloco…');
+    const resultado = (d && d.itens) || [];
+    resultado.forEach(r => {
+        const tr = document.querySelector('.conf-row[data-id="' + r.historico_id + '"]');
+        if (!tr) return;
+        const info = confLote[r.historico_id] || {};
+        if (r.ok) {
+            confMoverParaRegistradas(tr, r.historico_id, info);
+        } else {
+            tr.classList.remove('conf-row-selecionada');
+            const btn = tr.querySelector('.conf-lote-btn');
+            if (btn) btn.textContent = 'Incluir em bloco';
+        }
+    });
+    confLote = {};
+    confAtualizaBarraLote();
+}
+</script>
+{% endblock %}

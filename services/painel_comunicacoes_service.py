@@ -2440,10 +2440,13 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     """Tramita o PAJ para `tramitar_grupo`, referenciando a movimentação `mov_seq` e
     preenchendo o prazo de conclusão (deriva de `prazo`). Registra o passo em `log` e,
     se houver `emit`, transmite ao popup em tempo real.
-    Retorna dict com tram_status/tram_caixa/tram_detalhe/tram_url/tram_descricao.
+    Retorna dict com tram_status/tram_caixa/tram_detalhe/tram_url/tram_descricao/
+    tram_id_tramite (id do trâmite recém-criado na caixa destino — capturado aqui,
+    com 1 leitura leve da caixa, única vez; "" se não deu pra capturar, nesse caso
+    quem for localizar depois cai de volta no batimento por PAJ).
     Usado tanto pela movimentação manual (WhatsApp) quanto pela auto-movimentação (App)."""
     res = {"tram_caixa": "", "tram_status": "pendente", "tram_detalhe": "",
-           "tram_url": "", "tram_descricao": ""}
+           "tram_url": "", "tram_descricao": "", "tram_id_tramite": ""}
     tram_desc = _descricao_tramitacao(mov_seq)
     res["tram_descricao"] = tram_desc
     prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(prazo)
@@ -2463,6 +2466,16 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
         _prazo_txt = "sem prazo" if prazo_dias is None else f"prazo {prazo_dias}d"
         _passo(log, emit, rotulo, True,
                f'realizada para a caixa "{tramitar_grupo}" · {_prazo_txt}')
+        # Captura o id_tramite EXATO do trâmite recém-criado, agora (leitura leve, 1x) —
+        # evita, mais tarde, ter que "adivinhar" por PAJ se houver 2 trâmites do mesmo
+        # PAJ na mesma caixa (ex.: reenvio antes da confirmação do primeiro).
+        with contextlib.suppress(Exception):
+            info_novo = await sisdpu_client.listar_caixa_grupo(tramitar_grupo, enriquecer=False)
+            paj_norm_alvo = normalizar_paj(paj)
+            achado_novo = next((it for it in (info_novo.get("itens") or [])
+                                 if normalizar_paj(it.get("paj", "")) == paj_norm_alvo), None)
+            if achado_novo and achado_novo.get("id_tramite"):
+                res["tram_id_tramite"] = achado_novo["id_tramite"]
     else:
         _passo(log, emit, rotulo, False,
                f'falhou para a caixa "{tramitar_grupo}": {tram.get("detalhe", "")}')
@@ -2603,7 +2616,7 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
     from ingestao.sisdpu_client import SISDPU_URL
     res = {"mov_seq": None, "mov_status": "falha", "mov_detalhe": "", "mov_url": "",
            "tram_caixa": "", "tram_status": ("nao_solicitada" if not tramitar_grupo else "pendente"),
-           "tram_detalhe": "", "tram_url": "", "tram_descricao": "",
+           "tram_detalhe": "", "tram_url": "", "tram_descricao": "", "tram_id_tramite": "",
            "concluido_status": "nao_realizada", "concluido_detalhe": ""}
     id_proc = t.get("id") or ""
     paj = t.get("paj", "")
@@ -2659,7 +2672,8 @@ async def _movimentar_e_tramitar(t: dict, meio_label: str, mensagem: str,
         tramr = await _tramitar_referenciando_mov(
             id_proc, paj, tramitar_grupo, res["mov_seq"], prazo, log, emit=emit)
         res.update({k: tramr[k] for k in
-                    ("tram_caixa", "tram_status", "tram_detalhe", "tram_url", "tram_descricao")})
+                    ("tram_caixa", "tram_status", "tram_detalhe", "tram_url", "tram_descricao",
+                     "tram_id_tramite")})
         pode_concluir = (tramr["tram_status"] == "tramitado")
     else:
         _passo(log, emit, "Tramitação do PAJ", None, "não solicitada")
@@ -3104,6 +3118,477 @@ async def concluir_paj_sem_contato(slug: str, paj_norm: str, id_tramite: str,
     _salvar_sessao_log("sem_contato", log, False)
     return {"ok": True, "concluido_status": conc_res["concluido_status"],
             "tram_status": tram_res["tram_status"]}
+
+
+# ==================== CONFIRMAÇÕES DE LEITURA (WhatsApp) ====================
+# Pedido da equipe (2026-10-28): mensagens por WhatsApp pedem "responda OK" para
+# confirmar o recebimento; o PAJ é tramitado para uma caixa de aguardo (ex.: "01 -
+# PREV_AGENDA/AGUARDAR"). Até aqui, a checagem das respostas e a baixa no SISDPU eram
+# 100% manuais, todo dia. Esta central automatiza a LEITURA (WhatsApp) e deixa a
+# DECISÃO final com o usuário (1 clique por item) — nunca movimenta/conclui sozinha.
+def _persistir_verificacao(historico_id: str, item: dict) -> None:
+    """Grava o resultado da última verificação (Situação/Resposta) no próprio registro
+    do histórico — assim a central mostra o último estado conhecido mesmo depois de
+    sair e voltar à página, sem precisar rodar "Verificar respostas" de novo (pedido
+    do usuário, 2026-10-28). Sobrescrito no próximo "Verificar respostas"/"Atualizar
+    agora"; não é persistência de uma ação real, só de leitura."""
+    from services import historico_service
+    historico_service.atualizar(historico_id, {
+        "verif_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "verif_pronto_para_concluir": bool(item.get("pronto_para_concluir")),
+        "verif_tem_resposta": bool(item.get("tem_resposta")),
+        "verif_texto_resposta": item.get("texto_resposta", ""),
+        "verif_data_resposta": item.get("data_resposta", ""),
+        "verif_confirmou": bool(item.get("confirmou")),
+        "verif_erro": item.get("erro", ""),
+    })
+
+
+def _dias_desde(ts: str) -> int | None:
+    """Dias corridos entre `ts` (ISO, ex.: registro do envio) e hoje. None se inválido."""
+    if not ts:
+        return None
+    try:
+        dt = _dt.datetime.fromisoformat(str(ts)[:19])
+    except ValueError:
+        return None
+    return (_dt.datetime.now().date() - dt.date()).days
+
+
+def listar_aguardando_confirmacao() -> list[dict]:
+    """Registros do Histórico com WhatsApp enviado e TRAMITADO para uma caixa de aguardo
+    — candidatos à confirmação de recebimento. ⚠️ `concluido_status` do registro NÃO serve
+    de filtro aqui: ele descreve a conclusão do TRÂMITE ORIGINÁRIO (que acontece sempre,
+    automaticamente, logo após qualquer envio bem-sucedido) — é um passo DIFERENTE da
+    tramitação criada na caixa de aguardo, cujo estado não é rastreado localmente (só
+    existe de fato na caixa de grupo do SISDPU; `verificar_confirmacoes_stream` confere
+    ao vivo). Aqui só filtramos pelo campo próprio `confirmacao_status` (marcado por
+    `confirmar_recebimento` quando o usuário já confirmou por esta central, ou por
+    `remover_pendencia_confirmacao` quando o usuário tirou o item da lista sem confirmar)."""
+    from services import historico_service
+    out = []
+    for r in historico_service.listar():
+        meios = r.get("meios") or ([r["meio"]] if r.get("meio") else [])
+        if "whatsapp" not in meios:
+            continue
+        if r.get("tram_status") != "tramitado" or not r.get("tram_caixa"):
+            continue
+        if r.get("confirmacao_status") in ("confirmado", "removido"):
+            continue
+        # Selo "N dias" na Situação: antiguidade do envio (ts) e se o prazo (dias)
+        # já decorreu — calculado a cada leitura, não é persistido no registro.
+        dias = _dias_desde(r.get("ts", ""))
+        try:
+            prazo_dias = int(r.get("prazo") or 0)
+        except (TypeError, ValueError):
+            prazo_dias = 0
+        r["dias_decorridos"] = dias
+        r["prazo_expirado"] = bool(prazo_dias) and dias is not None and dias > prazo_dias
+        out.append(r)
+    return out
+
+
+def listar_confirmadas(limite: int = 50) -> list[dict]:
+    """Registros já CONFIRMADOS por esta central (Confirmar recebimento, individual ou
+    em bloco) — mais recentes primeiro. Mostrados na seção "Confirmações registradas"."""
+    from services import historico_service
+    out = [r for r in historico_service.listar()
+           if r.get("confirmacao_status") == "confirmado" and "whatsapp" in (r.get("meios") or [])]
+    out.sort(key=lambda r: r.get("confirmacao_em") or "", reverse=True)
+    return out[:limite]
+
+
+def contar_confirmacoes() -> dict:
+    """Contador para o selo do menu lateral."""
+    return {"total": len(listar_aguardando_confirmacao())}
+
+
+async def verificar_confirmacoes_stream():
+    """Varre as pendências de confirmação (ver `listar_aguardando_confirmacao`): resolve
+    o id_tramite ATUAL de cada uma na caixa de grupo para onde foi tramitada (pode ter
+    mudado desde o envio) e lê o WhatsApp de cada número contatado em busca de uma
+    resposta — SOMENTE LEITURA, nenhuma ação é tomada aqui. GERA eventos SSE (log ao
+    vivo) e, por fim, {"done": True, "resultado": {"itens": [...]}} para a central
+    montar a lista com o botão "Confirmar recebimento" por item."""
+    from ingestao import sisdpu_client, whatsapp_client
+    from services import historico_service
+    pendentes = listar_aguardando_confirmacao()
+    if not pendentes:
+        yield {"level": "info", "msg": "Nenhum envio por WhatsApp aguardando confirmação no momento."}
+        yield {"done": True, "resultado": {"itens": []}}
+        return
+    yield {"level": "info", "msg": f"{len(pendentes)} envio(s) aguardando confirmação. Localizando as tramitações…"}
+    # Resolve o id_tramite ATUAL por caixa de destino (agrupa p/ não reler a mesma
+    # caixa de grupo várias vezes — ela pode ter vários PAJs pendentes).
+    por_caixa: dict[str, list[dict]] = {}
+    for r in pendentes:
+        por_caixa.setdefault(r["tram_caixa"], []).append(r)
+    mapa_id_tramite: dict[str, str] = {}  # historico_id -> id_tramite atual na caixa (ou "")
+    # ⚠️ Só marcamos "não está mais na caixa" (autolimpeza) quando a caixa FOI LIDA COM
+    # SUCESSO (sem exceção e "encontrado"=True) — senão qualquer falha de leitura (ex.:
+    # cofre do SISDPU trancado) faria TODO MUNDO daquela caixa parecer "já concluído" e
+    # sumir indevidamente da lista. Bug real encontrado e corrigido em 2026-10-28.
+    caixas_ok: set[str] = set()
+    for caixa, regs in por_caixa.items():
+        yield {"level": "muted", "msg": f"     lendo a caixa de grupo \"{caixa}\"…"}
+        try:
+            info = await sisdpu_client.listar_caixa_grupo(caixa, enriquecer=False)
+        except Exception as e:  # noqa: BLE001
+            yield {"level": "erro", "msg": f"     falha ao ler \"{caixa}\": {e}"}
+            info = {}
+        if info.get("encontrado"):
+            caixas_ok.add(caixa)
+        else:
+            yield {"level": "aviso", "msg": f"     caixa \"{caixa}\" não encontrada no SISDPU no momento "
+                                            "— pendências dela não serão verificadas agora."}
+        por_paj: dict[str, dict] = {}
+        por_idt: dict[str, dict] = {}
+        for it in (info.get("itens") or []):
+            por_paj.setdefault(normalizar_paj(it.get("paj", "")), it)
+            if it.get("id_tramite"):
+                por_idt.setdefault(it["id_tramite"], it)
+        for r in regs:
+            # Prefere o id_tramite exato capturado no envio (sem ambiguidade); cai para
+            # o batimento por PAJ só em registros antigos que não têm esse campo, ou se
+            # o id capturado não aparecer mais na caixa (ex.: nome de campo mudou).
+            idt_conhecido = r.get("tram_id_tramite") or ""
+            achado = por_idt.get(idt_conhecido) if idt_conhecido else None
+            if achado is None:
+                achado = por_paj.get(r.get("paj_norm", ""))
+            mapa_id_tramite[r["id"]] = (achado or {}).get("id_tramite", "")
+    # Lê o WhatsApp de cada pendência (uma conversa por vez — perfil é de 1 processo só).
+    itens: list[dict] = []
+    for r in pendentes:
+        numeros = r.get("numeros") or []
+        numero = numeros[0] if numeros else ""
+        id_tram = mapa_id_tramite.get(r["id"], "")
+        caixa_lida_ok = r["tram_caixa"] in caixas_ok
+        item = {"historico_id": r["id"], "paj": r.get("paj", ""), "paj_norm": r.get("paj_norm", ""),
+                "assistido": r.get("assistido", ""), "numero": numero, "mov_seq": r.get("mov_seq"),
+                "tram_caixa": r.get("tram_caixa", ""), "pronto_para_concluir": bool(id_tram),
+                "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
+                "confirmou": False, "erro": ""}
+        if not id_tram and not caixa_lida_ok:
+            # A leitura da CAIXA falhou (ex.: cofre trancado) — não sabemos o estado real.
+            # NÃO autolimpa (não mexe no registro); o usuário tenta de novo depois.
+            item["erro"] = f'Não foi possível verificar a caixa "{r.get("tram_caixa", "")}" agora — tente novamente.'
+            yield {"level": "erro", "msg": f"     PAJ {item['paj']}: {item['erro']}"}
+            _persistir_verificacao(r["id"], item)
+            itens.append(item)
+            continue
+        if not id_tram:
+            # A caixa FOI lida com sucesso e o PAJ genuinamente não está mais nela: já foi
+            # concluído manualmente (fora desta central). Autolimpa (marca confirmado)
+            # para não ficar reaparecendo nas próximas verificações — não é um erro.
+            item["erro"] = "Já não está na caixa de aguardo — provavelmente já foi concluído manualmente."
+            historico_service.atualizar(r["id"], {
+                "confirmacao_status": "confirmado",
+                "confirmacao_detalhe": "autolimpeza: trâmite não encontrado na caixa de aguardo (caixa lida com sucesso)"})
+            yield {"level": "muted", "msg": f"     PAJ {item['paj']}: {item['erro']}"}
+            _persistir_verificacao(r["id"], item)
+            itens.append(item)
+            continue
+        if not numero:
+            item["erro"] = "Sem número de WhatsApp registrado neste envio."
+            yield {"level": "aviso", "msg": f"     PAJ {item['paj']}: {item['erro']}"}
+            _persistir_verificacao(r["id"], item)
+            itens.append(item)
+            continue
+        yield {"level": "muted", "msg": f"     PAJ {item['paj']} — lendo o WhatsApp ({numero})…"}
+        try:
+            leitura = await whatsapp_client.ler_respostas_apos_envio(numero)
+        except Exception as e:  # noqa: BLE001
+            leitura = {"ok": False, "detalhe": f"exceção: {e}"}
+        if not leitura.get("ok"):
+            item["erro"] = leitura.get("detalhe") or "falha ao ler o WhatsApp"
+            yield {"level": "erro", "msg": f"     PAJ {item['paj']}: {item['erro']}"}
+        else:
+            item.update(tem_resposta=leitura.get("tem_resposta", False),
+                       texto_resposta=leitura.get("texto_resposta", ""),
+                       data_resposta=leitura.get("data_resposta", ""),
+                       confirmou=leitura.get("confirmou", False))
+            # Cacheia a conversa INTEIRA lida agora (mesma sessão do WhatsApp) — assim
+            # "Abrir conversa" mostra na hora, sem precisar abrir outra sessão sempre
+            # que o usuário só quer CONFERIR (pedido do usuário, 2026-10-28).
+            historico_service.atualizar(r["id"], {
+                "conversa_cache": leitura.get("mensagens") or [],
+                "conversa_cache_em": _dt.datetime.now().isoformat(timespec="seconds"),
+            })
+            if leitura.get("confirmou"):
+                yield {"level": "ok", "msg": f"     PAJ {item['paj']}: resposta com possível confirmação."}
+            elif leitura.get("tem_resposta"):
+                yield {"level": "muted", "msg": f"     PAJ {item['paj']}: há resposta, mas sem confirmação clara — confira."}
+            else:
+                yield {"level": "muted", "msg": f"     PAJ {item['paj']}: ainda sem resposta."}
+        _persistir_verificacao(r["id"], item)
+        itens.append(item)
+    n_conf = sum(1 for it in itens if it.get("confirmou"))
+    yield {"level": "ok", "msg": f"Verificação concluída: {len(itens)} item(ns) · {n_conf} com possível confirmação."}
+    yield {"done": True, "resultado": {"itens": itens}}
+
+
+async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
+                                data_resposta: str = "") -> dict:
+    """Confirma o recebimento de UM item da central (ação REAL, sempre disparada por um
+    clique do usuário — nunca automática): movimenta o PAJ na fase 'Juntada de
+    documento' citando a mov do envio E a resposta do assistido (quando informada pelo
+    chamador — vem da última "Verificar respostas"), e dá baixa (admite + conclui) na
+    tramitação parada na caixa de aguardo. Reaproveita o mesmo pipeline mov+conclui já
+    validado em `_concluir_originarios`.
+    `data_resposta` no formato 'DD/MM/AAAA HH:MM' (só a hora entra na movimentação).
+    Se houver resposta, gera um PDF da conversa (mesmo formato do comprovante de envio)
+    e anexa à movimentação — pedido do usuário, 2026-10-28."""
+    from ingestao import sisdpu_client, whatsapp_client
+    from services import historico_service
+    reg = historico_service.obter(historico_id)
+    if not reg:
+        return {"ok": False, "erro": "Registro do histórico não encontrado."}
+    if reg.get("confirmacao_status") == "confirmado":
+        # ⚠️ Usa confirmacao_status (desta central), NÃO concluido_status: este último
+        # descreve a conclusão do trâmite ORIGINÁRIO, que já acontece automaticamente em
+        # todo envio por WhatsApp bem-sucedido — quase sempre "concluido" e não tem
+        # relação com a tramitação da caixa de aguardo que esta função trata.
+        return {"ok": False, "erro": "Este item já está concluído."}
+    id_processo = reg.get("id_processo", "")
+    paj_disp = reg.get("paj", "")
+    tram_caixa = reg.get("tram_caixa", "")
+    if not id_processo or not tram_caixa:
+        return {"ok": False, "erro": "Registro sem id de processo ou caixa de destino — não é possível agir."}
+    # Resolve o id_tramite ATUAL na caixa de aguardo (pode ter mudado desde a verificação).
+    try:
+        info = await sisdpu_client.listar_caixa_grupo(tram_caixa, enriquecer=False)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": f"Falha ao ler a caixa \"{tram_caixa}\": {e}"}
+    itens_caixa = info.get("itens") or []
+    idt_conhecido = reg.get("tram_id_tramite") or ""
+    achado = next((it for it in itens_caixa if it.get("id_tramite") == idt_conhecido), None) if idt_conhecido else None
+    if achado is None:
+        pn = reg.get("paj_norm", "")
+        achado = next((it for it in itens_caixa if normalizar_paj(it.get("paj", "")) == pn), None)
+    if not achado or not achado.get("id_tramite"):
+        return {"ok": False, "erro": f'Trâmite não localizado na caixa "{tram_caixa}" — pode já ter '
+                                     "sido concluído manualmente, ou a caixa mudou de nome."}
+    id_tramite = achado["id_tramite"]
+    log: list = list(reg.get("log") or [])
+    mov_seq = reg.get("mov_seq")
+    base = (f"Destinatário da mensagem da mov {mov_seq} deu ciente do recebimento"
+            if mov_seq else "Destinatário deu ciente do recebimento da mensagem")
+    # `texto_resposta` já vem com a hora ANTES de cada linha (ver whatsapp_client.
+    # ler_respostas_apos_envio) — não prefixa de novo aqui.
+    texto_resposta = (texto_resposta or "").strip()
+    desc = f"{base}:\n{texto_resposta}" if texto_resposta else f"{base}."
+    # Print da resposta em PDF (mesmo formato do comprovante de envio) — anexado à
+    # movimentação, igual já fazemos com o comprovante quando a mensagem é enviada.
+    # Best-effort: se não conseguir gerar, a movimentação segue sem o anexo.
+    anexos_mov: list[dict] = []
+    numero_resp = (reg.get("numeros") or [""])[0]
+    if texto_resposta and numero_resp:
+        try:
+            pdf_resposta = await whatsapp_client.capturar_pdf_resposta(
+                numero_resp, str(COMPROVANTES_WA_DIR), paj_ref=reg.get("paj_norm", ""))
+        except Exception:  # noqa: BLE001
+            pdf_resposta = None
+        if pdf_resposta:
+            anexos_mov.append({"nome": Path(pdf_resposta).name, "caminho": pdf_resposta, "tipo": "pdf"})
+            _log_passo(log, "Print da resposta (PDF)", True, Path(pdf_resposta).name)
+        else:
+            _log_passo(log, "Print da resposta (PDF)", False,
+                      "não foi possível gerar — movimentação segue sem o anexo")
+    try:
+        mov = await sisdpu_client.movimentar_paj(
+            [{"id": id_processo, "numero": paj_disp}], descricao=desc, fase="Juntada de documento",
+            anexos=anexos_mov or None)
+    except Exception as e:  # noqa: BLE001
+        mov = {"ok": False, "detalhe": f"exceção: {e}"}
+    mov_ok = bool(mov.get("ok"))
+    _log_passo(log, "Movimentação (ciente do recebimento)", mov_ok,
+               (f'"mov. {mov.get("mov_seq")}"' if mov_ok else mov.get("detalhe", "")))
+    if not mov_ok:
+        historico_service.atualizar(historico_id, {"log": log})
+        return {"ok": False, "erro": "Falha ao movimentar: " + mov.get("detalhe", "")}
+    # ⚠️ NÃO mexe em concluido_status/concluido_detalhe: esses campos descrevem a
+    # conclusão do TRÂMITE ORIGINÁRIO (já aconteceu no envio) — um passo DIFERENTE
+    # desta baixa da tramitação da caixa de aguardo, que usa campos próprios.
+    conc_res = await _concluir_originarios([id_tramite], log)
+    campos = {"log": log, "confirmacao_mov_seq": mov.get("mov_seq"),
+              "confirmacao_em": _dt.datetime.now().isoformat(timespec="seconds"),
+              "confirmacao_usuario": _usuario_sisdpu(),
+              "confirmacao_resposta": texto_resposta, "confirmacao_resposta_data": data_resposta}
+    if conc_res.get("concluido_status") in ("concluido", "ja_concluido"):
+        campos["confirmacao_status"] = "confirmado"
+        campos["confirmacao_detalhe"] = conc_res.get("concluido_detalhe", "")
+        historico_service.atualizar(historico_id, campos)
+        return {"ok": True}
+    campos["confirmacao_detalhe"] = conc_res.get("concluido_detalhe", "")
+    historico_service.atualizar(historico_id, campos)
+    return {"ok": False, "erro": "Movimentação feita, mas falhou a conclusão: "
+                                 + conc_res.get("concluido_detalhe", "")}
+
+
+def remover_pendencia_confirmacao(historico_id: str) -> dict:
+    """Tira um item da lista de pendentes de verificação SEM confirmar nada no SISDPU —
+    ação local/instantânea (ex.: PAJ que o usuário já tratou por fora, ou que não se
+    aplica mais). Usa o mesmo campo `confirmacao_status`, com valor próprio "removido"
+    (nunca aparece em `listar_confirmadas`, que exige "confirmado")."""
+    from services import historico_service
+    reg = historico_service.obter(historico_id)
+    if not reg:
+        return {"ok": False, "erro": "Registro do histórico não encontrado."}
+    if reg.get("confirmacao_status") in ("confirmado", "removido"):
+        return {"ok": False, "erro": "Este item já não está mais pendente."}
+    historico_service.atualizar(historico_id, {
+        "confirmacao_status": "removido",
+        "confirmacao_detalhe": "Removido manualmente da lista de pendentes (sem ação no SISDPU).",
+        "confirmacao_em": _dt.datetime.now().isoformat(timespec="seconds"),
+        "confirmacao_usuario": _usuario_sisdpu(),
+    })
+    return {"ok": True}
+
+
+async def confirmar_recebimento_lote_stream(itens: list[dict]):
+    """Confirma em bloco (1 clique) vários itens já verificados: cada `item` é
+    {historico_id, texto_resposta, data_resposta} — a mesma informação que a tabela já
+    mostra para cada um. Chama `confirmar_recebimento` em sequência, um de cada vez
+    (cada confirmação é uma ação REAL própria no SISDPU), emitindo progresso via SSE."""
+    from services import historico_service
+    itens = [it for it in (itens or []) if it.get("historico_id")]
+    if not itens:
+        yield {"level": "aviso", "msg": "Nenhum item selecionado para confirmar em bloco."}
+        yield {"done": True, "resultado": {"itens": []}}
+        return
+    yield {"level": "info", "msg": f"Confirmando {len(itens)} item(ns) em bloco…"}
+    resultados: list[dict] = []
+    for it in itens:
+        hid = it["historico_id"]
+        reg = historico_service.obter(hid) or {}
+        paj = reg.get("paj", hid)
+        yield {"level": "muted", "msg": f"     PAJ {paj}: confirmando…"}
+        try:
+            r = await confirmar_recebimento(hid, it.get("texto_resposta", ""), it.get("data_resposta", ""))
+        except Exception as e:  # noqa: BLE001
+            r = {"ok": False, "erro": f"exceção: {e}"}
+        if r.get("ok"):
+            yield {"level": "ok", "msg": f"     PAJ {paj}: confirmado."}
+        else:
+            yield {"level": "erro", "msg": f"     PAJ {paj}: {r.get('erro', 'falha')}"}
+        resultados.append({"historico_id": hid, "paj": paj, "ok": bool(r.get("ok")), "erro": r.get("erro", "")})
+    n_ok = sum(1 for r in resultados if r["ok"])
+    yield {"level": "ok", "msg": f"Confirmação em bloco concluída: {n_ok}/{len(resultados)} com êxito."}
+    yield {"done": True, "resultado": {"itens": resultados}}
+
+
+async def verificar_uma_pendencia(historico_id: str) -> dict:
+    """Reverifica UM item específico — mesma lógica/campos do item que
+    `verificar_confirmacoes_stream` monta em lote (resolve o id_tramite atual na caixa
+    de aguardo + lê o WhatsApp), mas para um só. Usado pelo "Atualizar agora" do
+    celular simulado: assim o usuário não precisa rodar "Verificar respostas" em lote
+    só para atualizar o PAJ que já está olhando. Retorna {ok, item, mensagens}."""
+    from ingestao import sisdpu_client, whatsapp_client
+    from services import historico_service
+    reg = historico_service.obter(historico_id)
+    if not reg:
+        return {"ok": False, "erro": "Registro do histórico não encontrado."}
+    numero = (reg.get("numeros") or [""])[0]
+    tram_caixa = reg.get("tram_caixa", "")
+    item = {"historico_id": historico_id, "paj": reg.get("paj", ""), "paj_norm": reg.get("paj_norm", ""),
+            "assistido": reg.get("assistido", ""), "numero": numero, "mov_seq": reg.get("mov_seq"),
+            "tram_caixa": tram_caixa, "pronto_para_concluir": False,
+            "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
+            "confirmou": False, "erro": ""}
+    if not tram_caixa:
+        item["erro"] = "Registro sem caixa de destino."
+        _persistir_verificacao(historico_id, item)
+        return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
+    try:
+        info = await sisdpu_client.listar_caixa_grupo(tram_caixa, enriquecer=False)
+    except Exception:  # noqa: BLE001
+        info = {}
+    if not info.get("encontrado"):
+        item["erro"] = f'Não foi possível verificar a caixa "{tram_caixa}" agora — tente novamente.'
+        _persistir_verificacao(historico_id, item)
+        return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
+    itens_caixa = info.get("itens") or []
+    idt_conhecido = reg.get("tram_id_tramite") or ""
+    achado = next((it for it in itens_caixa if it.get("id_tramite") == idt_conhecido), None) if idt_conhecido else None
+    if achado is None:
+        achado = next((it for it in itens_caixa if normalizar_paj(it.get("paj", "")) == reg.get("paj_norm", "")), None)
+    id_tram = (achado or {}).get("id_tramite", "")
+    item["pronto_para_concluir"] = bool(id_tram)
+    if not id_tram:
+        item["erro"] = "Já não está na caixa de aguardo — provavelmente já foi concluído manualmente."
+        historico_service.atualizar(historico_id, {
+            "confirmacao_status": "confirmado",
+            "confirmacao_detalhe": "autolimpeza: trâmite não encontrado na caixa de aguardo (caixa lida com sucesso)"})
+        _persistir_verificacao(historico_id, item)
+        return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
+    if not numero:
+        item["erro"] = "Sem número de WhatsApp registrado neste envio."
+        _persistir_verificacao(historico_id, item)
+        return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
+    try:
+        leitura = await whatsapp_client.ler_respostas_apos_envio(numero)
+    except Exception as e:  # noqa: BLE001
+        leitura = {"ok": False, "detalhe": f"exceção: {e}"}
+    if not leitura.get("ok"):
+        item["erro"] = leitura.get("detalhe") or "falha ao ler o WhatsApp"
+        _persistir_verificacao(historico_id, item)
+        return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
+    item.update(tem_resposta=leitura.get("tem_resposta", False),
+               texto_resposta=leitura.get("texto_resposta", ""),
+               data_resposta=leitura.get("data_resposta", ""),
+               confirmou=leitura.get("confirmou", False))
+    mensagens = leitura.get("mensagens") or []
+    historico_service.atualizar(historico_id, {
+        "conversa_cache": mensagens,
+        "conversa_cache_em": _dt.datetime.now().isoformat(timespec="seconds"),
+    })
+    _persistir_verificacao(historico_id, item)
+    return {"ok": True, "item": item, "mensagens": mensagens}
+
+
+async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> dict:
+    """Mostra a conversa do WhatsApp do envio `historico_id` para o botão "Abrir
+    conversa" (celular simulado). SOMENTE LEITURA (não movimenta/conclui nada).
+
+    Por padrão usa o CACHE gravado a cada "Verificar respostas" (`conversa_cache` no
+    histórico) — abre na hora, sem Playwright. `forcar=True` (botão "Atualizar agora"
+    no modal): se o item ainda está pendente de confirmação, roda a reverificação
+    completa (`verificar_uma_pendencia`) — assim a Situação/botões da linha na tabela
+    de pendentes já saem atualizados, sem precisar de "Verificar respostas" em lote.
+    Para um item já concluído/removido, só relê a conversa (não há mais o que verificar)."""
+    from services import historico_service
+    reg = historico_service.obter(historico_id)
+    if not reg:
+        return {"ok": False, "erro": "Registro do histórico não encontrado."}
+    numeros = reg.get("numeros") or []
+    numero = numeros[0] if numeros else ""
+    if not forcar and reg.get("conversa_cache") is not None:
+        return {"ok": True, "numero": numero, "assistido": reg.get("assistido", ""),
+                "mensagens": reg.get("conversa_cache") or [],
+                "cache": True, "cache_em": reg.get("conversa_cache_em", "")}
+    ainda_pendente = reg.get("confirmacao_status") not in ("confirmado", "removido")
+    if forcar and ainda_pendente:
+        v = await verificar_uma_pendencia(historico_id)
+        if not v.get("ok"):
+            return {"ok": False, "erro": v.get("erro") or "falha ao reverificar"}
+        agora = _dt.datetime.now().isoformat(timespec="seconds")
+        return {"ok": True, "numero": numero, "assistido": reg.get("assistido", ""),
+                "mensagens": v.get("mensagens") or [], "cache": False, "cache_em": agora,
+                "verificacao": v.get("item")}
+    if not numero:
+        return {"ok": False, "erro": "Sem número de WhatsApp registrado neste envio."}
+    from ingestao import whatsapp_client
+    try:
+        r = await whatsapp_client.obter_conversa(numero)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "erro": f"exceção: {e}"}
+    if not r.get("ok"):
+        return {"ok": False, "erro": r.get("detalhe") or "falha ao ler o WhatsApp"}
+    mensagens = r.get("mensagens") or []
+    agora = _dt.datetime.now().isoformat(timespec="seconds")
+    historico_service.atualizar(historico_id, {"conversa_cache": mensagens, "conversa_cache_em": agora})
+    return {"ok": True, "numero": numero, "assistido": reg.get("assistido", ""),
+            "mensagens": mensagens, "cache": False, "cache_em": agora}
 
 
 # ==================== CORRESPONDÊNCIAS ====================
@@ -4265,6 +4750,10 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "tram_caixa": mov_tram["tram_caixa"], "tram_status": mov_tram["tram_status"],
             "tram_detalhe": mov_tram["tram_detalhe"], "tram_url": mov_tram.get("tram_url", ""),
             "tram_descricao": mov_tram.get("tram_descricao", ""),  # tooltip da coluna "Tramitado"
+            # id do trâmite criado na caixa destino, capturado no próprio envio — usado
+            # pela Central de Confirmações de leitura p/ localizá-lo sem ambiguidade de
+            # PAJ (ex.: reenvio antes da confirmação do 1º). "" em registros antigos.
+            "tram_id_tramite": mov_tram.get("tram_id_tramite", ""),
             # conclusão (admissão + baixa) do(s) trâmite(s) ORIGINÁRIO(S)
             "concluido_status": mov_tram.get("concluido_status", "nao_realizada"),
             "concluido_detalhe": mov_tram.get("concluido_detalhe", ""),

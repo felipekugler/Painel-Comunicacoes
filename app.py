@@ -24,6 +24,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from config import UNIDADE_DESCRICAO
+from routes.confirmacoes import router as confirmacoes_router
 from routes.configuracoes import router as configuracoes_router
 from routes.dashboard import router as dashboard_router
 from routes.historico import router as historico_router
@@ -80,6 +81,7 @@ app.state.jinja.globals["cor_caixa"] = _ds.cor_caixa
 # Contadores das centrais de Ligações telefônicas e Correspondências (badges do menu).
 app.state.jinja.globals["contar_ligacoes"] = _ds.contar_ligacoes
 app.state.jinja.globals["contar_correspondencias"] = _ds.contar_correspondencias
+app.state.jinja.globals["contar_confirmacoes"] = _ds.contar_confirmacoes
 # Modo de IA (Simples × com IA) — globals CALLABLE (sempre atuais).
 from services import analise_service as _analise  # noqa: E402
 from services import config_service as _cs  # noqa: E402
@@ -143,6 +145,7 @@ app.include_router(dashboard_router)
 app.include_router(configuracoes_router)
 app.include_router(historico_router)
 app.include_router(ligacoes_router)
+app.include_router(confirmacoes_router)
 app.include_router(seguranca_router)
 # Sem cadeado de navegação: o painel abre livremente. A senha-mestra só é pedida
 # (via modal no front-end) quando o usuário aciona uma função que usa o SISDPU e a
