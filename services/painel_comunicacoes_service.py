@@ -3353,15 +3353,17 @@ async def verificar_confirmacoes_stream():
             _persistir_verificacao(r["id"], item)
             itens.append(item)
             continue
-        if not numero:
+        if not numero and not r.get("paj", ""):
             item["erro"] = "Sem número de WhatsApp registrado neste envio."
             yield {"level": "aviso", "msg": f"     PAJ {item['paj']}: {item['erro']}"}
             _persistir_verificacao(r["id"], item)
             itens.append(item)
             continue
-        yield {"level": "muted", "msg": f"     PAJ {item['paj']} — lendo o WhatsApp ({numero})…"}
+        # Sem número (ou número desatualizado): a leitura ainda tenta achar a conversa
+        # pelo PAJ no texto da mensagem (Plano B — ver _abrir_conversa).
+        yield {"level": "muted", "msg": f"     PAJ {item['paj']} — lendo o WhatsApp ({numero or 'sem número, buscando pelo PAJ'})…"}
         try:
-            leitura = await whatsapp_client.ler_respostas_apos_envio(numero)
+            leitura = await whatsapp_client.ler_respostas_apos_envio(numero, paj_ref=r.get("paj", ""))
         except Exception as e:  # noqa: BLE001
             leitura = {"ok": False, "detalhe": f"exceção: {e}"}
         if not leitura.get("ok"):
@@ -3379,6 +3381,10 @@ async def verificar_confirmacoes_stream():
                 "conversa_cache": leitura.get("mensagens") or [],
                 "conversa_cache_em": _dt.datetime.now().isoformat(timespec="seconds"),
             })
+            if leitura.get("metodo_abertura") == "busca_texto":
+                yield {"level": "aviso", "msg": f"     PAJ {item['paj']}: o número cadastrado não abriu a "
+                                                "conversa certa — achei pelo texto da mensagem (busca pelo "
+                                                "PAJ). Confira/atualize o número cadastrado."}
             if leitura.get("confirmou"):
                 yield {"level": "ok", "msg": f"     PAJ {item['paj']}: resposta com possível confirmação."}
             elif leitura.get("tem_resposta"):
@@ -3447,10 +3453,10 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
     # Best-effort: se não conseguir gerar, a movimentação segue sem o anexo.
     anexos_mov: list[dict] = []
     numero_resp = (reg.get("numeros") or [""])[0]
-    if texto_resposta and numero_resp:
+    if texto_resposta and (numero_resp or reg.get("paj", "")):
         try:
             pdf_resposta = await whatsapp_client.capturar_pdf_resposta(
-                numero_resp, str(COMPROVANTES_WA_DIR), paj_ref=reg.get("paj_norm", ""))
+                numero_resp, str(COMPROVANTES_WA_DIR), paj_ref=reg.get("paj", ""))
         except Exception:  # noqa: BLE001
             pdf_resposta = None
         if pdf_resposta:
@@ -3586,12 +3592,12 @@ async def verificar_uma_pendencia(historico_id: str) -> dict:
             "confirmacao_detalhe": "autolimpeza: trâmite não encontrado na caixa de aguardo (caixa lida com sucesso)"})
         _persistir_verificacao(historico_id, item)
         return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
-    if not numero:
+    if not numero and not reg.get("paj", ""):
         item["erro"] = "Sem número de WhatsApp registrado neste envio."
         _persistir_verificacao(historico_id, item)
         return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
     try:
-        leitura = await whatsapp_client.ler_respostas_apos_envio(numero)
+        leitura = await whatsapp_client.ler_respostas_apos_envio(numero, paj_ref=reg.get("paj", ""))
     except Exception as e:  # noqa: BLE001
         leitura = {"ok": False, "detalhe": f"exceção: {e}"}
     if not leitura.get("ok"):
@@ -3640,11 +3646,11 @@ async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> di
         return {"ok": True, "numero": numero, "assistido": reg.get("assistido", ""),
                 "mensagens": v.get("mensagens") or [], "cache": False, "cache_em": agora,
                 "verificacao": v.get("item")}
-    if not numero:
+    if not numero and not reg.get("paj", ""):
         return {"ok": False, "erro": "Sem número de WhatsApp registrado neste envio."}
     from ingestao import whatsapp_client
     try:
-        r = await whatsapp_client.obter_conversa(numero)
+        r = await whatsapp_client.obter_conversa(numero, paj_ref=reg.get("paj", ""))
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "erro": f"exceção: {e}"}
     if not r.get("ok"):

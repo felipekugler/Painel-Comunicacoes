@@ -143,6 +143,111 @@ async def _numero_invalido(page) -> bool:
         return False
 
 
+# ---------------- Abertura de conversa: Plano A (número) + Plano B (busca por texto) ----------------
+# Problema real relatado pelo usuário (2026-10-28): em vários casos a leitura volta
+# SEM mensagem nenhuma. Causa provável: o número cadastrado no histórico não bate
+# EXATAMENTE com o JID real do WhatsApp do contato (ex.: 9º dígito, número
+# desatualizado) — o link "send?phone=" então abre uma conversa NOVA/VAZIA em vez da
+# real, e a extração (que está correta) simplesmente não acha nada para ler.
+# Plano B: a busca GLOBAL do WhatsApp indexa tanto nomes de contato (alguns usuários
+# salvam como "PAJ 2025/029-04041") QUANTO o CONTEÚDO das mensagens — e toda mensagem
+# nossa inclui o PAJ no texto ("Contato referente ao PAJ ..."). Buscar pelo número do
+# PAJ e abrir o primeiro resultado funciona nos dois casos, independente do número de
+# telefone estar certo. Validado ao vivo 2026-10-28 (achou e abriu a conversa certa).
+_SEL_BUSCA_GLOBAL = 'input[aria-label="Pesquisar ou começar uma nova conversa"]'
+_SEL_RESULTADO_BUSCA = '#pane-side [role="listitem"], #pane-side div[role="row"]'
+
+
+async def _contagem_mensagens(page) -> int:
+    try:
+        return await page.locator("#main [data-id]").count()
+    except Exception:
+        return 0
+
+
+async def _buscar_e_abrir_por_texto(page, query: str) -> bool:
+    """Plano B: busca GLOBAL do WhatsApp (contatos + conteúdo das mensagens) por
+    `query` (normalmente o número do PAJ) e abre o primeiro resultado que não seja um
+    cabeçalho de seção ("Contatos"/"Mensagens"). Retorna True se abriu um chat com
+    pelo menos 1 mensagem."""
+    query = (query or "").strip()
+    if not query:
+        return False
+    try:
+        campo = page.locator(_SEL_BUSCA_GLOBAL)
+        if not await campo.count():
+            return False
+        await campo.click()
+        await campo.fill("")
+        await campo.fill(query)
+        await page.wait_for_timeout(1500)
+        itens = page.locator(_SEL_RESULTADO_BUSCA)
+        n = await itens.count()
+        for i in range(min(n, 20)):
+            texto = (await itens.nth(i).inner_text() or "").strip()
+            if texto in ("Contatos", "Mensagens", ""):
+                continue
+            await itens.nth(i).click()
+            await page.wait_for_timeout(1200)
+            return bool(await page.locator(_SEL_COMPOSE).count()) and bool(await _contagem_mensagens(page))
+    except Exception:  # noqa: BLE001
+        return False
+    return False
+
+
+async def _abrir_conversa(page, numero: str, paj_ref: str = "") -> dict:
+    """Abre a conversa certa no WhatsApp Web: Plano A (número) e, se não abrir ou abrir
+    uma conversa VAZIA (sinal de número errado/desatualizado), Plano B (busca por
+    texto — ver `_buscar_e_abrir_por_texto`), quando `paj_ref` é informado.
+    Retorna {ok, metodo, detalhe}. `metodo`: 'numero' | 'busca_texto' | ''."""
+    intl = normalizar_numero(numero)
+    if intl:
+        url = f"{WA_URL}/send?phone={intl}"
+        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        aberto = False
+        for _ in range(30):
+            await page.wait_for_timeout(1000)
+            if await _numero_invalido(page):
+                # Fecha o diálogo "não está no WhatsApp" (botão "OK") — ele cobre a
+                # tela e bloqueia o clique na busca do Plano B logo abaixo. Bug real
+                # encontrado ao vivo 2026-10-28 (Plano B nunca disparava: o clique no
+                # campo de busca falhava silenciosamente por estar coberto).
+                with contextlib.suppress(Exception):
+                    await page.get_by_role("button", name="OK", exact=True).first.click(timeout=3000)
+                await page.wait_for_timeout(300)
+                break
+            if await page.locator(_SEL_COMPOSE).count():
+                aberto = True
+                break
+        if aberto:
+            await page.wait_for_timeout(800)
+            if await _contagem_mensagens(page):
+                return {"ok": True, "metodo": "numero", "detalhe": ""}
+    else:
+        aberto = False
+        # Sem número algum (nem p/ tentar o Plano A) — a página pode nunca ter
+        # carregado o WhatsApp ainda; navega pra base antes do Plano B, senão a busca
+        # global nem existe no DOM. Carregar o app do ZERO é mais lento que abrir uma
+        # conversa específica — espera ATIVA pela busca aparecer (até ~15s), não um
+        # sleep fixo curto (bug real encontrado ao vivo 2026-10-28: 2s não bastava).
+        with contextlib.suppress(Exception):
+            await page.goto(WA_URL, wait_until="domcontentloaded", timeout=60000)
+            for _ in range(15):
+                await page.wait_for_timeout(1000)
+                if await page.locator(_SEL_BUSCA_GLOBAL).count():
+                    break
+    # Número não abriu, ou abriu uma conversa vazia — tenta o Plano B antes de desistir.
+    if paj_ref and await _buscar_e_abrir_por_texto(page, paj_ref):
+        return {"ok": True, "metodo": "busca_texto", "detalhe": ""}
+    if not intl:
+        return {"ok": False, "metodo": "", "detalhe": "Número vazio/inválido."}
+    if aberto:
+        return {"ok": False, "metodo": "",
+                "detalhe": f"A conversa de {intl} está vazia (sem nenhuma mensagem) — "
+                           "número provavelmente desatualizado/errado."}
+    return {"ok": False, "metodo": "", "detalhe": f"Número {intl} não está no WhatsApp."}
+
+
 # Lê as ÚLTIMAS mensagens de um chat (nossa + do assistido), identificando as NOSSAS
 # pelo mesmo sinal já usado em _confirmar_enviado (ícone de saída "tail-out" — validado
 # ao vivo 2026-10-28: o WhatsApp Web atual marca mensagens enviadas por nós com
@@ -239,10 +344,13 @@ _JS_LER_CHAT = r"""
 """
 
 
-async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headless: bool = True) -> dict:
+async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headless: bool = True,
+                                   paj_ref: str = "") -> dict:
     """Lê, no chat de `numero`, as mensagens recebidas DEPOIS da NOSSA última mensagem
     enviada — para checar se o assistido respondeu confirmando o recebimento (ex.:
     "OK"). Operação SOMENTE LEITURA: não digita nem envia nada.
+    `paj_ref` (opcional): ativa o Plano B (busca por texto) se o número não abrir a
+    conversa certa — ver `_abrir_conversa`.
 
     Retorna {ok, tem_resposta, texto_resposta, data_resposta, confirmou, mensagens, detalhe}:
       - tem_resposta: True se há ao menos uma mensagem do assistido após a nossa;
@@ -255,25 +363,13 @@ async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headles
       - mensagens: a conversa INTEIRA lida nesta mesma sessão (nossa/dele/texto/hora)
         — permite cachear a conversa completa sem abrir outra sessão do WhatsApp só
         para o botão "Abrir conversa" (ver `obter_conversa_whatsapp` no serviço)."""
-    intl = normalizar_numero(numero)
-    if not intl:
-        return {"ok": False, "detalhe": "Número vazio/inválido."}
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            url = f"{WA_URL}/send?phone={intl}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            aberto = False
-            for _ in range(30):
-                await page.wait_for_timeout(1000)
-                if await _numero_invalido(page):
-                    return {"ok": False, "detalhe": f"Número {intl} não está no WhatsApp."}
-                if await page.locator(_SEL_COMPOSE).count():
-                    aberto = True
-                    break
-            if not aberto:
-                return {"ok": False, "detalhe": "Conversa não abriu (timeout)."}
+            abertura = await _abrir_conversa(page, numero, paj_ref)
+            if not abertura.get("ok"):
+                return {"ok": False, "detalhe": abertura.get("detalhe", "")}
             await page.wait_for_timeout(800)  # deixa o histórico da conversa renderizar
             dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
         except Exception as e:  # noqa: BLE001
@@ -284,17 +380,19 @@ async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headles
 
     if dump.get("erro"):
         return {"ok": False, "detalhe": dump["erro"]}
+    metodo = abertura.get("metodo", "")
     mensagens = dump.get("mensagens") or []
     if not dump.get("achou_nossa_mensagem"):
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens,
+                "confirmou": False, "mensagens": mensagens, "metodo_abertura": metodo,
                 "detalhe": "Não encontrei nossa última mensagem enviada nas últimas "
                            f"{max_mensagens} mensagens do chat — pode haver mais conversa "
                            "depois do envio; confira manualmente."}
     respostas = dump.get("respostas") or []
     if not respostas:
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens, "detalhe": "Ainda sem resposta do assistido."}
+                "confirmou": False, "mensagens": mensagens, "metodo_abertura": metodo,
+                "detalhe": "Ainda sem resposta do assistido."}
     # Cada resposta vira uma linha "HH:MM texto" (hora ANTES do texto — pedido do
     # usuário). O innerText da bolha já traz o próprio horário no FINAL (jeito que o
     # WhatsApp renderiza); tiramos essa linha duplicada e prefixamos com a hora do
@@ -324,35 +422,27 @@ async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headles
             break
     confirmou = bool(texto_resposta)
     return {"ok": True, "tem_resposta": True, "texto_resposta": texto_resposta,
-            "data_resposta": data_resposta, "confirmou": confirmou, "mensagens": mensagens, "detalhe": ""}
+            "data_resposta": data_resposta, "confirmou": confirmou, "mensagens": mensagens,
+            "metodo_abertura": metodo, "detalhe": ""}
 
 
-async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = True) -> dict:
+async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = True,
+                         paj_ref: str = "") -> dict:
     """Lê a conversa INTEIRA (nossas mensagens + respostas) com `numero`, para exibição
     num celular simulado — ex.: botão "Abrir conversa"/"Atualizar agora" na central de
     Confirmações de leitura (leitura ao vivo; o caminho "normal" é o cache gravado por
     `ler_respostas_apos_envio` a cada "Verificar respostas" — ver `obter_conversa_whatsapp`
     no serviço). Operação SOMENTE LEITURA: não digita nem envia nada.
+    `paj_ref` (opcional): ativa o Plano B (busca por texto) se o número não abrir a
+    conversa certa — ver `_abrir_conversa`.
     Retorna {ok, numero, mensagens:[{nossa,texto,hora}], detalhe}."""
-    intl = normalizar_numero(numero)
-    if not intl:
-        return {"ok": False, "detalhe": "Número vazio/inválido."}
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            url = f"{WA_URL}/send?phone={intl}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            aberto = False
-            for _ in range(30):
-                await page.wait_for_timeout(1000)
-                if await _numero_invalido(page):
-                    return {"ok": False, "detalhe": f"Número {intl} não está no WhatsApp."}
-                if await page.locator(_SEL_COMPOSE).count():
-                    aberto = True
-                    break
-            if not aberto:
-                return {"ok": False, "detalhe": "Conversa não abriu (timeout)."}
+            abertura = await _abrir_conversa(page, numero, paj_ref)
+            if not abertura.get("ok"):
+                return {"ok": False, "detalhe": abertura.get("detalhe", "")}
             await page.wait_for_timeout(800)
             dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
         except Exception as e:  # noqa: BLE001
@@ -362,7 +452,8 @@ async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = 
                 await ctx.close()
     if dump.get("erro"):
         return {"ok": False, "detalhe": dump["erro"]}
-    return {"ok": True, "numero": intl, "mensagens": dump.get("mensagens") or [], "detalhe": ""}
+    return {"ok": True, "numero": normalizar_numero(numero) or numero,
+            "mensagens": dump.get("mensagens") or [], "detalhe": ""}
 
 
 async def _confirmar_enviado(page, texto: str = "", timeout_seg: int = 20) -> bool:
@@ -643,26 +734,15 @@ async def capturar_pdf_resposta(numero: str, destino_dir: str, paj_ref: str = ""
     """Abre o chat de `numero` e gera o PDF da resposta do assistido (ver
     `_capturar_resposta`) — usado por `confirmar_recebimento` para anexar a resposta
     à movimentação que a registra no PAJ. Operação SOMENTE LEITURA (não digita nem
-    envia nada). Retorna o caminho do PDF, ou None se não conseguir — nunca levanta;
-    a movimentação segue normalmente mesmo sem o anexo."""
-    intl = normalizar_numero(numero)
-    if not intl:
-        return None
+    envia nada). `paj_ref` também ativa o Plano B (busca por texto) se o número não
+    abrir a conversa certa — ver `_abrir_conversa`. Retorna o caminho do PDF, ou None
+    se não conseguir — nunca levanta; a movimentação segue normalmente sem o anexo."""
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            url = f"{WA_URL}/send?phone={intl}"
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            aberto = False
-            for _ in range(30):
-                await page.wait_for_timeout(1000)
-                if await _numero_invalido(page):
-                    return None
-                if await page.locator(_SEL_COMPOSE).count():
-                    aberto = True
-                    break
-            if not aberto:
+            abertura = await _abrir_conversa(page, numero, paj_ref)
+            if not abertura.get("ok"):
                 return None
             await page.wait_for_timeout(800)
             return await _capturar_resposta(page, destino_dir, paj_ref)
