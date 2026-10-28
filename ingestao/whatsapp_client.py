@@ -143,19 +143,24 @@ async def _numero_invalido(page) -> bool:
         return False
 
 
-# ---------------- Abertura de conversa: Plano A (número) + Plano B (busca por texto) ----------------
+# ---------------- Abertura de conversa: número(s) cadastrado(s) + descoberta por PAJ ----------------
 # Problema real relatado pelo usuário (2026-10-28): em vários casos a leitura volta
-# SEM mensagem nenhuma. Causa provável: o número cadastrado no histórico não bate
-# EXATAMENTE com o JID real do WhatsApp do contato (ex.: 9º dígito, número
-# desatualizado) — o link "send?phone=" então abre uma conversa NOVA/VAZIA em vez da
-# real, e a extração (que está correta) simplesmente não acha nada para ler.
-# Plano B: a busca GLOBAL do WhatsApp indexa tanto nomes de contato (alguns usuários
-# salvam como "PAJ 2025/029-04041") QUANTO o CONTEÚDO das mensagens — e toda mensagem
-# nossa inclui o PAJ no texto ("Contato referente ao PAJ ..."). Buscar pelo número do
-# PAJ e abrir o primeiro resultado funciona nos dois casos, independente do número de
-# telefone estar certo. Validado ao vivo 2026-10-28 (achou e abriu a conversa certa).
+# SEM mensagem nenhuma. Duas causas, as DUAS confirmadas ao vivo com o usuário:
+#   1) o número cadastrado não bate EXATAMENTE com o JID real do WhatsApp do contato
+#      (9º dígito, número desatualizado) — o link "send?phone=" abre uma conversa
+#      NOVA/VAZIA em vez da real;
+#   2) o painel às vezes manda a MESMA mensagem para VÁRIOS números do mesmo
+#      assistido, e nunca se sabe se a resposta vai vir por um, por todos, ou por
+#      nenhum — só olhar `numeros[0]` perde respostas que vieram pelos outros.
+# Solução: a busca GLOBAL do WhatsApp pelo padrão "PAJ AAAA/UUU-NNNNN" (validado AO
+# VIVO pelo usuário, 2026-10-28 — é o formato que funciona de forma confiável, mais
+# do que só o número solto) mostra TODAS as conversas relacionadas ao PAJ — cada uma
+# identificada pelo próprio número de telefone quando o contato não está salvo.
+# Extraímos esses números e verificamos CADA UM (mais os já cadastrados no histórico),
+# agregando: qualquer um com resposta conta.
 _SEL_BUSCA_GLOBAL = 'input[aria-label="Pesquisar ou começar uma nova conversa"]'
 _SEL_RESULTADO_BUSCA = '#pane-side [role="listitem"], #pane-side div[role="row"]'
+_RE_TEL_BR = re.compile(r"\+?\s*55\s*\(?\d{2}\)?\s*\d{4,5}-?\d{4}")
 
 
 async def _contagem_mensagens(page) -> int:
@@ -165,87 +170,154 @@ async def _contagem_mensagens(page) -> int:
         return 0
 
 
-async def _buscar_e_abrir_por_texto(page, query: str) -> bool:
-    """Plano B: busca GLOBAL do WhatsApp (contatos + conteúdo das mensagens) por
-    `query` (normalmente o número do PAJ) e abre o primeiro resultado que não seja um
-    cabeçalho de seção ("Contatos"/"Mensagens"). Retorna True se abriu um chat com
-    pelo menos 1 mensagem."""
-    query = (query or "").strip()
-    if not query:
+async def _fechar_dialogo_numero_invalido(page) -> None:
+    """Fecha o diálogo "não está no WhatsApp" (botão "OK") — ele cobre a tela e
+    bloqueia qualquer clique seguinte (ex.: na busca global). Bug real encontrado ao
+    vivo 2026-10-28."""
+    with contextlib.suppress(Exception):
+        await page.get_by_role("button", name="OK", exact=True).first.click(timeout=3000)
+    await page.wait_for_timeout(300)
+
+
+async def _abrir_numero_direto(page, numero: str) -> bool:
+    """Abre a conversa de `numero` direto pelo link do WhatsApp (sem busca). Retorna
+    True só se abriu E tem pelo menos 1 mensagem (uma conversa vazia é sinal de
+    número errado/desatualizado — não conta como "aberta")."""
+    intl = normalizar_numero(numero)
+    if not intl:
         return False
+    await page.goto(f"{WA_URL}/send?phone={intl}", wait_until="domcontentloaded", timeout=60000)
+    aberto = False
+    for _ in range(30):
+        await page.wait_for_timeout(1000)
+        if await _numero_invalido(page):
+            await _fechar_dialogo_numero_invalido(page)
+            break
+        if await page.locator(_SEL_COMPOSE).count():
+            aberto = True
+            break
+    if not aberto:
+        return False
+    await page.wait_for_timeout(800)
+    return bool(await _contagem_mensagens(page))
+
+
+async def _ir_para_busca_global(page) -> None:
+    """Garante que a busca global esteja acessível na tela — navega pra base do
+    WhatsApp se a página ainda não carregou nada. Espera ATIVA (até ~15s): carregar o
+    app do ZERO é mais lento que abrir uma conversa específica (bug real encontrado
+    ao vivo 2026-10-28: um sleep fixo curto não bastava)."""
+    if await page.locator(_SEL_BUSCA_GLOBAL).count():
+        return
+    with contextlib.suppress(Exception):
+        await page.goto(WA_URL, wait_until="domcontentloaded", timeout=60000)
+        for _ in range(15):
+            await page.wait_for_timeout(1000)
+            if await page.locator(_SEL_BUSCA_GLOBAL).count():
+                break
+
+
+async def _descobrir_numeros_por_paj(page, paj: str) -> list[str]:
+    """Busca "PAJ <numero>" (padrão validado AO VIVO pelo usuário, 2026-10-28 — mais
+    confiável que só o número solto) na busca GLOBAL do WhatsApp e extrai os NÚMEROS
+    reais das conversas encontradas — até números que não estão cadastrados no painel
+    (contato não salvo = WhatsApp mostra o próprio número como título do resultado).
+    Não abre nada; só descobre candidatos. Requer que a busca já esteja acessível na
+    tela (ver `_ir_para_busca_global`)."""
+    paj = (paj or "").strip()
+    if not paj:
+        return []
+    query = paj if paj.upper().startswith("PAJ") else f"PAJ {paj}"
     try:
         campo = page.locator(_SEL_BUSCA_GLOBAL)
         if not await campo.count():
-            return False
+            return []
         await campo.click()
         await campo.fill("")
         await campo.fill(query)
         await page.wait_for_timeout(1500)
         itens = page.locator(_SEL_RESULTADO_BUSCA)
         n = await itens.count()
-        for i in range(min(n, 20)):
-            texto = (await itens.nth(i).inner_text() or "").strip()
-            if texto in ("Contatos", "Mensagens", ""):
+        numeros: list[str] = []
+        for i in range(min(n, 30)):
+            texto = await itens.nth(i).inner_text() or ""
+            m = _RE_TEL_BR.search(texto)
+            if not m:
                 continue
-            await itens.nth(i).click()
-            await page.wait_for_timeout(1200)
-            return bool(await page.locator(_SEL_COMPOSE).count()) and bool(await _contagem_mensagens(page))
-    except Exception:  # noqa: BLE001
-        return False
-    return False
-
-
-async def _abrir_conversa(page, numero: str, paj_ref: str = "") -> dict:
-    """Abre a conversa certa no WhatsApp Web: Plano A (número) e, se não abrir ou abrir
-    uma conversa VAZIA (sinal de número errado/desatualizado), Plano B (busca por
-    texto — ver `_buscar_e_abrir_por_texto`), quando `paj_ref` é informado.
-    Retorna {ok, metodo, detalhe}. `metodo`: 'numero' | 'busca_texto' | ''."""
-    intl = normalizar_numero(numero)
-    if intl:
-        url = f"{WA_URL}/send?phone={intl}"
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        aberto = False
-        for _ in range(30):
-            await page.wait_for_timeout(1000)
-            if await _numero_invalido(page):
-                # Fecha o diálogo "não está no WhatsApp" (botão "OK") — ele cobre a
-                # tela e bloqueia o clique na busca do Plano B logo abaixo. Bug real
-                # encontrado ao vivo 2026-10-28 (Plano B nunca disparava: o clique no
-                # campo de busca falhava silenciosamente por estar coberto).
-                with contextlib.suppress(Exception):
-                    await page.get_by_role("button", name="OK", exact=True).first.click(timeout=3000)
-                await page.wait_for_timeout(300)
-                break
-            if await page.locator(_SEL_COMPOSE).count():
-                aberto = True
-                break
-        if aberto:
-            await page.wait_for_timeout(800)
-            if await _contagem_mensagens(page):
-                return {"ok": True, "metodo": "numero", "detalhe": ""}
-    else:
-        aberto = False
-        # Sem número algum (nem p/ tentar o Plano A) — a página pode nunca ter
-        # carregado o WhatsApp ainda; navega pra base antes do Plano B, senão a busca
-        # global nem existe no DOM. Carregar o app do ZERO é mais lento que abrir uma
-        # conversa específica — espera ATIVA pela busca aparecer (até ~15s), não um
-        # sleep fixo curto (bug real encontrado ao vivo 2026-10-28: 2s não bastava).
+            cand = normalizar_numero(m.group(0))
+            if cand and cand not in numeros:
+                numeros.append(cand)
         with contextlib.suppress(Exception):
-            await page.goto(WA_URL, wait_until="domcontentloaded", timeout=60000)
-            for _ in range(15):
-                await page.wait_for_timeout(1000)
-                if await page.locator(_SEL_BUSCA_GLOBAL).count():
-                    break
-    # Número não abriu, ou abriu uma conversa vazia — tenta o Plano B antes de desistir.
-    if paj_ref and await _buscar_e_abrir_por_texto(page, paj_ref):
-        return {"ok": True, "metodo": "busca_texto", "detalhe": ""}
-    if not intl:
-        return {"ok": False, "metodo": "", "detalhe": "Número vazio/inválido."}
-    if aberto:
-        return {"ok": False, "metodo": "",
-                "detalhe": f"A conversa de {intl} está vazia (sem nenhuma mensagem) — "
-                           "número provavelmente desatualizado/errado."}
-    return {"ok": False, "metodo": "", "detalhe": f"Número {intl} não está no WhatsApp."}
+            await campo.fill("")  # limpa a busca p/ não atrapalhar o próximo uso da página
+        return numeros
+    except Exception:  # noqa: BLE001
+        return []
+
+
+async def _ler_conversas_do_paj(page, numeros_registrados: list[str] | None, paj_ref: str,
+                                max_mensagens: int) -> dict:
+    """Lê TODAS as conversas relacionadas ao PAJ: os números já cadastrados no
+    histórico MAIS os descobertos pela busca "PAJ <numero>" (pode haver mais de um —
+    ver comentário acima de `_SEL_BUSCA_GLOBAL`). Para cada candidato que abrir
+    (com pelo menos 1 mensagem), lê via `_JS_LER_CHAT`.
+    Retorna {ok, dumps: {numero: dump}, numeros_verificados: [...], detalhe}."""
+    candidatos = [normalizar_numero(n) for n in (numeros_registrados or []) if n]
+    candidatos = [n for n in candidatos if n]
+    if paj_ref:
+        await _ir_para_busca_global(page)
+        for n in await _descobrir_numeros_por_paj(page, paj_ref):
+            if n not in candidatos:
+                candidatos.append(n)
+    if not candidatos:
+        return {"ok": False, "dumps": {}, "numeros_verificados": [],
+                "detalhe": "Sem número cadastrado e nada encontrado na busca pelo PAJ."}
+    dumps: dict[str, dict] = {}
+    verificados: list[str] = []
+    for numero in candidatos:
+        if await _abrir_numero_direto(page, numero):
+            verificados.append(numero)
+            dumps[numero] = await page.evaluate(_JS_LER_CHAT, max_mensagens)
+    if not verificados:
+        return {"ok": False, "dumps": {}, "numeros_verificados": [],
+                "detalhe": f"Não consegui abrir nenhuma conversa ({len(candidatos)} "
+                           "candidato(s) tentado(s): cadastrado(s) e/ou achado(s) na busca pelo PAJ)."}
+    return {"ok": True, "dumps": dumps, "numeros_verificados": verificados, "detalhe": ""}
+
+
+def _processar_dump_resposta(dump: dict | None) -> dict:
+    """Extrai tem_resposta/texto_resposta/data_resposta de UM dump de `_JS_LER_CHAT`
+    (lógica usada por `ler_respostas_apos_envio`, isolada para rodar por conversa
+    quando há mais de um número candidato ao mesmo PAJ)."""
+    vazio = {"tem_resposta": False, "texto_resposta": "", "data_resposta": ""}
+    if not dump or dump.get("erro") or not dump.get("achou_nossa_mensagem"):
+        return vazio
+    respostas = dump.get("respostas") or []
+    if not respostas:
+        return vazio
+    linhas_resposta = []
+    for r in respostas:
+        texto = (r.get("texto") or "").strip()
+        if not texto:
+            continue
+        m_hora = re.search(r"\[(\d{2}:\d{2}),", r.get("preplain") or "")
+        hora = m_hora.group(1) if m_hora else ""
+        if not hora:
+            m_fim = re.search(r"(\d{2}:\d{2})\s*$", texto)
+            hora = m_fim.group(1) if m_fim else ""
+        if hora:
+            texto = re.sub(r"\n?\s*" + re.escape(hora) + r"\s*$", "", texto).strip()
+        if not texto:
+            continue
+        linhas_resposta.append(f"{hora} {texto}" if hora else texto)
+    texto_resposta = "\n".join(linhas_resposta).strip()
+    data_resposta = ""
+    for r in reversed(respostas):  # última data-hora disponível (preplain pode faltar em bolhas agrupadas)
+        m = re.search(r"\[(\d{2}:\d{2}), (\d{2}/\d{2}/\d{4})\]", r.get("preplain") or "")
+        if m:
+            data_resposta = f"{m.group(2)} {m.group(1)}"
+            break
+    return {"tem_resposta": bool(texto_resposta), "texto_resposta": texto_resposta,
+            "data_resposta": data_resposta}
 
 
 # Lê as ÚLTIMAS mensagens de um chat (nossa + do assistido), identificando as NOSSAS
@@ -345,115 +417,112 @@ _JS_LER_CHAT = r"""
 
 
 async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headless: bool = True,
-                                   paj_ref: str = "") -> dict:
-    """Lê, no chat de `numero`, as mensagens recebidas DEPOIS da NOSSA última mensagem
-    enviada — para checar se o assistido respondeu confirmando o recebimento (ex.:
-    "OK"). Operação SOMENTE LEITURA: não digita nem envia nada.
-    `paj_ref` (opcional): ativa o Plano B (busca por texto) se o número não abrir a
-    conversa certa — ver `_abrir_conversa`.
+                                   paj_ref: str = "", numeros_registrados: list[str] | None = None) -> dict:
+    """Lê TODAS as conversas relacionadas ao PAJ (o(s) número(s) cadastrado(s) MAIS
+    o(s) descoberto(s) pela busca "PAJ <numero>" — ver `_ler_conversas_do_paj`) e
+    procura mensagens recebidas DEPOIS da NOSSA última mensagem enviada em QUALQUER
+    uma delas — para checar se o assistido respondeu confirmando o recebimento (ex.:
+    "OK"), não importa por qual número. Operação SOMENTE LEITURA: não digita nem
+    envia nada.
+    `numero`: número "principal" já cadastrado (pode ser vazio se só `paj_ref` for
+    conhecido). `numeros_registrados` (opcional): outros números já cadastrados para
+    o mesmo PAJ, verificados junto. `paj_ref`: PAJ usado para descobrir mais números.
 
     Retorna {ok, tem_resposta, texto_resposta, data_resposta, confirmou, mensagens, detalhe}:
-      - tem_resposta: True se há ao menos uma mensagem do assistido após a nossa;
-      - texto_resposta: texto concatenado das mensagens de resposta (p/ conferência manual);
-      - data_resposta: 'DD/MM/AAAA HH:MM' extraída da última resposta, se disponível;
-      - confirmou: True sempre que há QUALQUER resposta do assistido após a nossa
-        mensagem (a direção já é identificada com segurança pelo autor — não exige
-        mais bater com uma palavra específica como "OK"). É só uma PRÉ-SELEÇÃO; a
-        decisão final é sempre do usuário (ver central de Confirmações de leitura).
-      - mensagens: a conversa INTEIRA lida nesta mesma sessão (nossa/dele/texto/hora)
-        — permite cachear a conversa completa sem abrir outra sessão do WhatsApp só
-        para o botão "Abrir conversa" (ver `obter_conversa_whatsapp` no serviço)."""
+      - tem_resposta: True se há ao menos uma mensagem do assistido após a nossa, em
+        qualquer uma das conversas verificadas;
+      - texto_resposta: texto concatenado das respostas; quando mais de uma conversa
+        tem resposta, cada uma vem prefixada por "[<numero>]" numa linha própria;
+      - data_resposta: 'DD/MM/AAAA HH:MM' extraída da resposta mais recente entre
+        todas as conversas, se disponível;
+      - confirmou: True sempre que há QUALQUER resposta do assistido em qualquer
+        conversa relacionada ao PAJ (a direção já é identificada com segurança pelo
+        autor — não exige mais bater com uma palavra específica como "OK"). É só uma
+        PRÉ-SELEÇÃO; a decisão final é sempre do usuário (ver central de Confirmações
+        de leitura).
+      - mensagens: a conversa (nossa/dele/texto/hora) da conversa com resposta — ou,
+        se nenhuma tem resposta, da primeira conversa verificada — permite cachear
+        sem abrir outra sessão do WhatsApp só para o botão "Abrir conversa" (ver
+        `obter_conversa_whatsapp` no serviço)."""
+    candidatos = [numero] + list(numeros_registrados or [])
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            abertura = await _abrir_conversa(page, numero, paj_ref)
-            if not abertura.get("ok"):
-                return {"ok": False, "detalhe": abertura.get("detalhe", "")}
-            await page.wait_for_timeout(800)  # deixa o histórico da conversa renderizar
-            dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
+            leitura = await _ler_conversas_do_paj(page, candidatos, paj_ref, max_mensagens)
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "detalhe": f"exceção ao ler o chat: {e}"}
         finally:
             with contextlib.suppress(Exception):
                 await ctx.close()
 
-    if dump.get("erro"):
-        return {"ok": False, "detalhe": dump["erro"]}
-    metodo = abertura.get("metodo", "")
-    mensagens = dump.get("mensagens") or []
-    if not dump.get("achou_nossa_mensagem"):
+    if not leitura.get("ok"):
+        return {"ok": False, "detalhe": leitura.get("detalhe", "")}
+    dumps = leitura["dumps"]
+    numeros_verificados = leitura["numeros_verificados"]
+    metodo = "numero" if numero and normalizar_numero(numero) in numeros_verificados else "busca_texto"
+
+    processados = {n: _processar_dump_resposta(d) for n, d in dumps.items()}
+    com_resposta = [n for n in numeros_verificados if processados[n]["tem_resposta"]]
+    dump_ref = dumps.get(com_resposta[0]) if com_resposta else next(iter(dumps.values()), {})
+    mensagens_ref = (dump_ref or {}).get("mensagens") or []
+
+    if not any(dumps[n].get("achou_nossa_mensagem") for n in numeros_verificados):
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens, "metodo_abertura": metodo,
+                "confirmou": False, "mensagens": mensagens_ref, "metodo_abertura": metodo,
                 "detalhe": "Não encontrei nossa última mensagem enviada nas últimas "
-                           f"{max_mensagens} mensagens do chat — pode haver mais conversa "
-                           "depois do envio; confira manualmente."}
-    respostas = dump.get("respostas") or []
-    if not respostas:
+                           f"{max_mensagens} mensagens de nenhuma conversa verificada "
+                           f"({len(numeros_verificados)}) — pode haver mais conversa depois "
+                           "do envio; confira manualmente."}
+    if not com_resposta:
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens, "metodo_abertura": metodo,
-                "detalhe": "Ainda sem resposta do assistido."}
-    # Cada resposta vira uma linha "HH:MM texto" (hora ANTES do texto — pedido do
-    # usuário). O innerText da bolha já traz o próprio horário no FINAL (jeito que o
-    # WhatsApp renderiza); tiramos essa linha duplicada e prefixamos com a hora do
-    # preplain (mais confiável; cai para a do innerText quando o preplain faltar —
-    # acontece em bolhas agrupadas sem legenda, ex.: mídia sem texto).
-    linhas_resposta = []
-    for r in respostas:
-        texto = (r.get("texto") or "").strip()
-        if not texto:
-            continue
-        m_hora = re.search(r"\[(\d{2}:\d{2}),", r.get("preplain") or "")
-        hora = m_hora.group(1) if m_hora else ""
-        if not hora:
-            m_fim = re.search(r"(\d{2}:\d{2})\s*$", texto)
-            hora = m_fim.group(1) if m_fim else ""
-        if hora:
-            texto = re.sub(r"\n?\s*" + re.escape(hora) + r"\s*$", "", texto).strip()
-        if not texto:
-            continue
-        linhas_resposta.append(f"{hora} {texto}" if hora else texto)
-    texto_resposta = "\n".join(linhas_resposta).strip()
-    data_resposta = ""
-    for r in reversed(respostas):  # última data-hora disponível (preplain pode faltar em bolhas agrupadas)
-        m = re.search(r"\[(\d{2}:\d{2}), (\d{2}/\d{2}/\d{4})\]", r.get("preplain") or "")
-        if m:
-            data_resposta = f"{m.group(2)} {m.group(1)}"
-            break
-    confirmou = bool(texto_resposta)
+                "confirmou": False, "mensagens": mensagens_ref, "metodo_abertura": metodo,
+                "detalhe": "Ainda sem resposta do assistido (verificado em "
+                           f"{len(numeros_verificados)} conversa(s))."}
+    multiplas = len(com_resposta) > 1
+    textos = []
+    for n in com_resposta:
+        t = processados[n]["texto_resposta"]
+        textos.append(f"[{n}]\n{t}" if multiplas else t)
+    texto_resposta = "\n\n".join(textos).strip()
+    data_resposta = max((processados[n]["data_resposta"] for n in com_resposta if processados[n]["data_resposta"]),
+                         default="")
+    mensagens_ref = dumps[com_resposta[0]].get("mensagens") or []
     return {"ok": True, "tem_resposta": True, "texto_resposta": texto_resposta,
-            "data_resposta": data_resposta, "confirmou": confirmou, "mensagens": mensagens,
+            "data_resposta": data_resposta, "confirmou": True, "mensagens": mensagens_ref,
             "metodo_abertura": metodo, "detalhe": ""}
 
 
 async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = True,
-                         paj_ref: str = "") -> dict:
-    """Lê a conversa INTEIRA (nossas mensagens + respostas) com `numero`, para exibição
-    num celular simulado — ex.: botão "Abrir conversa"/"Atualizar agora" na central de
-    Confirmações de leitura (leitura ao vivo; o caminho "normal" é o cache gravado por
-    `ler_respostas_apos_envio` a cada "Verificar respostas" — ver `obter_conversa_whatsapp`
-    no serviço). Operação SOMENTE LEITURA: não digita nem envia nada.
-    `paj_ref` (opcional): ativa o Plano B (busca por texto) se o número não abrir a
-    conversa certa — ver `_abrir_conversa`.
+                         paj_ref: str = "", numeros_registrados: list[str] | None = None) -> dict:
+    """Lê a conversa INTEIRA (nossas mensagens + respostas) relacionada ao PAJ, para
+    exibição num celular simulado — ex.: botão "Abrir conversa"/"Atualizar agora" na
+    central de Confirmações de leitura (leitura ao vivo; o caminho "normal" é o cache
+    gravado por `ler_respostas_apos_envio` a cada "Verificar respostas" — ver
+    `obter_conversa_whatsapp` no serviço). Operação SOMENTE LEITURA: não digita nem
+    envia nada. Quando há mais de uma conversa relacionada ao PAJ (ver
+    `_ler_conversas_do_paj`), mostra a que tiver resposta do assistido; sem nenhuma
+    resposta, mostra a primeira verificada.
     Retorna {ok, numero, mensagens:[{nossa,texto,hora}], detalhe}."""
+    candidatos = [numero] + list(numeros_registrados or [])
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            abertura = await _abrir_conversa(page, numero, paj_ref)
-            if not abertura.get("ok"):
-                return {"ok": False, "detalhe": abertura.get("detalhe", "")}
-            await page.wait_for_timeout(800)
-            dump = await page.evaluate(_JS_LER_CHAT, max_mensagens)
+            leitura = await _ler_conversas_do_paj(page, candidatos, paj_ref, max_mensagens)
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "detalhe": f"exceção ao ler o chat: {e}"}
         finally:
             with contextlib.suppress(Exception):
                 await ctx.close()
-    if dump.get("erro"):
-        return {"ok": False, "detalhe": dump["erro"]}
-    return {"ok": True, "numero": normalizar_numero(numero) or numero,
-            "mensagens": dump.get("mensagens") or [], "detalhe": ""}
+    if not leitura.get("ok"):
+        return {"ok": False, "detalhe": leitura.get("detalhe", "")}
+    dumps = leitura["dumps"]
+    numeros_verificados = leitura["numeros_verificados"]
+    com_resposta = [n for n in numeros_verificados if _processar_dump_resposta(dumps[n])["tem_resposta"]]
+    numero_escolhido = com_resposta[0] if com_resposta else numeros_verificados[0]
+    return {"ok": True, "numero": numero_escolhido,
+            "mensagens": dumps[numero_escolhido].get("mensagens") or [], "detalhe": ""}
 
 
 async def _confirmar_enviado(page, texto: str = "", timeout_seg: int = 20) -> bool:
@@ -664,10 +733,21 @@ async def _capturar_conversa_fatias(page, baseline_h) -> list[bytes]:
     return fatias or [bytes(await page.locator("#main").first.screenshot(type="jpeg", quality=85))]
 
 
-async def _capturar_contato_jpeg(page) -> bytes | None:
-    """Screenshot do painel "Dados do contato" (abre, captura, fecha) — página 1 dos
-    PDFs gerados a partir da conversa (comprovante de envio e PDF da resposta)."""
-    contato = None
+async def _capturar_contato_jpeg(page) -> dict:
+    """Abre o painel "Dados do contato" (clica, espera, fecha) e captura DUAS coisas
+    de uma vez, já que a abertura/fechamento do painel é o passo caro/frágil:
+      - `jpeg`: screenshot do painel — página 1 dos PDFs gerados a partir da conversa
+        (comprovante de envio e PDF da resposta);
+      - `numero`: o número de telefone no formato RECONHECIDO PELO WHATSAPP (ground
+        truth — inclui qualquer ajuste de DDI/9º dígito que o WhatsApp aplicou ao
+        abrir a conversa), extraído do texto do próprio painel. Mais confiável que
+        reconstruir o número a partir do que foi digitado/cadastrado no contato —
+        é esse número que deve ser usado para reabrir a conversa depois (pedido do
+        usuário, 2026-10-28: viu o PDF do comprovante mostrar o número num formato
+        diferente do cadastrado, e só a busca por ESSE número — não pelo cadastrado
+        nem por texto do PAJ — achou a conversa de forma 100% confiável).
+    Retorna {"jpeg": bytes|None, "numero": str}."""
+    jpeg, numero = None, ""
     with contextlib.suppress(Exception):
         await page.locator("#main header").first.click()
         await page.wait_for_function(
@@ -677,22 +757,29 @@ async def _capturar_contato_jpeg(page) -> bytes | None:
         h = await page.evaluate_handle(_JS_DRAWER_CONTATO)
         el = h.as_element()
         if el:
-            contato = await el.screenshot(type="jpeg", quality=85)
+            jpeg = await el.screenshot(type="jpeg", quality=85)
+            texto = await el.inner_text()
+            m = _RE_TEL_BR.search(texto or "")
+            if m:
+                numero = normalizar_numero(m.group(0))
         await page.keyboard.press("Escape")  # fecha o painel
-    return bytes(contato) if contato else None
+    return {"jpeg": bytes(jpeg) if jpeg else None, "numero": numero}
 
 
 async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
-                                baseline_h=None) -> str | None:
+                                baseline_h=None) -> dict:
     """Gera o comprovante PDF: página 1 = Dados do contato (foto+nome+número do
     destinatário — SÓ o painel, sem barra lateral); páginas seguintes = a CONVERSA em
     fatias (todo o bloco enviado, com CSS zoom p/ caber mais por página — ver
-    WA_COMPROVANTE_ZOOM). Nome: Envio_Whats_Painel_[PAJ_]AAAA-MM-DD_HH-MM-SS.pdf."""
-    destino = None
+    WA_COMPROVANTE_ZOOM). Nome: Envio_Whats_Painel_[PAJ_]AAAA-MM-DD_HH-MM-SS.pdf.
+    Retorna {"pdf": caminho|None, "numero_confirmado": str} — o número é o mesmo
+    extraído do painel "Dados do contato" (ver `_capturar_contato_jpeg`)."""
+    destino, numero_confirmado = None, ""
     try:
         conv = await _capturar_conversa_fatias(page, baseline_h)
         contato = await _capturar_contato_jpeg(page)
-        jpegs = ([contato] if contato else []) + list(conv)
+        numero_confirmado = contato.get("numero", "")
+        jpegs = ([contato["jpeg"]] if contato.get("jpeg") else []) + list(conv)
         if jpegs:
             ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
             ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -702,7 +789,7 @@ async def _capturar_comprovante(page, comprovante_dir: str, paj_ref: str = "",
             _jpegs_to_pdf(jpegs, destino)
     except Exception:  # noqa: BLE001
         destino = None
-    return destino
+    return {"pdf": destino, "numero_confirmado": numero_confirmado}
 
 
 async def _capturar_resposta(page, destino_dir: str, paj_ref: str = "") -> str | None:
@@ -716,7 +803,7 @@ async def _capturar_resposta(page, destino_dir: str, paj_ref: str = "") -> str |
     try:
         conv = await _capturar_conversa_fatias(page, None)
         contato = await _capturar_contato_jpeg(page)
-        jpegs = ([contato] if contato else []) + list(conv)
+        jpegs = ([contato["jpeg"]] if contato.get("jpeg") else []) + list(conv)
         if jpegs:
             ref = re.sub(r"[^\w.-]", "_", paj_ref or "").strip("_")
             ts = _dt.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -730,19 +817,29 @@ async def _capturar_resposta(page, destino_dir: str, paj_ref: str = "") -> str |
 
 
 async def capturar_pdf_resposta(numero: str, destino_dir: str, paj_ref: str = "",
-                                 headless: bool = True) -> str | None:
-    """Abre o chat de `numero` e gera o PDF da resposta do assistido (ver
+                                 headless: bool = True, numeros_registrados: list[str] | None = None) -> str | None:
+    """Encontra, entre TODAS as conversas relacionadas ao PAJ (o(s) número(s)
+    cadastrado(s) MAIS o(s) descoberto(s) pela busca "PAJ <numero>" — ver
+    `_ler_conversas_do_paj`), a que tem resposta do assistido, e gera o PDF dela (ver
     `_capturar_resposta`) — usado por `confirmar_recebimento` para anexar a resposta
     à movimentação que a registra no PAJ. Operação SOMENTE LEITURA (não digita nem
-    envia nada). `paj_ref` também ativa o Plano B (busca por texto) se o número não
-    abrir a conversa certa — ver `_abrir_conversa`. Retorna o caminho do PDF, ou None
-    se não conseguir — nunca levanta; a movimentação segue normalmente sem o anexo."""
+    envia nada). Retorna o caminho do PDF, ou None se não conseguir — nunca levanta;
+    a movimentação segue normalmente sem o anexo."""
+    candidatos = [numero] + list(numeros_registrados or [])
     async with async_playwright() as p:
         ctx = await abrir_contexto(p, headless=headless)
         page = ctx.pages[0] if ctx.pages else await ctx.new_page()
         try:
-            abertura = await _abrir_conversa(page, numero, paj_ref)
-            if not abertura.get("ok"):
+            leitura = await _ler_conversas_do_paj(page, candidatos, paj_ref, 60)
+            if not leitura.get("ok"):
+                return None
+            dumps = leitura["dumps"]
+            numeros_verificados = leitura["numeros_verificados"]
+            com_resposta = [n for n in numeros_verificados if _processar_dump_resposta(dumps[n])["tem_resposta"]]
+            alvo = com_resposta[0] if com_resposta else numeros_verificados[0]
+            # Reabre a conversa-alvo (a última aberta pelo loop acima pode ser outra) —
+            # _capturar_resposta precisa da página posicionada nela para o print.
+            if not await _abrir_numero_direto(page, alvo):
                 return None
             await page.wait_for_timeout(800)
             return await _capturar_resposta(page, destino_dir, paj_ref)
@@ -859,16 +956,19 @@ async def enviar_mensagem(
             todos_ok = bool(etapas) and all(ok for _, ok in etapas)
             algum_ok = any(ok for _, ok in etapas)
             comprovante = None
+            numero_confirmado = intl  # fallback: nosso número normalizado, se não der p/ extrair do painel
             if comprovante_dir and algum_ok:
                 await page.wait_for_timeout(800)
-                comprovante = await _capturar_comprovante(page, comprovante_dir, paj_ref,
-                                                          baseline_h=base_conv_h)
+                cap = await _capturar_comprovante(page, comprovante_dir, paj_ref, baseline_h=base_conv_h)
+                comprovante = cap.get("pdf")
+                numero_confirmado = cap.get("numero_confirmado") or intl
             desc = ", ".join(f"{n}{'' if ok else ' (não confirmado)'}" for n, ok in etapas)
             nota_aus = f" · {len(ausentes)} anexo(s) ausente(s)" if ausentes else ""
             return {"ok": todos_ok,
                     "status": "enviado" if todos_ok else ("parcial" if algum_ok else "falha"),
                     "detalhe": f"WhatsApp p/ {intl}: {desc}{nota_aus}",
-                    "comprovante": comprovante}
+                    "comprovante": comprovante,
+                    "numero_confirmado": numero_confirmado}
         finally:
             await ctx.close()
 

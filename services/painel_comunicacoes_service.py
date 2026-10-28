@@ -3155,6 +3155,30 @@ def _dias_desde(ts: str) -> int | None:
     return (_dt.datetime.now().date() - dt.date()).days
 
 
+def _numeros_candidatos(reg: dict) -> list[str]:
+    """Números candidatos p/ reabrir a conversa do WhatsApp deste registro — prioriza
+    os números CONFIRMADOS pelo próprio WhatsApp no momento do envio (`numeros_confirmados`
+    — ground truth lido do painel "Dados do contato", disponível em envios novos). Para
+    registros ANTIGOS (sem esse campo), reconstrói o mesmo formato a partir do número
+    cadastrado: DDI 55 + DDD + número (`normalizar_numero` — a mesma conta já usada por
+    `enviar_mensagem` para montar o link de envio, e cujo resultado já fica registrado
+    no próprio log de cada item, ex. "WhatsApp p/ 5541999082652"). Cobre ~99% dos casos
+    (o usuário confirmou, 2026-10-28, que o único diferencial do "número simplificado"
+    é a ausência do DDI — DDD e número continuam os mesmos). Inclui também o número
+    cadastrado cru por último, sem duplicar, como última rede de segurança."""
+    from ingestao.whatsapp_client import normalizar_numero
+    confirmados = [n for n in (reg.get("numeros_confirmados") or []) if n]
+    registrados = [n for n in (reg.get("numeros") or []) if n]
+    reconstruidos = [normalizar_numero(n) for n in registrados]
+    vistos: set[str] = set()
+    candidatos: list[str] = []
+    for n in confirmados + reconstruidos + registrados:
+        if n and n not in vistos:
+            vistos.add(n)
+            candidatos.append(n)
+    return candidatos
+
+
 def _candidatos_confirmacao():
     """Registros ainda pendentes de confirmação (WhatsApp, tramitado p/ caixa de
     aguardo, não confirmado/removido) — SEM aplicar corte de antiguidade. Base
@@ -3324,7 +3348,7 @@ async def verificar_confirmacoes_stream():
     # Lê o WhatsApp de cada pendência (uma conversa por vez — perfil é de 1 processo só).
     itens: list[dict] = []
     for r in pendentes:
-        numeros = r.get("numeros") or []
+        numeros = _numeros_candidatos(r)
         numero = numeros[0] if numeros else ""
         id_tram = mapa_id_tramite.get(r["id"], "")
         caixa_lida_ok = r["tram_caixa"] in caixas_ok
@@ -3363,7 +3387,8 @@ async def verificar_confirmacoes_stream():
         # pelo PAJ no texto da mensagem (Plano B — ver _abrir_conversa).
         yield {"level": "muted", "msg": f"     PAJ {item['paj']} — lendo o WhatsApp ({numero or 'sem número, buscando pelo PAJ'})…"}
         try:
-            leitura = await whatsapp_client.ler_respostas_apos_envio(numero, paj_ref=r.get("paj", ""))
+            leitura = await whatsapp_client.ler_respostas_apos_envio(
+                numero, paj_ref=r.get("paj", ""), numeros_registrados=numeros[1:])
         except Exception as e:  # noqa: BLE001
             leitura = {"ok": False, "detalhe": f"exceção: {e}"}
         if not leitura.get("ok"):
@@ -3452,11 +3477,13 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
     # movimentação, igual já fazemos com o comprovante quando a mensagem é enviada.
     # Best-effort: se não conseguir gerar, a movimentação segue sem o anexo.
     anexos_mov: list[dict] = []
-    numero_resp = (reg.get("numeros") or [""])[0]
+    numeros_reg = _numeros_candidatos(reg)
+    numero_resp = numeros_reg[0] if numeros_reg else ""
     if texto_resposta and (numero_resp or reg.get("paj", "")):
         try:
             pdf_resposta = await whatsapp_client.capturar_pdf_resposta(
-                numero_resp, str(COMPROVANTES_WA_DIR), paj_ref=reg.get("paj", ""))
+                numero_resp, str(COMPROVANTES_WA_DIR), paj_ref=reg.get("paj", ""),
+                numeros_registrados=numeros_reg[1:])
         except Exception:  # noqa: BLE001
             pdf_resposta = None
         if pdf_resposta:
@@ -3559,7 +3586,8 @@ async def verificar_uma_pendencia(historico_id: str) -> dict:
     reg = historico_service.obter(historico_id)
     if not reg:
         return {"ok": False, "erro": "Registro do histórico não encontrado."}
-    numero = (reg.get("numeros") or [""])[0]
+    numeros_reg = _numeros_candidatos(reg)
+    numero = numeros_reg[0] if numeros_reg else ""
     tram_caixa = reg.get("tram_caixa", "")
     item = {"historico_id": historico_id, "paj": reg.get("paj", ""), "paj_norm": reg.get("paj_norm", ""),
             "assistido": reg.get("assistido", ""), "numero": numero, "mov_seq": reg.get("mov_seq"),
@@ -3597,7 +3625,8 @@ async def verificar_uma_pendencia(historico_id: str) -> dict:
         _persistir_verificacao(historico_id, item)
         return {"ok": True, "item": item, "mensagens": reg.get("conversa_cache") or []}
     try:
-        leitura = await whatsapp_client.ler_respostas_apos_envio(numero, paj_ref=reg.get("paj", ""))
+        leitura = await whatsapp_client.ler_respostas_apos_envio(
+            numero, paj_ref=reg.get("paj", ""), numeros_registrados=numeros_reg[1:])
     except Exception as e:  # noqa: BLE001
         leitura = {"ok": False, "detalhe": f"exceção: {e}"}
     if not leitura.get("ok"):
@@ -3631,7 +3660,7 @@ async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> di
     reg = historico_service.obter(historico_id)
     if not reg:
         return {"ok": False, "erro": "Registro do histórico não encontrado."}
-    numeros = reg.get("numeros") or []
+    numeros = _numeros_candidatos(reg)
     numero = numeros[0] if numeros else ""
     if not forcar and reg.get("conversa_cache") is not None:
         return {"ok": True, "numero": numero, "assistido": reg.get("assistido", ""),
@@ -3650,7 +3679,7 @@ async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> di
         return {"ok": False, "erro": "Sem número de WhatsApp registrado neste envio."}
     from ingestao import whatsapp_client
     try:
-        r = await whatsapp_client.obter_conversa(numero, paj_ref=reg.get("paj", ""))
+        r = await whatsapp_client.obter_conversa(numero, paj_ref=reg.get("paj", ""), numeros_registrados=numeros[1:])
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "erro": f"exceção: {e}"}
     if not r.get("ok"):
@@ -4729,7 +4758,8 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                     mensagem_prazo=msg_prazo,
                     mensagem_referencia=(f"Contato referente ao PAJ {paj}" if paj else ""))
                 comp = r1.get("comprovante")
-                envios.append({"numero": numero, "ok": r1.get("ok"),
+                envios.append({"numero": numero, "numero_confirmado": r1.get("numero_confirmado") or "",
+                               "ok": r1.get("ok"),
                                "status": r1.get("status", "falha"), "detalhe": r1.get("detalhe", ""),
                                "comprovante": comp, "comprovante_nome": Path(comp).name if comp else ""})
                 _passo(log, emit, f"Envio da mensagem (WhatsApp) → {numero}",
@@ -4758,6 +4788,11 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
                    False, e["detalhe"])
 
         numeros_ok = [e["numero"] for e in oks]
+        # Número no formato RECONHECIDO PELO WHATSAPP (ground truth, lido do painel
+        # "Dados do contato" no momento do envio — ver whatsapp_client._capturar_contato_jpeg)
+        # — mais confiável que o número cadastrado para reabrir a conversa depois
+        # (pedido do usuário, 2026-10-28). Cai para o cadastrado quando não extraiu.
+        numeros_confirmados_ok = [e.get("numero_confirmado") or e["numero"] for e in oks]
         comprovantes = [{"nome": e["comprovante_nome"], "caminho": e["comprovante"]}
                         for e in oks if e.get("comprovante")]
         # p/ histórico/UI: nome do PDF associado a cada número contatado
@@ -4815,6 +4850,7 @@ async def enviar_whatsapp_tramite(slug: str, paj_norm: str, id_tramite: str,
             "comprovante": (comps_nomes[0] if comps_nomes else ""),
             "comprovantes": comprovantes_reg,
             "numeros": numeros_ok,
+            "numeros_confirmados": numeros_confirmados_ok,
             # documentação no PAJ (movimentação + tramitação opcional) + log individual
             "mov_seq": mov_tram["mov_seq"], "mov_status": mov_tram["mov_status"],
             "mov_detalhe": mov_tram["mov_detalhe"], "mov_url": mov_tram.get("mov_url", ""),
