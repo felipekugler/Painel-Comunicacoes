@@ -3155,6 +3155,29 @@ def _dias_desde(ts: str) -> int | None:
     return (_dt.datetime.now().date() - dt.date()).days
 
 
+def contar_ocultos_por_cutoff() -> int:
+    """Quantos PAJs seriam candidatos a confirmação (mesmos critérios de
+    `listar_aguardando_confirmacao`), mas estão ocultos pelo corte de antiguidade —
+    só para avisar na tela, evitando a sensação de "sumiu sem explicação"."""
+    from services import config_service, historico_service
+    cutoff = config_service.get_confirmacoes_cutoff_dias()
+    if not cutoff:
+        return 0
+    n = 0
+    for r in historico_service.listar():
+        meios = r.get("meios") or ([r["meio"]] if r.get("meio") else [])
+        if "whatsapp" not in meios:
+            continue
+        if r.get("tram_status") != "tramitado" or not r.get("tram_caixa"):
+            continue
+        if r.get("confirmacao_status") in ("confirmado", "removido"):
+            continue
+        dias = _dias_desde(r.get("ts", ""))
+        if dias is not None and dias > cutoff:
+            n += 1
+    return n
+
+
 def listar_aguardando_confirmacao() -> list[dict]:
     """Registros do Histórico com WhatsApp enviado e TRAMITADO para uma caixa de aguardo
     — candidatos à confirmação de recebimento. ⚠️ `concluido_status` do registro NÃO serve
@@ -3164,8 +3187,14 @@ def listar_aguardando_confirmacao() -> list[dict]:
     existe de fato na caixa de grupo do SISDPU; `verificar_confirmacoes_stream` confere
     ao vivo). Aqui só filtramos pelo campo próprio `confirmacao_status` (marcado por
     `confirmar_recebimento` quando o usuário já confirmou por esta central, ou por
-    `remover_pendencia_confirmacao` quando o usuário tirou o item da lista sem confirmar)."""
-    from services import historico_service
+    `remover_pendencia_confirmacao` quando o usuário tirou o item da lista sem confirmar).
+    ⚠️ Corte de antiguidade (`config_service.get_confirmacoes_cutoff_dias`, padrão 10
+    dias): PAJs cujo ÚLTIMO envio é mais antigo que o corte NÃO aparecem — residual
+    pequeno, tratado manualmente como era antes desta central existir (evita que uma
+    instalação em máquina com histórico acumulado despeje centenas de PAJs antigos já
+    resolvidos por fora, com risco de duplicar ação no SISDPU). 0 = sem corte."""
+    from services import config_service, historico_service
+    cutoff = config_service.get_confirmacoes_cutoff_dias()
     out = []
     for r in historico_service.listar():
         meios = r.get("meios") or ([r["meio"]] if r.get("meio") else [])
@@ -3178,6 +3207,8 @@ def listar_aguardando_confirmacao() -> list[dict]:
         # Selo "N dias" na Situação: antiguidade do envio (ts) e se o prazo (dias)
         # já decorreu — calculado a cada leitura, não é persistido no registro.
         dias = _dias_desde(r.get("ts", ""))
+        if cutoff and dias is not None and dias > cutoff:
+            continue
         try:
             prazo_dias = int(r.get("prazo") or 0)
         except (TypeError, ValueError):

@@ -29,6 +29,7 @@ async def confirmacoes_page(request: Request):
     template = request.app.state.jinja.get_template("confirmacoes.html")
     return HTMLResponse(template.render(
         request=request, pendentes=pendentes, confirmadas=confirmadas,
+        ocultos_cutoff=svc.contar_ocultos_por_cutoff(),
         disparos=disparos_service.listar_disparos(meio="confirmacao_leitura", limite=25)))
 
 

@@ -189,6 +189,34 @@ def set_prazo_tramitacao_padrao(n: int) -> int:
     return d["prazo_tramitacao_padrao"]
 
 
+# ---------------- corte de antiguidade da Central de Confirmações de leitura ----------------
+# Pedido do usuário (2026-10-28): ao instalar a central numa máquina com histórico
+# acumulado, TODOS os envios antigos (já tratados manualmente, antes da central
+# existir) apareciam de uma vez como "pendentes" — centenas de linhas, risco de
+# duplicar ação no SISDPU num PAJ já resolvido por fora. O corte oculta da lista
+# qualquer PAJ cujo ÚLTIMO envio por WhatsApp tenha mais que N dias (residual
+# tratado manualmente, como era antes da funcionalidade existir). 0 = sem corte.
+CONFIRMACOES_CUTOFF_DIAS_PADRAO = 10
+
+
+def get_confirmacoes_cutoff_dias() -> int:
+    """Dias de antiguidade do envio além dos quais o PAJ some da lista de pendentes
+    de confirmação (0 = sem corte, mostra tudo). Padrão 10. Entre 0 e 365 dias."""
+    n = ler_config().get("confirmacoes_cutoff_dias", CONFIRMACOES_CUTOFF_DIAS_PADRAO)
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = CONFIRMACOES_CUTOFF_DIAS_PADRAO
+    return max(0, min(n, 365))
+
+
+def set_confirmacoes_cutoff_dias(n: int) -> int:
+    d = ler_config()
+    d["confirmacoes_cutoff_dias"] = max(0, min(int(n), 365))
+    _gravar(d)
+    return d["confirmacoes_cutoff_dias"]
+
+
 # ---------------- feriados / dias não úteis (ajuste da data de conclusão) ----------------
 # Sábados e domingos já são tratados como não úteis automaticamente (regra fixa); aqui só
 # cadastramos os dias ADICIONAIS (feriados, recesso forense) — pedido da usuária Larissa

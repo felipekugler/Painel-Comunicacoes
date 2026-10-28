@@ -539,6 +539,26 @@
     </div>
 
     <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
+        <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Confirmações de leitura (WhatsApp)</h2>
+        <h3 style="font-size:14.5px;font-weight:600;margin:14px 0 4px;">Corte de antiguidade</h3>
+        <p class="text-secondary" style="font-size:13px;margin:0 0 12px;">
+            PAJs cujo <strong>último envio por WhatsApp</strong> é mais antigo que este número de dias
+            <strong>não aparecem</strong> na lista de pendentes de confirmação — evita que uma instalação nova
+            (ou numa máquina com histórico acumulado) mostre de uma vez centenas de PAJs antigos já tratados
+            manualmente, com risco de duplicar uma ação no SISDPU. Esse residual continua sendo tratado como
+            era feito manualmente antes desta central existir. Use <strong>0</strong> para não aplicar corte
+            (mostrar tudo).
+        </p>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <label for="conf-cutoff-dias" style="font-size:14px;">Corte (dias):</label>
+            <input type="number" id="conf-cutoff-dias" class="wa-input" style="width:90px;"
+                   min="0" max="365" value="{{ confirmacoes_cutoff_dias }}">
+            <button class="btn-accent" onclick="saveConfirmacoesCutoff()">Salvar</button>
+            <span id="conf-cutoff-status" class="text-tertiary" style="font-size:12px;"></span>
+        </div>
+    </div>
+
+    <div class="fluent-card" style="padding:22px;max-width:720px;margin-top:22px;">
         <h2 class="font-display cfg-sec" style="font-size:18px;margin:0 0 4px;">Correspondências / Carta (Correios)</h2>
         <p class="text-secondary" style="font-size:13px;margin:0 0 14px;">
             Padrões usados na expedição de <strong>e-Carta</strong> pelos Correios. O <strong>corpo</strong> da carta é
@@ -1073,6 +1093,16 @@ async function savePrazoTramPadrao(){
     const r=await fetch('/api/config/prazo-tramitacao-padrao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dias})});
     const d=await r.json();
     if(d.ok){ el.value=d.dias; st.textContent=''; toast('Prazo padrão salvo ('+d.dias+' dias)'); }
+    else { st.textContent='Falha ao salvar.'; }
+}
+async function saveConfirmacoesCutoff(){
+    const el=document.getElementById('conf-cutoff-dias');
+    const st=document.getElementById('conf-cutoff-status');
+    const dias=parseInt(el.value,10);
+    if(!Number.isInteger(dias) || dias<0 || dias>365){ st.textContent='Informe de 0 a 365 dias.'; return; }
+    const r=await fetch('/api/config/confirmacoes-cutoff-dias',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dias})});
+    const d=await r.json();
+    if(d.ok){ el.value=d.dias; st.textContent=''; toast(d.dias==0 ? 'Corte desativado (mostra tudo)' : 'Corte salvo ('+d.dias+' dias)'); }
     else { st.textContent='Falha ao salvar.'; }
 }
 async function _saveCartaTexto(url, elId, stId, rotulo){

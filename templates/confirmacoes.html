@@ -54,6 +54,13 @@
         <strong>"Verificar respostas"</strong> para o painel ler o WhatsApp de cada contato para
         verificar se houve resposta. Após, decida se deve ser movimentado e concluído o PAJ.
     </p>
+    {% if ocultos_cutoff %}
+    <p class="text-tertiary mt-1" style="font-size:12px;">
+        {{ ocultos_cutoff }} PAJ{{ 's' if ocultos_cutoff != 1 else '' }} com envio mais antigo que o corte de
+        antiguidade não aparece{{ 'm' if ocultos_cutoff != 1 else '' }} aqui (residual tratado manualmente, como
+        era antes desta central existir) — ajustável em <a href="/configuracoes" class="accent-link">Configurações</a>.
+    </p>
+    {% endif %}
 </div>
 
 <div class="mb-3" style="display:flex;align-items:center;gap:10px;">

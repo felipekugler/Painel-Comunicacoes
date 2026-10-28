@@ -48,6 +48,7 @@ async def configuracoes(request: Request):
         layout_pendentes=config_service.get_layout_pendentes(),
         prazos_predefinidos=config_service.get_prazos_predefinidos(),
         prazo_tramitacao_padrao=config_service.get_prazo_tramitacao_padrao(),
+        confirmacoes_cutoff_dias=config_service.get_confirmacoes_cutoff_dias(),
         feriados=config_service.get_feriados(),
         carta_cabecalho=config_service.get_carta_cabecalho(),
         carta_rodape=config_service.get_carta_rodape(),
@@ -204,6 +205,18 @@ async def set_prazo_tramitacao_padrao(payload: dict = Body(...)):
     except (TypeError, ValueError):
         return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
     return {"ok": True, "dias": config_service.set_prazo_tramitacao_padrao(n)}
+
+
+@router.post("/api/config/confirmacoes-cutoff-dias", response_class=JSONResponse)
+async def set_confirmacoes_cutoff_dias(payload: dict = Body(...)):
+    """Corte de antiguidade (dias) da Central de Confirmações de leitura — PAJs cujo
+    último envio é mais antigo que isso somem da lista de pendentes. 0 = sem corte.
+    Inteiro entre 0 e 365."""
+    try:
+        n = int((payload or {}).get("dias"))
+    except (TypeError, ValueError):
+        return JSONResponse({"ok": False, "erro": "valor inválido"}, status_code=400)
+    return {"ok": True, "dias": config_service.set_confirmacoes_cutoff_dias(n)}
 
 
 @router.post("/api/config/feriados", response_class=JSONResponse)
