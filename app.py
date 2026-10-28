@@ -60,7 +60,10 @@ def _configurar_logging() -> None:
 _configurar_logging()
 
 # Versao do painel — fonte unica. Exposta a todos os templates via Jinja globals.
-APP_VERSION = "0.1.0"
+# Convenção (pedido do usuário, 2026-10-28): subir esta versão a cada alteração
+# relevante — PATCH p/ correção de bug, MINOR p/ funcionalidade nova, MAJOR p/
+# mudança estrutural/incompatível.
+APP_VERSION = "0.2.0"
 
 app = FastAPI(title="painel-comunicacoes", version=APP_VERSION)
 app.state.jinja = jinja2.Environment(

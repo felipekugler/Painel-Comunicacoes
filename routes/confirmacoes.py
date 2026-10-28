@@ -26,6 +26,9 @@ router = APIRouter()
 @router.get("/confirmacoes", response_class=HTMLResponse)
 async def confirmacoes_page(request: Request):
     pendentes = svc.listar_aguardando_confirmacao()
+    # "Respondido"/"Lida" sobem pro topo da tabela (pedido do usuário, 2026-10-28) —
+    # sort ESTÁVEL: preserva a ordem relativa dentro de cada grupo.
+    pendentes.sort(key=lambda p: 0 if (p.get("verif_confirmou") or p.get("verif_status_leitura") == "lida") else 1)
     confirmadas = svc.listar_confirmadas()
     template = request.app.state.jinja.get_template("confirmacoes.html")
     return HTMLResponse(template.render(

@@ -3296,6 +3296,33 @@ def contar_confirmacoes() -> dict:
     return {"total": len(listar_aguardando_confirmacao())}
 
 
+def _nivel_log_situacao(leitura: dict) -> str:
+    """Nível da linha de log (SSE) pro resultado de UMA leitura — mesma prioridade da
+    Situação mostrada na tabela (ver template): confirmou > lida > aguardando_leitura
+    > aguardando_entrega > tem_resposta (sem texto legível) > nada. Pedido do usuário,
+    2026-10-28: o log de "Verificar respostas" só mostrava "ainda sem resposta" ou
+    "possível confirmação" — não refletia os estados intermediários novos."""
+    if leitura.get("confirmou") or leitura.get("status_leitura") == "lida":
+        return "ok"
+    return "muted"
+
+
+def _msg_log_situacao(leitura: dict) -> str:
+    """Texto da linha de log — mesma prioridade de `_nivel_log_situacao`."""
+    status = leitura.get("status_leitura", "")
+    if leitura.get("confirmou"):
+        return "resposta com possível confirmação."
+    if status == "lida":
+        return "mensagem lida pelo assistido no WhatsApp — possível confirmação (sem resposta por texto)."
+    if status == "aguardando_leitura":
+        return "mensagem entregue ao WhatsApp do assistido — ainda não foi lida."
+    if status == "aguardando_entrega":
+        return "mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido."
+    if leitura.get("tem_resposta"):
+        return "há resposta, mas sem confirmação clara — confira."
+    return "ainda sem resposta."
+
+
 async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
     """Varre as pendências de confirmação (ver `listar_aguardando_confirmacao`): resolve
     o id_tramite ATUAL de cada uma na caixa de grupo para onde foi tramitada (pode ter
@@ -3427,15 +3454,11 @@ async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
                 yield {"level": "aviso", "msg": f"     PAJ {item['paj']}: o número cadastrado não abriu a "
                                                 "conversa certa — achei pelo texto da mensagem (busca pelo "
                                                 "PAJ). Confira/atualize o número cadastrado."}
-            if leitura.get("confirmou"):
-                yield {"level": "ok", "msg": f"     PAJ {item['paj']}: resposta com possível confirmação."}
-            elif leitura.get("tem_resposta"):
-                yield {"level": "muted", "msg": f"     PAJ {item['paj']}: há resposta, mas sem confirmação clara — confira."}
-            else:
-                yield {"level": "muted", "msg": f"     PAJ {item['paj']}: ainda sem resposta."}
+            yield {"level": _nivel_log_situacao(leitura),
+                   "msg": f"     PAJ {item['paj']}: {_msg_log_situacao(leitura)}"}
         _persistir_verificacao(r["id"], item)
         itens.append(item)
-    n_conf = sum(1 for it in itens if it.get("confirmou"))
+    n_conf = sum(1 for it in itens if it.get("confirmou") or it.get("status_leitura") == "lida")
     yield {"level": "ok", "msg": f"Verificação concluída: {len(itens)} item(ns) · {n_conf} com possível confirmação."}
     yield {"done": True, "resultado": {"itens": itens}}
 
@@ -3708,10 +3731,13 @@ async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> di
     conversa" (celular simulado). SOMENTE LEITURA (não movimenta/conclui nada).
 
     Por padrão usa o CACHE gravado a cada "Verificar respostas" (`conversa_cache` no
-    histórico) — abre na hora, sem Playwright. `forcar=True` (botão "Atualizar agora"
-    no modal): se o item ainda está pendente de confirmação, roda a reverificação
-    completa (`verificar_uma_pendencia`) — assim a Situação/botões da linha na tabela
-    de pendentes já saem atualizados, sem precisar de "Verificar respostas" em lote.
+    histórico) — abre na hora, sem Playwright. Quando precisa ler o WhatsApp ao vivo
+    (cache ainda vazio — 1ª vez que alguém abre a conversa deste item — OU
+    `forcar=True`, botão "Atualizar agora" no modal) e o item ainda está pendente de
+    confirmação, roda a reverificação completa (`verificar_uma_pendencia`) em vez de
+    uma leitura "muda" — assim a Situação/botões da linha na tabela de pendentes já
+    saem atualizados na hora, sem precisar de "Verificar respostas" em lote depois
+    (bug relatado pelo usuário, 2026-10-28: abrir a conversa não atualizava a Situação).
     Para um item já concluído/removido, só relê a conversa (não há mais o que verificar)."""
     from services import historico_service
     reg = historico_service.obter(historico_id)
@@ -3724,7 +3750,7 @@ async def obter_conversa_whatsapp(historico_id: str, forcar: bool = False) -> di
                 "mensagens": reg.get("conversa_cache") or [],
                 "cache": True, "cache_em": reg.get("conversa_cache_em", "")}
     ainda_pendente = reg.get("confirmacao_status") not in ("confirmado", "removido")
-    if forcar and ainda_pendente:
+    if ainda_pendente:
         v = await verificar_uma_pendencia(historico_id)
         if not v.get("ok"):
             return {"ok": False, "erro": v.get("erro") or "falha ao reverificar"}

@@ -6,13 +6,31 @@
 .conf-badge { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 10px; border-radius:999px; white-space:nowrap; border:1px solid transparent; }
 .conf-ok    { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border-color:color-mix(in srgb,#16a34a 45%,transparent); }
 .conf-lida  { color:#0a7ea6; background:color-mix(in srgb,#53bdeb 16%,transparent); border-color:color-mix(in srgb,#53bdeb 55%,transparent); }
+/* Cor própria por situação (pedido do usuário, 2026-10-28) — Erro=vermelho,
+   Respondido=verde, Lida=azul (acima), Aguardando leitura=âmbar, Aguardando
+   entrega=slate, Não=violeta, não verificado=neutro (conf-sem, inalterado). */
+.conf-aguardando-leitura { color:#b45309; background:color-mix(in srgb,#b45309 12%,transparent); border-color:color-mix(in srgb,#b45309 45%,transparent); }
+.conf-aguardando-entrega { color:#64748b; background:color-mix(in srgb,#64748b 12%,transparent); border-color:color-mix(in srgb,#64748b 40%,transparent); }
+.conf-nao   { color:#7c3aed; background:color-mix(in srgb,#7c3aed 12%,transparent); border-color:color-mix(in srgb,#7c3aed 40%,transparent); }
 .conf-sem   { color:var(--text-tertiary); background:transparent; border-color:var(--stroke); }
 .conf-erro  { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
+/* Selos de filtro rápido "Lidas"/"Respondidas" (pedido do usuário, 2026-10-28,
+   substitui o antigo botão único "Só respondidos") — toggle on/off, combináveis. */
+.conf-filtro-chip { font-size:11.5px; padding:4px 12px; border-radius:999px; cursor:pointer;
+                     border:1px solid var(--stroke-strong); background:transparent; color:var(--text-secondary); }
+.conf-filtro-chip:hover { border-color:var(--accent); color:var(--text); }
+.conf-filtro-chip.ativo { background:var(--accent); color:var(--accent-fg); border-color:var(--accent); font-weight:600; }
 .conf-resposta { font-size:12px; color:var(--text-secondary); text-align:left; }
 .conf-acao-cel { display:flex; flex-direction:column; gap:5px; align-items:stretch; }
 .conf-acao-cel .conf-lote-linha { display:flex; gap:5px; }
 .conf-acao-cel .conf-lote-linha button { flex:1; }
 .conf-row-selecionada { background:color-mix(in srgb, var(--accent) 7%, transparent); }
+/* Selo azul abaixo do PAJ quando a linha está incluída no bloco (pedido do usuário,
+   2026-10-28 — só a cor de fundo da linha era pouco visível). */
+.conf-lote-selo { display:none; margin-top:3px; font-size:9.5px; font-weight:700; padding:1px 7px;
+    border-radius:999px; background:color-mix(in srgb, var(--accent) 20%, transparent); color:var(--accent);
+    border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); white-space:nowrap; width:fit-content; }
+.conf-row-selecionada .conf-lote-selo { display:inline-block; }
 #conf-lote-bar { display:none; align-items:center; gap:12px; padding:10px 16px; margin-bottom:14px;
                  background:color-mix(in srgb, var(--accent) 6%, transparent);
                  border-color:color-mix(in srgb, var(--accent) 30%, transparent); }
@@ -28,14 +46,21 @@
 /* Celular simulado (mesmo estilo do "Sistema de Substituições") — cores fixas de
    WhatsApp (não seguem tema claro/escuro do painel, igual ao app real). */
 #conf-chat-modal { position:fixed; inset:0; z-index:3500; background:rgba(0,0,0,.5);
-                    display:none; align-items:center; justify-content:center; padding:20px; }
-.conf-cel-dialog { width:100%; max-width:380px; padding:18px; }
-.conf-cel { background:#111; border-radius:28px; padding:12px; }
+                    display:none; align-items:center; justify-content:center; padding:20px;
+                    overflow-y:auto; }
+/* Tela maior (pedido do usuário, 2026-10-28): 60% da largura e 70% da altura da
+   tela, fixos — o "celular" (.conf-cel) e a lista de mensagens (.conf-chat) crescem
+   via flexbox pra preencher esse tamanho; só a lista mantém rolagem própria, como
+   no WhatsApp real. */
+.conf-cel-dialog { width:60vw; height:70vh; padding:18px; box-sizing:border-box;
+                    display:flex; flex-direction:column; }
+.conf-cel { background:#111; border-radius:28px; padding:12px; flex:1; min-height:0;
+            display:flex; flex-direction:column; }
 .conf-cel-topo { background:#075e54; color:#fff; border-radius:18px 18px 0 0; padding:10px 14px;
-                 display:flex; gap:8px; align-items:center; font-size:13px; }
-.conf-chat { background:#efeae2; height:440px; overflow-y:auto; padding:10px; display:flex;
+                 display:flex; gap:8px; align-items:center; font-size:13px; flex-shrink:0; }
+.conf-chat { background:#efeae2; flex:1; min-height:0; overflow-y:auto; padding:10px; display:flex;
              flex-direction:column; gap:6px; border-radius:0 0 18px 18px; }
-.conf-bolha { max-width:85%; padding:6px 9px 4px; border-radius:8px; font-size:13px; line-height:1.35;
+.conf-bolha { max-width:min(85%, 560px); padding:6px 9px 4px; border-radius:8px; font-size:13px; line-height:1.35;
               box-shadow:0 1px 1px rgba(0,0,0,.08); white-space:pre-wrap; }
 .conf-bolha.nossa { background:#d9fdd3; align-self:flex-end; }
 .conf-bolha.dele  { background:#fff; align-self:flex-start; }
@@ -70,8 +95,10 @@
     <button class="btn-accent" id="conf-verificar-btn" onclick="confVerificar()">Verificar respostas</button>
     <span id="conf-status" class="text-tertiary" style="font-size:12.5px;"></span>
     <span style="flex:1;"></span>
-    <button class="btn-subtle" id="conf-filtro-respondidos-btn" onclick="confToggleSoRespondidos(this)"
-            title="Mostra só as linhas com Situação &quot;Respondido&quot; ou &quot;Lida&quot;">Só respondidos</button>
+    <button type="button" class="conf-filtro-chip" onclick="confToggleFiltroChip('lida', this)"
+            title="Filtro rápido: mostra só as linhas com Situação &quot;Lida&quot;">Lidas</button>
+    <button type="button" class="conf-filtro-chip" onclick="confToggleFiltroChip('respondido', this)"
+            title="Filtro rápido: mostra só as linhas com Situação &quot;Respondido&quot;">Respondidas</button>
     <input type="text" id="conf-busca-input" class="wa-input" style="width:260px;font-size:12.5px;"
            placeholder="Buscar PAJ (ignora o corte de antiguidade)…"
            onkeydown="if(event.key==='Enter'){ event.preventDefault(); confBuscarPaj(); }">
@@ -132,7 +159,18 @@
             {# "Lida" (confirmação de leitura do WhatsApp) tem efeito equivalente a "Respondida"
                para habilitar o registro no PAJ — pedido do usuário, 2026-10-28. #}
             {% set habilitado = verificado and it.verif_pronto_para_concluir and (it.verif_confirmou or it.verif_status_leitura == 'lida') and not it.verif_erro %}
-            <tr class="conf-row" data-id="{{ it.id }}"
+            {# Chave de situação p/ o filtro da coluna (pedido do usuário, 2026-10-28) —
+               mesma prioridade do selo mostrado abaixo. #}
+            {% set situacao_key = (
+                'erro' if it.verif_erro else
+                'respondido' if (verificado and it.verif_confirmou) else
+                'lida' if (verificado and it.verif_status_leitura == 'lida') else
+                'aguardando_leitura' if (verificado and it.verif_status_leitura == 'aguardando_leitura') else
+                'aguardando_entrega' if (verificado and it.verif_status_leitura == 'aguardando_entrega') else
+                'nao' if verificado else
+                'nao_verificado'
+            ) %}
+            <tr class="conf-row" data-id="{{ it.id }}" data-situacao="{{ situacao_key }}"
                 data-texto-resposta="{{ it.verif_texto_resposta or '' }}"
                 data-data-resposta="{{ it.verif_data_resposta or '' }}">
                 <td>
@@ -143,6 +181,7 @@
                     {% else %}
                     <span style="font-family:'Cascadia Code','Consolas',monospace;font-weight:600;white-space:nowrap;">{{ it.paj }}</span>
                     {% endif %}
+                    <span class="conf-lote-selo">Incluído no bloco</span>
                 </td>
                 <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
                 <td class="text-secondary" style="font-size:12.5px;">{{ (it.numeros or [])|first or "—" }}</td>
@@ -173,11 +212,11 @@
                             {%- elif verificado and it.verif_status_leitura == 'lida' -%}
                             <span class="conf-badge conf-lida conf-pronto-registrar" title="Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).">Lida</span>
                             {%- elif verificado and it.verif_status_leitura == 'aguardando_leitura' -%}
-                            <span class="conf-badge conf-sem" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>
+                            <span class="conf-badge conf-aguardando-leitura" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>
                             {%- elif verificado and it.verif_status_leitura == 'aguardando_entrega' -%}
-                            <span class="conf-badge conf-sem" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>
+                            <span class="conf-badge conf-aguardando-entrega" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>
                             {%- elif verificado -%}
-                            <span class="conf-badge conf-sem" title="{{ 'Há resposta, mas sem texto legível para conferir.' if it.verif_tem_resposta else 'Ainda sem resposta.' }}">Não</span>
+                            <span class="conf-badge conf-nao" title="{{ 'Há resposta, mas sem texto legível para conferir.' if it.verif_tem_resposta else 'Ainda sem resposta.' }}">Não</span>
                             {%- else -%}
                             <span class="conf-badge conf-sem">não verificado</span>
                             {%- endif -%}
@@ -306,7 +345,7 @@ let confLote = {}; // historico_id -> {historico_id, texto_resposta, data_respos
 // ---------- Coluna "Encaminhamento" (nova tramitação opcional após registrar a
 // resposta — pedido do usuário, 2026-10-28) — mesmo padrão de caixa/prazo já usado
 // em "Gravar" (prontos.html): select + selos de caixas favoritas + selos de prazo.
-const CONF_PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};
+const CONF_PRAZOS_PREDEF = {{ (prazos_predefinidos or [])|tojson }};
 let _confGruposCache = null, _confGruposFav = [];
 
 async function confEncCarregarGrupos() {
@@ -387,27 +426,61 @@ function _confPintarLinha(it) {
     // pendentes + resultado de uma busca ativa) — repinta TODAS as cópias.
     document.querySelectorAll('.conf-row[data-id="' + it.historico_id + '"]').forEach(tr => _confPintarUmaLinha(tr, it));
     _confAplicarFiltroSituacao();
+    _confReordenarPendentes();
 }
 
-// Filtro "Só respondidos" (botão ao lado da busca por PAJ) — esconde, na tabela
-// visível no momento (pendentes OU resultado de busca), qualquer linha cuja
-// Situação não seja "Respondido". Reaplicado depois de toda repintura (verificar
-// respostas, busca por PAJ, atualizar conversa) pra não ficar desatualizado.
-let confSoRespondidosAtivo = false;
+// "Respondido"/"Lida" sobem pro topo da tabela de pendentes (pedido do usuário,
+// 2026-10-28) — reordena ao vivo depois de qualquer repintura (verificar em lote,
+// abrir conversa, atualizar agora), sem precisar recarregar a página. Só a tabela
+// de PENDENTES (a de busca já vem ordenada por data, da própria API).
+function _confReordenarPendentes() {
+    const tbody = document.querySelector('#conf-pendentes-table tbody');
+    if (!tbody) return;
+    const linhas = Array.from(tbody.querySelectorAll('.conf-row'));
+    const prontos = [], outros = [];
+    linhas.forEach(tr => {
+        const sit = tr.dataset.situacao;
+        ((sit === 'respondido' || sit === 'lida') ? prontos : outros).push(tr);
+    });
+    prontos.concat(outros).forEach(tr => tbody.appendChild(tr));
+}
 
-function confToggleSoRespondidos(btn) {
-    confSoRespondidosAtivo = !confSoRespondidosAtivo;
-    btn.classList.toggle('btn-accent', confSoRespondidosAtivo);
-    btn.classList.toggle('btn-subtle', !confSoRespondidosAtivo);
-    btn.textContent = confSoRespondidosAtivo ? '✕ Só respondidos' : 'Só respondidos';
+// Chave de situação (mesma prioridade do selo mostrado na coluna) — usada tanto pelo
+// filtro quanto pela reordenação. Aceita tanto o formato "verif_*" (registro do
+// histórico/busca) quanto o formato "cru" devolvido por uma verificação ao vivo
+// (`_confPintarUmaLinha`), que não tem o prefixo "verif_".
+function _confSituacaoKey(it, verificado) {
+    const erro = ('verif_erro' in it) ? it.verif_erro : it.erro;
+    const confirmou = ('verif_confirmou' in it) ? it.verif_confirmou : it.confirmou;
+    const statusLeitura = ('verif_status_leitura' in it) ? it.verif_status_leitura : it.status_leitura;
+    if (erro) return 'erro';
+    if (verificado && confirmou) return 'respondido';
+    if (verificado && statusLeitura === 'lida') return 'lida';
+    if (verificado && statusLeitura === 'aguardando_leitura') return 'aguardando_leitura';
+    if (verificado && statusLeitura === 'aguardando_entrega') return 'aguardando_entrega';
+    if (verificado) return 'nao';
+    return 'nao_verificado';
+}
+
+// Selos "Lidas"/"Respondidas" (ao lado da busca por PAJ) — filtro rápido, clicáveis
+// independentemente (combinam com OU quando os dois estão ativos — pedido do
+// usuário, 2026-10-28, substitui o antigo botão único "Só respondidos"). Esconde, na
+// tabela visível no momento (pendentes OU resultado de busca), qualquer linha cuja
+// situação não esteja entre os selos ativos. Reaplicado depois de toda repintura
+// (verificar respostas, busca por PAJ, abrir/atualizar conversa).
+let confFiltroChipsAtivos = new Set();
+
+function confToggleFiltroChip(chave, btn) {
+    if (confFiltroChipsAtivos.has(chave)) confFiltroChipsAtivos.delete(chave);
+    else confFiltroChipsAtivos.add(chave);
+    btn.classList.toggle('ativo', confFiltroChipsAtivos.has(chave));
     _confAplicarFiltroSituacao();
 }
 
 function _confAplicarFiltroSituacao() {
     document.querySelectorAll('.conf-row').forEach(tr => {
-        if (!confSoRespondidosAtivo) { tr.style.display = ''; return; }
-        const respondido = !!tr.querySelector('.conf-situacao-badge-cel .conf-pronto-registrar');
-        tr.style.display = respondido ? '' : 'none';
+        if (!confFiltroChipsAtivos.size) { tr.style.display = ''; return; }
+        tr.style.display = confFiltroChipsAtivos.has(tr.dataset.situacao) ? '' : 'none';
     });
 }
 
@@ -419,6 +492,7 @@ function _confPintarUmaLinha(tr, it) {
     const loteBtn = tr.querySelector('.conf-lote-btn');
     tr.dataset.textoResposta = it.texto_resposta || '';
     tr.dataset.dataResposta = it.data_resposta || '';
+    tr.dataset.situacao = _confSituacaoKey(it, true);
     if (it.erro) {
         respTexto.textContent = it.erro;
         respCel.classList.add('text-tertiary');
@@ -440,13 +514,13 @@ function _confPintarUmaLinha(tr, it) {
         _confBadge(sitCel, 'conf-lida conf-pronto-registrar', 'Lida');
         sitCel.title = 'Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).';
     } else if (it.status_leitura === 'aguardando_leitura') {
-        _confBadge(sitCel, 'conf-sem', 'Aguardando leitura');
+        _confBadge(sitCel, 'conf-aguardando-leitura', 'Aguardando leitura');
         sitCel.title = 'Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.';
     } else if (it.status_leitura === 'aguardando_entrega') {
-        _confBadge(sitCel, 'conf-sem', 'Aguardando entrega');
+        _confBadge(sitCel, 'conf-aguardando-entrega', 'Aguardando entrega');
         sitCel.title = 'Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.';
     } else {
-        _confBadge(sitCel, 'conf-sem', 'Não');
+        _confBadge(sitCel, 'conf-nao', 'Não');
         sitCel.title = it.tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.';
     }
     if (!it.pronto_para_concluir) {
@@ -499,10 +573,11 @@ function _confConstruirLinha(it) {
     if (it.verif_erro) sitBadge = '<span class="conf-badge conf-erro" title="' + _confEsc(it.verif_erro) + '">Erro</span>';
     else if (verificado && it.verif_confirmou) sitBadge = '<span class="conf-badge conf-ok conf-pronto-registrar" title="' + (it.verif_data_resposta ? ('Respondido em ' + _confEsc(it.verif_data_resposta)) : '') + '">Respondido</span>';
     else if (verificado && it.verif_status_leitura === 'lida') sitBadge = '<span class="conf-badge conf-lida conf-pronto-registrar" title="Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).">Lida</span>';
-    else if (verificado && it.verif_status_leitura === 'aguardando_leitura') sitBadge = '<span class="conf-badge conf-sem" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>';
-    else if (verificado && it.verif_status_leitura === 'aguardando_entrega') sitBadge = '<span class="conf-badge conf-sem" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>';
-    else if (verificado) sitBadge = '<span class="conf-badge conf-sem" title="' + (it.verif_tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.') + '">Não</span>';
+    else if (verificado && it.verif_status_leitura === 'aguardando_leitura') sitBadge = '<span class="conf-badge conf-aguardando-leitura" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>';
+    else if (verificado && it.verif_status_leitura === 'aguardando_entrega') sitBadge = '<span class="conf-badge conf-aguardando-entrega" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>';
+    else if (verificado) sitBadge = '<span class="conf-badge conf-nao" title="' + (it.verif_tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.') + '">Não</span>';
     else sitBadge = '<span class="conf-badge conf-sem">não verificado</span>';
+    const situacaoKey = _confSituacaoKey(it, verificado);
     const dias = (it.dias_decorridos === null || it.dias_decorridos === undefined) ? null : it.dias_decorridos;
     const diasTitle = 'Enviado em ' + _confDataHoraBr(it.ts) + (it.prazo ? (' · prazo de ' + it.prazo + ' dia' + (it.prazo != 1 ? 's' : '') + (it.prazo_expirado ? ' (expirado)' : '')) : '');
     const urgenteBadge = it.prazo === 0
@@ -514,10 +589,10 @@ function _confConstruirLinha(it) {
     else if (!it.verif_tem_resposta) motivo = 'Ainda sem resposta do assistido — não é possível confirmar.';
     else motivo = 'Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.';
 
-    return '<tr class="conf-row" data-id="' + it.id + '" '
+    return '<tr class="conf-row" data-id="' + it.id + '" data-situacao="' + situacaoKey + '" '
         + 'data-texto-resposta="' + _confEsc(it.verif_texto_resposta || '') + '" '
         + 'data-data-resposta="' + _confEsc(it.verif_data_resposta || '') + '">'
-      + '<td>' + pajHtml + '</td>'
+      + '<td>' + pajHtml + '<span class="conf-lote-selo">Incluído no bloco</span></td>'
       + '<td><div class="col-assistido" title="' + _confEsc(it.assistido || '') + '">' + (_confEsc(it.assistido) || '—') + '</div></td>'
       + '<td class="text-secondary" style="font-size:12.5px;">' + _confEsc(numero) + '</td>'
       + '<td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">' + _confDataBr(it.ts) + '<br>' + movTxt + '</td>'
@@ -750,6 +825,10 @@ async function confAbrirConversa(historicoId, btn) {
         const d = await r.json().catch(() => ({}));
         if (!d.ok) { alert('Não foi possível abrir a conversa: ' + (d.erro || 'erro')); return; }
         _confRenderConversa(d);
+        // 1ª abertura (cache ainda vazio) pode ter rodado a verificação completa —
+        // repinta a Situação/botões na hora, sem esperar "Verificar respostas" em
+        // lote (pedido do usuário, 2026-10-28).
+        if (d.verificacao) _confPintarLinha(d.verificacao);
     } catch (e) {
         alert('Erro: ' + e);
     } finally {
