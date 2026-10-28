@@ -330,11 +330,28 @@ async def _ler_conversas_do_paj(page, numeros_registrados: list[str] | None, paj
     return {"ok": True, "dumps": dumps, "numeros_verificados": verificados, "detalhe": ""}
 
 
+# Tradução do aria-label de texto do WhatsApp (Enviada/Entregue/Lida) pro vocabulário
+# interno de Situação da central. "Lida" tem efeito equivalente a "Respondida" para
+# fins de registro no PAJ (pedido do usuário, 2026-10-28) — ver `habilitado` no template.
+STATUS_LEITURA_WA = {"Enviada": "aguardando_entrega", "Entregue": "aguardando_leitura", "Lida": "lida"}
+_PRIORIDADE_STATUS_LEITURA = {"": 0, "aguardando_entrega": 1, "aguardando_leitura": 2, "lida": 3}
+
+
+def _melhor_status_leitura(status_por_numero) -> str:
+    """Entre várias conversas do mesmo PAJ, o status mais "avançado" (Lida > Aguardando
+    leitura > Aguardando entrega) é o que importa — qualquer uma confirmando leitura já
+    é sinal suficiente, mesmo que as outras ainda estejam só "entregue"."""
+    return max(status_por_numero, key=lambda s: _PRIORIDADE_STATUS_LEITURA.get(s, 0), default="")
+
+
 def _processar_dump_resposta(dump: dict | None) -> dict:
-    """Extrai tem_resposta/texto_resposta/data_resposta de UM dump de `_JS_LER_CHAT`
-    (lógica usada por `ler_respostas_apos_envio`, isolada para rodar por conversa
-    quando há mais de um número candidato ao mesmo PAJ)."""
-    vazio = {"tem_resposta": False, "texto_resposta": "", "data_resposta": ""}
+    """Extrai tem_resposta/texto_resposta/data_resposta/status_leitura de UM dump de
+    `_JS_LER_CHAT` (lógica usada por `ler_respostas_apos_envio`, isolada para rodar
+    por conversa quando há mais de um número candidato ao mesmo PAJ).
+    `status_leitura`: ""|"aguardando_entrega"|"aguardando_leitura"|"lida" — do status
+    (Enviada/Entregue/Lida) da nossa mensagem mais recente nesta conversa."""
+    status_leitura = STATUS_LEITURA_WA.get((dump or {}).get("ultimo_status_nosso", ""), "")
+    vazio = {"tem_resposta": False, "texto_resposta": "", "data_resposta": "", "status_leitura": status_leitura}
     if not dump or dump.get("erro") or not dump.get("achou_nossa_mensagem"):
         return vazio
     respostas = dump.get("respostas") or []
@@ -363,7 +380,7 @@ def _processar_dump_resposta(dump: dict | None) -> dict:
             data_resposta = f"{m.group(2)} {m.group(1)}"
             break
     return {"tem_resposta": bool(texto_resposta), "texto_resposta": texto_resposta,
-            "data_resposta": data_resposta}
+            "data_resposta": data_resposta, "status_leitura": status_leitura}
 
 
 # Lê as ÚLTIMAS mensagens de um chat (nossa + do assistido), identificando as NOSSAS
@@ -400,7 +417,16 @@ _JS_LER_CHAT = r"""
         if (!hora && mFim) hora = mFim[1];
         if (hora) texto = texto.replace(new RegExp('\\n?\\s*' + hora + '\\s*$'), '').trim();
         const temMidia = !!el.querySelector('[data-icon="document-PDF-icon"], [data-icon="media-play"], img');
-        return {tailOut, preplain, autor, hora, texto, temMidia};
+        // Status de ENTREGA/LEITURA (só existe em mensagens NOSSAS) — o WhatsApp Web
+        // expõe via aria-label de TEXTO ("Enviada"/"Entregue"/"Lida"), não por nome de
+        // ícone (validado ao vivo, 2026-10-28 — não há data-icon confiável pra isso
+        // nesta versão do cliente).
+        const statusEl = [...el.querySelectorAll('[aria-label]')].find(s => {
+            const t = (s.getAttribute('aria-label') || '').trim();
+            return t === 'Enviada' || t === 'Entregue' || t === 'Lida';
+        });
+        const status = statusEl ? statusEl.getAttribute('aria-label').trim() : '';
+        return {tailOut, preplain, autor, hora, texto, temMidia, status};
     });
     // O ícone "tail-out" (mensagem enviada por nós) só aparece na PRIMEIRA bolha de
     // uma sequência seguida do mesmo remetente — as seguintes ficam "agrupadas" sem
@@ -450,11 +476,17 @@ _JS_LER_CHAT = r"""
     const respostas = depois.filter(it => it.autor && it.autor !== nomeNosso);
     const mensagens = itens
         .map((it, i) => ({ nossa: !!ehNossaPorIdx[i],
-                       texto: it.texto || (it.temMidia ? '[mídia/anexo]' : ''), hora: it.hora, temMidia: it.temMidia }))
+                       texto: it.texto || (it.temMidia ? '[mídia/anexo]' : ''), hora: it.hora, temMidia: it.temMidia,
+                       status: ehNossaPorIdx[i] ? it.status : '' }))
         .filter(it => it.texto || it.temMidia);
     return {
         total_lido: itens.length,
         achou_nossa_mensagem: ultimoNossoIdx >= 0,
+        // Status (Enviada/Entregue/Lida) da mensagem NOSSA mais recente da conversa —
+        // usado pra marcar a Situação como "Aguardando entrega"/"Aguardando
+        // leitura"/"Lida" quando ainda não há resposta por texto (pedido do usuário,
+        // 2026-10-28).
+        ultimo_status_nosso: ultimoNossoIdx >= 0 ? itens[ultimoNossoIdx].status : '',
         respostas: respostas.map(it => ({texto: it.texto, preplain: it.preplain})),
         mensagens,
     };
@@ -512,17 +544,20 @@ async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headles
     com_resposta = [n for n in numeros_verificados if processados[n]["tem_resposta"]]
     dump_ref = dumps.get(com_resposta[0]) if com_resposta else next(iter(dumps.values()), {})
     mensagens_ref = (dump_ref or {}).get("mensagens") or []
+    status_leitura = _melhor_status_leitura(processados[n]["status_leitura"] for n in numeros_verificados)
 
     if not any(dumps[n].get("achou_nossa_mensagem") for n in numeros_verificados):
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens_ref, "metodo_abertura": metodo,
+                "confirmou": False, "status_leitura": status_leitura, "mensagens": mensagens_ref,
+                "metodo_abertura": metodo,
                 "detalhe": "Não encontrei nossa última mensagem enviada nas últimas "
                            f"{max_mensagens} mensagens de nenhuma conversa verificada "
                            f"({len(numeros_verificados)}) — pode haver mais conversa depois "
                            "do envio; confira manualmente."}
     if not com_resposta:
         return {"ok": True, "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "mensagens": mensagens_ref, "metodo_abertura": metodo,
+                "confirmou": False, "status_leitura": status_leitura, "mensagens": mensagens_ref,
+                "metodo_abertura": metodo,
                 "detalhe": "Ainda sem resposta do assistido (verificado em "
                            f"{len(numeros_verificados)} conversa(s))."}
     multiplas = len(com_resposta) > 1
@@ -535,8 +570,8 @@ async def ler_respostas_apos_envio(numero: str, max_mensagens: int = 60, headles
                          default="")
     mensagens_ref = dumps[com_resposta[0]].get("mensagens") or []
     return {"ok": True, "tem_resposta": True, "texto_resposta": texto_resposta,
-            "data_resposta": data_resposta, "confirmou": True, "mensagens": mensagens_ref,
-            "metodo_abertura": metodo, "detalhe": ""}
+            "data_resposta": data_resposta, "confirmou": True, "status_leitura": status_leitura,
+            "mensagens": mensagens_ref, "metodo_abertura": metodo, "detalhe": ""}
 
 
 async def obter_conversa(numero: str, max_mensagens: int = 60, headless: bool = True,

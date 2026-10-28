@@ -17,7 +17,7 @@ DECISÃO de movimentar/concluir o PAJ fica sempre com o usuário, 1 clique por i
 from fastapi import APIRouter, Body, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
-from services import disparos_service
+from services import config_service, disparos_service
 from services import painel_comunicacoes_service as svc
 
 router = APIRouter()
@@ -31,6 +31,7 @@ async def confirmacoes_page(request: Request):
     return HTMLResponse(template.render(
         request=request, pendentes=pendentes, confirmadas=confirmadas,
         ocultos_cutoff=svc.contar_ocultos_por_cutoff(),
+        prazos_predefinidos=config_service.get_prazos_predefinidos(),
         disparos=disparos_service.listar_disparos(meio="confirmacao_leitura", limite=25)))
 
 
@@ -51,11 +52,13 @@ async def api_verificar_confirmacoes(payload: dict = Body(default={})):
 async def api_confirmar_recebimento(historico_id: str, payload: dict = Body(default={})):
     """Ação REAL (sempre por clique do usuário): movimenta o PAJ (fase 'Juntada de
     documento', citando a mov do envio e a resposta do assistido) e dá baixa na
-    tramitação da caixa de aguardo. Corpo opcional: {texto_resposta, data_resposta}
-    (a última resposta lida em "Verificar respostas")."""
+    tramitação da caixa de aguardo. Corpo opcional: {texto_resposta, data_resposta,
+    encaminhar_grupo, encaminhar_prazo} — os dois últimos (coluna "Encaminhamento" da
+    central) fazem uma NOVA tramitação do PAJ depois da baixa, se informados."""
     try:
         r = await svc.confirmar_recebimento(
-            historico_id, payload.get("texto_resposta", ""), payload.get("data_resposta", ""))
+            historico_id, payload.get("texto_resposta", ""), payload.get("data_resposta", ""),
+            payload.get("encaminhar_grupo", ""), payload.get("encaminhar_prazo"))
     except Exception as e:  # noqa: BLE001
         r = {"ok": False, "erro": str(e)}
     return JSONResponse(r, status_code=200 if r.get("ok") else 400)
@@ -75,7 +78,8 @@ async def api_remover_pendencia(historico_id: str):
 @router.post("/api/confirmacoes/confirmar-lote/stream")
 async def api_confirmar_lote(payload: dict = Body(default={})):
     """Confirma em bloco os itens escolhidos pelo usuário. Corpo: {itens: [{historico_id,
-    texto_resposta, data_resposta}, ...]}. Cada um é uma ação REAL própria no SISDPU,
+    texto_resposta, data_resposta, encaminhar_grupo, encaminhar_prazo}, ...]} — os dois
+    últimos campos são opcionais, por item. Cada um é uma ação REAL própria no SISDPU,
     executada em sequência; progresso via SSE."""
     gen = svc.confirmar_recebimento_lote_stream(payload.get("itens") or [])
     return StreamingResponse(
@@ -99,7 +103,8 @@ async def api_conversa_whatsapp(historico_id: str, payload: dict = Body(default=
 _CAMPOS_BUSCA = ["id", "paj", "paj_norm", "url_detalhe", "assistido", "numeros", "mov_seq",
                  "tram_caixa", "ts", "prazo", "dias_decorridos", "prazo_expirado",
                  "verif_em", "verif_pronto_para_concluir", "verif_tem_resposta",
-                 "verif_texto_resposta", "verif_data_resposta", "verif_confirmou", "verif_erro"]
+                 "verif_texto_resposta", "verif_data_resposta", "verif_confirmou",
+                 "verif_status_leitura", "verif_erro"]
 
 
 @router.get("/api/confirmacoes/buscar", response_class=JSONResponse)

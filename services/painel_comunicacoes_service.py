@@ -2436,10 +2436,13 @@ def _prazo_tramitacao(prazo_envio) -> tuple[str, str, int]:
 
 async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: str,
                                       mov_seq, prazo, log: list, rotulo: str = "Tramitação do PAJ",
-                                      emit=None) -> dict:
+                                      emit=None, descricao: str | None = None) -> dict:
     """Tramita o PAJ para `tramitar_grupo`, referenciando a movimentação `mov_seq` e
     preenchendo o prazo de conclusão (deriva de `prazo`). Registra o passo em `log` e,
     se houver `emit`, transmite ao popup em tempo real.
+    `descricao` (opcional): substitui a descrição PADRÃO (`_descricao_tramitacao`, que
+    fala de "mensagem enviada" — correta para o envio original, mas não para outros
+    usos, ex.: encaminhamento feito ao registrar uma resposta do assistido).
     Retorna dict com tram_status/tram_caixa/tram_detalhe/tram_url/tram_descricao/
     tram_id_tramite (id do trâmite recém-criado na caixa destino — capturado aqui,
     com 1 leitura leve da caixa, única vez; "" se não deu pra capturar, nesse caso
@@ -2447,7 +2450,7 @@ async def _tramitar_referenciando_mov(id_proc: str, paj: str, tramitar_grupo: st
     Usado tanto pela movimentação manual (WhatsApp) quanto pela auto-movimentação (App)."""
     res = {"tram_caixa": "", "tram_status": "pendente", "tram_detalhe": "",
            "tram_url": "", "tram_descricao": "", "tram_id_tramite": ""}
-    tram_desc = _descricao_tramitacao(mov_seq)
+    tram_desc = descricao if descricao is not None else _descricao_tramitacao(mov_seq)
     res["tram_descricao"] = tram_desc
     prazo_data, prazo_desc, prazo_dias = _prazo_tramitacao(prazo)
     if emit is not None:
@@ -3140,6 +3143,7 @@ def _persistir_verificacao(historico_id: str, item: dict) -> None:
         "verif_texto_resposta": item.get("texto_resposta", ""),
         "verif_data_resposta": item.get("data_resposta", ""),
         "verif_confirmou": bool(item.get("confirmou")),
+        "verif_status_leitura": item.get("status_leitura", ""),
         "verif_erro": item.get("erro", ""),
     })
 
@@ -3368,7 +3372,7 @@ async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
                 "assistido": r.get("assistido", ""), "numero": numero, "mov_seq": r.get("mov_seq"),
                 "tram_caixa": r.get("tram_caixa", ""), "pronto_para_concluir": bool(id_tram),
                 "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-                "confirmou": False, "erro": ""}
+                "confirmou": False, "status_leitura": "", "erro": ""}
         if not id_tram and not caixa_lida_ok:
             # A leitura da CAIXA falhou (ex.: cofre trancado) — não sabemos o estado real.
             # NÃO autolimpa (não mexe no registro); o usuário tenta de novo depois.
@@ -3410,7 +3414,8 @@ async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
             item.update(tem_resposta=leitura.get("tem_resposta", False),
                        texto_resposta=leitura.get("texto_resposta", ""),
                        data_resposta=leitura.get("data_resposta", ""),
-                       confirmou=leitura.get("confirmou", False))
+                       confirmou=leitura.get("confirmou", False),
+                       status_leitura=leitura.get("status_leitura", ""))
             # Cacheia a conversa INTEIRA lida agora (mesma sessão do WhatsApp) — assim
             # "Abrir conversa" mostra na hora, sem precisar abrir outra sessão sempre
             # que o usuário só quer CONFERIR (pedido do usuário, 2026-10-28).
@@ -3436,7 +3441,8 @@ async def verificar_confirmacoes_stream(historico_ids: list[str] | None = None):
 
 
 async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
-                                data_resposta: str = "") -> dict:
+                                data_resposta: str = "", encaminhar_grupo: str = "",
+                                encaminhar_prazo=None) -> dict:
     """Confirma o recebimento de UM item da central (ação REAL, sempre disparada por um
     clique do usuário — nunca automática): movimenta o PAJ na fase 'Juntada de
     documento' citando a mov do envio E a resposta do assistido (quando informada pelo
@@ -3444,6 +3450,13 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
     tramitação parada na caixa de aguardo. Reaproveita o mesmo pipeline mov+conclui já
     validado em `_concluir_originarios`.
     `data_resposta` no formato 'DD/MM/AAAA HH:MM' (só a hora entra na movimentação).
+    `encaminhar_grupo` (opcional, coluna "Encaminhamento" da central, pedido do
+    usuário 2026-10-28): se informado, depois da baixa na caixa de aguardo dar certo,
+    faz uma NOVA tramitação do PAJ para essa caixa, com `encaminhar_prazo` (dias,
+    mesma convenção de `_prazo_tramitacao`). Reaproveita `_tramitar_referenciando_mov`
+    (mesmo pipeline já usado no envio original). Falha no encaminhamento NÃO desfaz
+    nem marca como falha a confirmação em si (que já tinha dado certo) — vem reportada
+    em `aviso` no retorno, para o usuário conferir manualmente.
     Se houver resposta, gera um PDF da conversa (mesmo formato do comprovante de envio)
     e anexa à movimentação — pedido do usuário, 2026-10-28."""
     from ingestao import sisdpu_client, whatsapp_client
@@ -3484,7 +3497,15 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
     # `texto_resposta` já vem com a hora ANTES de cada linha (ver whatsapp_client.
     # ler_respostas_apos_envio) — não prefixa de novo aqui.
     texto_resposta = (texto_resposta or "").strip()
-    desc = f"{base}:\n{texto_resposta}" if texto_resposta else f"{base}."
+    if texto_resposta:
+        desc = f"{base}:\n{texto_resposta}"
+    elif reg.get("verif_status_leitura") == "lida":
+        # Sem resposta por TEXTO, mas o próprio WhatsApp confirma que a mensagem foi
+        # lida (✓✓ azul) — efeito equivalente a "respondida" para fins de registro no
+        # PAJ (pedido do usuário, 2026-10-28). Texto exato pedido pelo usuário.
+        desc = "Confirmada leitura no WhatsApp, sem resposta expressa."
+    else:
+        desc = f"{base}."
     # Print da resposta em PDF (mesmo formato do comprovante de envio) — anexado à
     # movimentação, igual já fazemos com o comprovante quando a mensagem é enviada.
     # Best-effort: se não conseguir gerar, a movimentação segue sem o anexo.
@@ -3520,6 +3541,24 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
     # conclusão do TRÂMITE ORIGINÁRIO (já aconteceu no envio) — um passo DIFERENTE
     # desta baixa da tramitação da caixa de aguardo, que usa campos próprios.
     conc_res = await _concluir_originarios([id_tramite], log)
+    # Encaminhamento (nova tramitação, opcional): só depois da baixa dar certo — é
+    # explicitamente um passo "a mais", nunca substitui nem bloqueia o fluxo normal.
+    encaminhar_grupo = (encaminhar_grupo or "").strip()
+    aviso_encaminhamento = ""
+    if encaminhar_grupo and conc_res.get("concluido_status") in ("concluido", "ja_concluido"):
+        enc_desc = (f'Encaminhado para nova análise após resposta do assistido na mov. '
+                    f'"{mov.get("mov_seq")}".' if mov.get("mov_seq") else
+                    "Encaminhado para nova análise após resposta do assistido.")
+        try:
+            enc_res = await _tramitar_referenciando_mov(
+                id_processo, paj_disp, encaminhar_grupo, mov.get("mov_seq"), encaminhar_prazo,
+                log, rotulo="Encaminhamento do PAJ", descricao=enc_desc)
+        except Exception as e:  # noqa: BLE001
+            enc_res = {"tram_status": "falha", "tram_detalhe": f"exceção: {e}"}
+            _log_passo(log, "Encaminhamento do PAJ", False, enc_res["tram_detalhe"])
+        if enc_res.get("tram_status") != "tramitado":
+            aviso_encaminhamento = (f'Resposta registrada normalmente, mas o encaminhamento para '
+                                    f'"{encaminhar_grupo}" falhou: {enc_res.get("tram_detalhe", "")}')
     campos = {"log": log, "confirmacao_mov_seq": mov.get("mov_seq"),
               "confirmacao_em": _dt.datetime.now().isoformat(timespec="seconds"),
               "confirmacao_usuario": _usuario_sisdpu(),
@@ -3528,7 +3567,7 @@ async def confirmar_recebimento(historico_id: str, texto_resposta: str = "",
         campos["confirmacao_status"] = "confirmado"
         campos["confirmacao_detalhe"] = conc_res.get("concluido_detalhe", "")
         historico_service.atualizar(historico_id, campos)
-        return {"ok": True}
+        return {"ok": True, "aviso": aviso_encaminhamento} if aviso_encaminhamento else {"ok": True}
     campos["confirmacao_detalhe"] = conc_res.get("concluido_detalhe", "")
     historico_service.atualizar(historico_id, campos)
     return {"ok": False, "erro": "Movimentação feita, mas falhou a conclusão: "
@@ -3574,14 +3613,19 @@ async def confirmar_recebimento_lote_stream(itens: list[dict]):
         paj = reg.get("paj", hid)
         yield {"level": "muted", "msg": f"     PAJ {paj}: confirmando…"}
         try:
-            r = await confirmar_recebimento(hid, it.get("texto_resposta", ""), it.get("data_resposta", ""))
+            r = await confirmar_recebimento(
+                hid, it.get("texto_resposta", ""), it.get("data_resposta", ""),
+                it.get("encaminhar_grupo", ""), it.get("encaminhar_prazo"))
         except Exception as e:  # noqa: BLE001
             r = {"ok": False, "erro": f"exceção: {e}"}
         if r.get("ok"):
             yield {"level": "ok", "msg": f"     PAJ {paj}: confirmado."}
+            if r.get("aviso"):
+                yield {"level": "aviso", "msg": f"     PAJ {paj}: {r['aviso']}"}
         else:
             yield {"level": "erro", "msg": f"     PAJ {paj}: {r.get('erro', 'falha')}"}
-        resultados.append({"historico_id": hid, "paj": paj, "ok": bool(r.get("ok")), "erro": r.get("erro", "")})
+        resultados.append({"historico_id": hid, "paj": paj, "ok": bool(r.get("ok")),
+                            "erro": r.get("erro", ""), "aviso": r.get("aviso", "")})
     n_ok = sum(1 for r in resultados if r["ok"])
     yield {"level": "ok", "msg": f"Confirmação em bloco concluída: {n_ok}/{len(resultados)} com êxito."}
     yield {"done": True, "resultado": {"itens": resultados}}
@@ -3605,7 +3649,7 @@ async def verificar_uma_pendencia(historico_id: str) -> dict:
             "assistido": reg.get("assistido", ""), "numero": numero, "mov_seq": reg.get("mov_seq"),
             "tram_caixa": tram_caixa, "pronto_para_concluir": False,
             "tem_resposta": False, "texto_resposta": "", "data_resposta": "",
-            "confirmou": False, "erro": ""}
+            "confirmou": False, "status_leitura": "", "erro": ""}
     if not tram_caixa:
         item["erro"] = "Registro sem caixa de destino."
         _persistir_verificacao(historico_id, item)
@@ -3648,7 +3692,8 @@ async def verificar_uma_pendencia(historico_id: str) -> dict:
     item.update(tem_resposta=leitura.get("tem_resposta", False),
                texto_resposta=leitura.get("texto_resposta", ""),
                data_resposta=leitura.get("data_resposta", ""),
-               confirmou=leitura.get("confirmou", False))
+               confirmou=leitura.get("confirmou", False),
+               status_leitura=leitura.get("status_leitura", ""))
     mensagens = leitura.get("mensagens") or []
     historico_service.atualizar(historico_id, {
         "conversa_cache": mensagens,

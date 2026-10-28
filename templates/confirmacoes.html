@@ -5,6 +5,7 @@
 <style>
 .conf-badge { display:inline-block; font-size:10.5px; font-weight:700; padding:2px 10px; border-radius:999px; white-space:nowrap; border:1px solid transparent; }
 .conf-ok    { color:#16a34a; background:color-mix(in srgb,#16a34a 12%,transparent); border-color:color-mix(in srgb,#16a34a 45%,transparent); }
+.conf-lida  { color:#0a7ea6; background:color-mix(in srgb,#53bdeb 16%,transparent); border-color:color-mix(in srgb,#53bdeb 55%,transparent); }
 .conf-sem   { color:var(--text-tertiary); background:transparent; border-color:var(--stroke); }
 .conf-erro  { color:#dc2626; background:color-mix(in srgb,#dc2626 12%,transparent); border-color:color-mix(in srgb,#dc2626 50%,transparent); }
 .conf-resposta { font-size:12px; color:var(--text-secondary); text-align:left; }
@@ -39,6 +40,8 @@
 .conf-bolha.nossa { background:#d9fdd3; align-self:flex-end; }
 .conf-bolha.dele  { background:#fff; align-self:flex-start; }
 .conf-bolha .h { display:block; text-align:right; font-size:10px; color:#667781; margin-top:2px; }
+.conf-bolha .tick { color:#8696a0; margin-left:3px; font-size:11px; }
+.conf-bolha .tick.lida { color:#53bdeb; }
 </style>
 
 <div class="mb-6">
@@ -68,7 +71,7 @@
     <span id="conf-status" class="text-tertiary" style="font-size:12.5px;"></span>
     <span style="flex:1;"></span>
     <button class="btn-subtle" id="conf-filtro-respondidos-btn" onclick="confToggleSoRespondidos(this)"
-            title="Mostra só as linhas com Situação &quot;Respondido&quot;">Só respondidos</button>
+            title="Mostra só as linhas com Situação &quot;Respondido&quot; ou &quot;Lida&quot;">Só respondidos</button>
     <input type="text" id="conf-busca-input" class="wa-input" style="width:260px;font-size:12.5px;"
            placeholder="Buscar PAJ (ignora o corte de antiguidade)…"
            onkeydown="if(event.key==='Enter'){ event.preventDefault(); confBuscarPaj(); }">
@@ -89,6 +92,7 @@
                     <th style="width:12rem;">Caixa</th>
                     <th style="min-width:22rem;">Resposta</th>
                     <th style="width:8rem;">Situação</th>
+                    <th style="width:11rem;">Encaminhamento</th>
                     <th style="width:16rem;">Ação</th>
                 </tr>
             </thead>
@@ -118,13 +122,16 @@
                 <th style="width:12rem;">Caixa</th>
                 <th style="min-width:22rem;">Resposta</th>
                 <th style="width:8rem;">Situação</th>
+                <th style="width:11rem;">Encaminhamento</th>
                 <th style="width:16rem;">Ação</th>
             </tr>
         </thead>
         <tbody>
             {% for it in pendentes %}
             {% set verificado = it.verif_em is defined and it.verif_em %}
-            {% set habilitado = verificado and it.verif_pronto_para_concluir and it.verif_confirmou and not it.verif_erro %}
+            {# "Lida" (confirmação de leitura do WhatsApp) tem efeito equivalente a "Respondida"
+               para habilitar o registro no PAJ — pedido do usuário, 2026-10-28. #}
+            {% set habilitado = verificado and it.verif_pronto_para_concluir and (it.verif_confirmou or it.verif_status_leitura == 'lida') and not it.verif_erro %}
             <tr class="conf-row" data-id="{{ it.id }}"
                 data-texto-resposta="{{ it.verif_texto_resposta or '' }}"
                 data-data-resposta="{{ it.verif_data_resposta or '' }}">
@@ -162,7 +169,13 @@
                             {%- if it.verif_erro -%}
                             <span class="conf-badge conf-erro" title="{{ it.verif_erro }}">Erro</span>
                             {%- elif verificado and it.verif_confirmou -%}
-                            <span class="conf-badge conf-ok" title="{{ ('Respondido em ' + it.verif_data_resposta) if it.verif_data_resposta else '' }}">Respondido</span>
+                            <span class="conf-badge conf-ok conf-pronto-registrar" title="{{ ('Respondido em ' + it.verif_data_resposta) if it.verif_data_resposta else '' }}">Respondido</span>
+                            {%- elif verificado and it.verif_status_leitura == 'lida' -%}
+                            <span class="conf-badge conf-lida conf-pronto-registrar" title="Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).">Lida</span>
+                            {%- elif verificado and it.verif_status_leitura == 'aguardando_leitura' -%}
+                            <span class="conf-badge conf-sem" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>
+                            {%- elif verificado and it.verif_status_leitura == 'aguardando_entrega' -%}
+                            <span class="conf-badge conf-sem" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>
                             {%- elif verificado -%}
                             <span class="conf-badge conf-sem" title="{{ 'Há resposta, mas sem texto legível para conferir.' if it.verif_tem_resposta else 'Ainda sem resposta.' }}">Não</span>
                             {%- else -%}
@@ -170,6 +183,19 @@
                             {%- endif -%}
                         </span>
                     </div>
+                </td>
+                <td class="conf-encaminhar-cel" style="min-width:11rem;">
+                    <select class="conf-enc-sel" onchange="confEncMudou(this)"
+                            style="width:100%;font-size:11.5px;padding:3px 4px;border-radius:6px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);">
+                        <option value="">— Nenhuma ação —</option>
+                    </select>
+                    <div class="conf-enc-favs" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;"></div>
+                    <div class="conf-enc-prazo-wrap" style="display:none;align-items:center;gap:4px;margin-top:4px;">
+                        <input type="number" class="conf-enc-prazo" min="0" value="5" title="Prazo em dias para a nova caixa"
+                               style="width:3.4rem;font-size:11px;padding:2px 4px;border-radius:6px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);">
+                        <span class="text-tertiary" style="font-size:10.5px;">dias</span>
+                    </div>
+                    <div class="conf-enc-prazo-chips" style="display:none;flex-wrap:wrap;gap:3px;margin-top:4px;"></div>
                 </td>
                 <td class="conf-acao-cel">
                     {% set motivo_desabilitado = 'Verifique as respostas primeiro' if not verificado else (it.verif_erro or (('Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.' if it.verif_tem_resposta else 'Ainda sem resposta do assistido — não é possível confirmar.') if it.verif_pronto_para_concluir else 'Trâmite não localizado na caixa de destino — confira manualmente.')) %}
@@ -275,7 +301,78 @@ function _confFormatarResposta(texto) {
     return texto.split('\n').map(l => l.replace(/^(\d{2}:\d{2})\s+/, '$1 - ')).join('\n');
 }
 
-let confLote = {}; // historico_id -> {historico_id, texto_resposta, data_resposta}
+let confLote = {}; // historico_id -> {historico_id, texto_resposta, data_resposta, encaminhar_grupo, encaminhar_prazo}
+
+// ---------- Coluna "Encaminhamento" (nova tramitação opcional após registrar a
+// resposta — pedido do usuário, 2026-10-28) — mesmo padrão de caixa/prazo já usado
+// em "Gravar" (prontos.html): select + selos de caixas favoritas + selos de prazo.
+const CONF_PRAZOS_PREDEF = {{ prazos_predefinidos|tojson }};
+let _confGruposCache = null, _confGruposFav = [];
+
+async function confEncCarregarGrupos() {
+    if (!_confGruposCache) {
+        try {
+            const r = await fetch('/api/grupos-unidade');
+            const d = await r.json();
+            _confGruposCache = (d && d.grupos) || [];
+            _confGruposFav = (d && d.favoritos) || [];
+        } catch (e) { _confGruposCache = []; }
+    }
+    document.querySelectorAll('.conf-encaminhar-cel').forEach(_confEncPreencherCelula);
+}
+
+function _confEncPreencherCelula(td) {
+    const sel = td.querySelector('.conf-enc-sel');
+    if (!sel || sel.dataset.preenchido) return;
+    sel.dataset.preenchido = '1';
+    (_confGruposCache || []).forEach(g => {
+        const o = document.createElement('option'); o.value = g; o.textContent = g;
+        sel.appendChild(o);
+    });
+    const favBox = td.querySelector('.conf-enc-favs');
+    _confGruposFav.forEach(g => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge';
+        b.textContent = g;
+        b.onclick = () => { sel.value = g; confEncMudou(sel); };
+        favBox.appendChild(b);
+    });
+    const prazoBox = td.querySelector('.conf-enc-prazo-chips');
+    const prazoInput = td.querySelector('.conf-enc-prazo');
+    CONF_PRAZOS_PREDEF.forEach(v => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'prazo-badge';
+        b.textContent = v + ' dias';
+        b.onclick = () => { prazoInput.value = v; };
+        prazoBox.appendChild(b);
+    });
+    const urg = document.createElement('button');
+    urg.type = 'button'; urg.className = 'prazo-badge urgente';
+    urg.textContent = '⚡ Urgente';
+    urg.title = 'Prioridade máxima (prazo 0 — conclusão amanhã)';
+    urg.onclick = () => { prazoInput.value = 0; };
+    prazoBox.appendChild(urg);
+}
+
+// Mostra/esconde o prazo (dias) junto da caixa — só faz sentido escolher prazo
+// depois de escolher pra onde encaminhar.
+function confEncMudou(sel) {
+    const td = sel.closest('.conf-encaminhar-cel');
+    const on = !!sel.value;
+    td.querySelector('.conf-enc-prazo-wrap').style.display = on ? 'flex' : 'none';
+    td.querySelector('.conf-enc-prazo-chips').style.display = on ? 'flex' : 'none';
+}
+
+// Lê a escolha de encaminhamento da linha `tr` — {encaminhar_grupo, encaminhar_prazo}
+// ('' / null quando "— Nenhuma ação —", sem tramitação extra nenhuma).
+function _confLerEncaminhamento(tr) {
+    const sel = tr.querySelector('.conf-enc-sel');
+    const grupo = sel ? sel.value : '';
+    if (!grupo) return { encaminhar_grupo: '', encaminhar_prazo: null };
+    const prazoInput = tr.querySelector('.conf-enc-prazo');
+    const prazo = prazoInput ? parseInt(prazoInput.value, 10) : NaN;
+    return { encaminhar_grupo: grupo, encaminhar_prazo: isNaN(prazo) ? null : prazo };
+}
 
 // Linhas de "Confirmações registradas" vindas prontas do servidor (carregamento da
 // página) também precisam do traço — só as adicionadas ao vivo (confMoverParaRegistradas)
@@ -309,7 +406,7 @@ function confToggleSoRespondidos(btn) {
 function _confAplicarFiltroSituacao() {
     document.querySelectorAll('.conf-row').forEach(tr => {
         if (!confSoRespondidosAtivo) { tr.style.display = ''; return; }
-        const respondido = !!tr.querySelector('.conf-situacao-badge-cel .conf-ok');
+        const respondido = !!tr.querySelector('.conf-situacao-badge-cel .conf-pronto-registrar');
         tr.style.display = respondido ? '' : 'none';
     });
 }
@@ -333,9 +430,21 @@ function _confPintarUmaLinha(tr, it) {
     }
     respCel.classList.remove('text-tertiary');
     respTexto.textContent = it.tem_resposta ? _confFormatarResposta(it.texto_resposta || '') : '(sem resposta ainda)';
+    // "Lida" (confirmação de leitura do WhatsApp) tem efeito equivalente a "Respondida"
+    // p/ habilitar o registro no PAJ — pedido do usuário, 2026-10-28.
+    const lida = it.status_leitura === 'lida';
     if (it.confirmou) {
-        _confBadge(sitCel, 'conf-ok', 'Respondido');
+        _confBadge(sitCel, 'conf-ok conf-pronto-registrar', 'Respondido');
         sitCel.title = it.data_resposta ? ('Respondido em ' + it.data_resposta) : '';
+    } else if (lida) {
+        _confBadge(sitCel, 'conf-lida conf-pronto-registrar', 'Lida');
+        sitCel.title = 'Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).';
+    } else if (it.status_leitura === 'aguardando_leitura') {
+        _confBadge(sitCel, 'conf-sem', 'Aguardando leitura');
+        sitCel.title = 'Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.';
+    } else if (it.status_leitura === 'aguardando_entrega') {
+        _confBadge(sitCel, 'conf-sem', 'Aguardando entrega');
+        sitCel.title = 'Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.';
     } else {
         _confBadge(sitCel, 'conf-sem', 'Não');
         sitCel.title = it.tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.';
@@ -345,7 +454,7 @@ function _confPintarUmaLinha(tr, it) {
         btn.title = 'Trâmite não localizado na caixa de destino — confira manualmente.';
         loteBtn.disabled = true;
         loteBtn.title = btn.title;
-    } else if (!it.confirmou) {
+    } else if (!it.confirmou && !lida) {
         btn.disabled = true;
         btn.title = it.tem_resposta
             ? 'Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.'
@@ -371,7 +480,9 @@ function _confDataBr(iso) {
 // repintura via _confPintarLinha) funcionem sem nenhum código extra.
 function _confConstruirLinha(it) {
     const verificado = !!it.verif_em;
-    const habilitado = verificado && it.verif_pronto_para_concluir && it.verif_confirmou && !it.verif_erro;
+    // "Lida" tem efeito equivalente a "Respondida" p/ habilitar o registro (pedido do usuário, 2026-10-28).
+    const habilitado = verificado && it.verif_pronto_para_concluir
+        && (it.verif_confirmou || it.verif_status_leitura === 'lida') && !it.verif_erro;
     const numero = (it.numeros && it.numeros[0]) || '—';
     const movTxt = it.mov_seq ? ('Mov ' + it.mov_seq) : '—';
     const pajHtml = it.url_detalhe
@@ -386,7 +497,10 @@ function _confConstruirLinha(it) {
     else { respostaTxt = 'Clique em "Verificar respostas"…'; respostaClasse = 'text-tertiary'; }
     let sitBadge;
     if (it.verif_erro) sitBadge = '<span class="conf-badge conf-erro" title="' + _confEsc(it.verif_erro) + '">Erro</span>';
-    else if (verificado && it.verif_confirmou) sitBadge = '<span class="conf-badge conf-ok" title="' + (it.verif_data_resposta ? ('Respondido em ' + _confEsc(it.verif_data_resposta)) : '') + '">Respondido</span>';
+    else if (verificado && it.verif_confirmou) sitBadge = '<span class="conf-badge conf-ok conf-pronto-registrar" title="' + (it.verif_data_resposta ? ('Respondido em ' + _confEsc(it.verif_data_resposta)) : '') + '">Respondido</span>';
+    else if (verificado && it.verif_status_leitura === 'lida') sitBadge = '<span class="conf-badge conf-lida conf-pronto-registrar" title="Mensagem lida pelo assistido no WhatsApp (sem resposta por texto).">Lida</span>';
+    else if (verificado && it.verif_status_leitura === 'aguardando_leitura') sitBadge = '<span class="conf-badge conf-sem" title="Mensagem entregue ao WhatsApp do assistido — ainda não foi lida.">Aguardando leitura</span>';
+    else if (verificado && it.verif_status_leitura === 'aguardando_entrega') sitBadge = '<span class="conf-badge conf-sem" title="Mensagem enviada — ainda não confirmado que chegou ao WhatsApp do assistido.">Aguardando entrega</span>';
     else if (verificado) sitBadge = '<span class="conf-badge conf-sem" title="' + (it.verif_tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.') + '">Não</span>';
     else sitBadge = '<span class="conf-badge conf-sem">não verificado</span>';
     const dias = (it.dias_decorridos === null || it.dias_decorridos === undefined) ? null : it.dias_decorridos;
@@ -419,6 +533,18 @@ function _confConstruirLinha(it) {
         + urgenteBadge
         + '<span class="conf-situacao-badge-cel">' + sitBadge + '</span>'
       + '</div></td>'
+      + '<td class="conf-encaminhar-cel" style="min-width:11rem;">'
+        + '<select class="conf-enc-sel" onchange="confEncMudou(this)" '
+        + 'style="width:100%;font-size:11.5px;padding:3px 4px;border-radius:6px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);">'
+        + '<option value="">— Nenhuma ação —</option></select>'
+        + '<div class="conf-enc-favs" style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px;"></div>'
+        + '<div class="conf-enc-prazo-wrap" style="display:none;align-items:center;gap:4px;margin-top:4px;">'
+          + '<input type="number" class="conf-enc-prazo" min="0" value="5" title="Prazo em dias para a nova caixa" '
+          + 'style="width:3.4rem;font-size:11px;padding:2px 4px;border-radius:6px;border:1px solid var(--stroke-strong);background:var(--layer-alt);color:var(--text);">'
+          + '<span class="text-tertiary" style="font-size:10.5px;">dias</span>'
+        + '</div>'
+        + '<div class="conf-enc-prazo-chips" style="display:none;flex-wrap:wrap;gap:3px;margin-top:4px;"></div>'
+      + '</td>'
       + '<td class="conf-acao-cel">'
         + '<button class="btn-accent conf-confirmar-btn" style="padding:5px 12px;font-size:12.5px;white-space:nowrap;" '
         + (habilitado ? '' : 'disabled') + ' onclick="confConfirmar(\'' + it.id + '\', this)" '
@@ -455,6 +581,7 @@ async function confBuscarPaj() {
         : ('Nenhum PAJ pendente de confirmação encontrado para "' + q + '".');
     document.getElementById('conf-busca-body').innerHTML = itens.map(_confConstruirLinha).join('');
     _confAplicarFiltroSituacao();
+    confEncCarregarGrupos();
 }
 
 function confLimparBusca() {
@@ -536,12 +663,15 @@ function confMoverParaRegistradas(tr, historicoId, info) {
 
 async function confConfirmar(historicoId, btn) {
     if (!(await window.garantirSisdpu())) return;
-    if (!confirm('Confirmar o recebimento? Isso vai MOVIMENTAR o PAJ no SISDPU (fase "Juntada de '
-               + 'documento") e CONCLUIR a tramitação da caixa de aguardo. Esta ação é real e não '
-               + 'pode ser desfeita pelo painel.')) return;
     const tr = btn.closest('tr');
+    const enc = _confLerEncaminhamento(tr);
+    const avisoEnc = enc.encaminhar_grupo
+        ? (' Também vai ENCAMINHAR (nova tramitação) o PAJ para "' + enc.encaminhar_grupo + '".') : '';
+    if (!confirm('Confirmar o recebimento? Isso vai MOVIMENTAR o PAJ no SISDPU (fase "Juntada de '
+               + 'documento") e CONCLUIR a tramitação da caixa de aguardo.' + avisoEnc + ' Esta ação é '
+               + 'real e não pode ser desfeita pelo painel.')) return;
     const orig = btn.innerHTML; btn.disabled = true; btn.textContent = 'Confirmando…';
-    const corpo = { texto_resposta: tr.dataset.textoResposta || '', data_resposta: tr.dataset.dataResposta || '' };
+    const corpo = Object.assign({ texto_resposta: tr.dataset.textoResposta || '', data_resposta: tr.dataset.dataResposta || '' }, enc);
     try {
         const r = await fetch('/api/confirmacoes/' + encodeURIComponent(historicoId) + '/confirmar', {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo)
@@ -549,6 +679,7 @@ async function confConfirmar(historicoId, btn) {
         const d = await r.json().catch(() => ({}));
         if (d.ok) {
             confMoverParaRegistradas(tr, historicoId, corpo);
+            if (d.aviso) alert(d.aviso);
         } else {
             alert('Não foi possível confirmar: ' + (d.erro || 'erro'));
             btn.disabled = false; btn.innerHTML = orig;
@@ -586,6 +717,20 @@ function _confRenderConversa(d) {
                 const h = document.createElement('span');
                 h.className = 'h';
                 h.textContent = m.hora;
+                // Tiques de entrega/leitura de verdade (✓ enviada, ✓✓ cinza entregue,
+                // ✓✓ azul lida) — só em mensagens NOSSAS, quando o WhatsApp expôs o
+                // status (pedido do usuário, 2026-10-28).
+                if (m.nossa && m.status) {
+                    const MARCA = { 'Enviada': '✓', 'Entregue': '✓✓', 'Lida': '✓✓' };
+                    const marca = MARCA[m.status];
+                    if (marca) {
+                        const tick = document.createElement('span');
+                        tick.className = 'tick' + (m.status === 'Lida' ? ' lida' : '');
+                        tick.textContent = marca;
+                        tick.title = m.status;
+                        h.appendChild(tick);
+                    }
+                }
                 div.appendChild(h);
             }
             body.appendChild(div);
@@ -671,11 +816,11 @@ function confToggleLote(historicoId, btn) {
             if (b) b.textContent = 'Incluir em bloco';
         });
     } else {
-        confLote[historicoId] = {
+        confLote[historicoId] = Object.assign({
             historico_id: historicoId,
             texto_resposta: tr.dataset.textoResposta || '',
             data_resposta: tr.dataset.dataResposta || '',
-        };
+        }, _confLerEncaminhamento(tr));
         todas.forEach(el => {
             el.classList.add('conf-row-selecionada');
             const b = el.querySelector('.conf-lote-btn');
@@ -723,5 +868,7 @@ async function confExecutarLote() {
     confLote = {};
     confAtualizaBarraLote();
 }
+
+confEncCarregarGrupos();
 </script>
 {% endblock %}
