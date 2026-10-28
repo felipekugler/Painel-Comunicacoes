@@ -3155,15 +3155,12 @@ def _dias_desde(ts: str) -> int | None:
     return (_dt.datetime.now().date() - dt.date()).days
 
 
-def contar_ocultos_por_cutoff() -> int:
-    """Quantos PAJs seriam candidatos a confirmação (mesmos critérios de
-    `listar_aguardando_confirmacao`), mas estão ocultos pelo corte de antiguidade —
-    só para avisar na tela, evitando a sensação de "sumiu sem explicação"."""
-    from services import config_service, historico_service
-    cutoff = config_service.get_confirmacoes_cutoff_dias()
-    if not cutoff:
-        return 0
-    n = 0
+def _candidatos_confirmacao():
+    """Registros ainda pendentes de confirmação (WhatsApp, tramitado p/ caixa de
+    aguardo, não confirmado/removido) — SEM aplicar corte de antiguidade. Base
+    compartilhada por `listar_aguardando_confirmacao`/`contar_ocultos_por_cutoff`/
+    `buscar_pendencia_por_paj`."""
+    from services import historico_service
     for r in historico_service.listar():
         meios = r.get("meios") or ([r["meio"]] if r.get("meio") else [])
         if "whatsapp" not in meios:
@@ -3172,6 +3169,18 @@ def contar_ocultos_por_cutoff() -> int:
             continue
         if r.get("confirmacao_status") in ("confirmado", "removido"):
             continue
+        yield r
+
+
+def contar_ocultos_por_cutoff() -> int:
+    """Quantos PAJs seriam candidatos a confirmação, mas estão ocultos pelo corte de
+    antiguidade — só para avisar na tela, evitando a sensação de "sumiu sem explicação"."""
+    from services import config_service
+    cutoff = config_service.get_confirmacoes_cutoff_dias()
+    if not cutoff:
+        return 0
+    n = 0
+    for r in _candidatos_confirmacao():
         dias = _dias_desde(r.get("ts", ""))
         if dias is not None and dias > cutoff:
             n += 1
@@ -3192,18 +3201,13 @@ def listar_aguardando_confirmacao() -> list[dict]:
     dias): PAJs cujo ÚLTIMO envio é mais antigo que o corte NÃO aparecem — residual
     pequeno, tratado manualmente como era antes desta central existir (evita que uma
     instalação em máquina com histórico acumulado despeje centenas de PAJs antigos já
-    resolvidos por fora, com risco de duplicar ação no SISDPU). 0 = sem corte."""
-    from services import config_service, historico_service
+    resolvidos por fora, com risco de duplicar ação no SISDPU). 0 = sem corte. A busca
+    por PAJ (`buscar_pendencia_por_paj`) tem PRIORIDADE sobre esse corte (pedido do
+    usuário, 2026-10-28) — é a forma de alcançar um PAJ antigo sem mexer na configuração."""
+    from services import config_service
     cutoff = config_service.get_confirmacoes_cutoff_dias()
     out = []
-    for r in historico_service.listar():
-        meios = r.get("meios") or ([r["meio"]] if r.get("meio") else [])
-        if "whatsapp" not in meios:
-            continue
-        if r.get("tram_status") != "tramitado" or not r.get("tram_caixa"):
-            continue
-        if r.get("confirmacao_status") in ("confirmado", "removido"):
-            continue
+    for r in _candidatos_confirmacao():
         # Selo "N dias" na Situação: antiguidade do envio (ts) e se o prazo (dias)
         # já decorreu — calculado a cada leitura, não é persistido no registro.
         dias = _dias_desde(r.get("ts", ""))
@@ -3216,6 +3220,36 @@ def listar_aguardando_confirmacao() -> list[dict]:
         r["dias_decorridos"] = dias
         r["prazo_expirado"] = bool(prazo_dias) and dias is not None and dias > prazo_dias
         out.append(r)
+    return out
+
+
+def _chave_busca_paj(s: str) -> str:
+    """Normaliza para busca livre por PAJ: só dígitos/letras, maiúsculo — assim
+    "2023/029-00839", "029-00839" e "00839" casam igual (substring)."""
+    return re.sub(r"[^0-9A-Za-z]", "", s or "").upper()
+
+
+def buscar_pendencia_por_paj(query: str) -> list[dict]:
+    """Busca candidatos a confirmação por PAJ (substring tolerante a barra/hífen/
+    espaço) — IGNORA o corte de antiguidade: a busca tem PRIORIDADE sobre o corte
+    (pedido do usuário, 2026-10-28), para achar um PAJ antigo sem mexer na
+    configuração. Mais recentes primeiro."""
+    q = _chave_busca_paj(query)
+    if not q:
+        return []
+    out = []
+    for r in _candidatos_confirmacao():
+        if q not in _chave_busca_paj(r.get("paj", "")):
+            continue
+        dias = _dias_desde(r.get("ts", ""))
+        try:
+            prazo_dias = int(r.get("prazo") or 0)
+        except (TypeError, ValueError):
+            prazo_dias = 0
+        r["dias_decorridos"] = dias
+        r["prazo_expirado"] = bool(prazo_dias) and dias is not None and dias > prazo_dias
+        out.append(r)
+    out.sort(key=lambda r: r.get("ts") or "", reverse=True)
     return out
 
 

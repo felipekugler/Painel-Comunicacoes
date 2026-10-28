@@ -11,6 +11,7 @@ DECISÃO de movimentar/concluir o PAJ fica sempre com o usuário, 1 clique por i
 - POST /api/confirmacoes/{historico_id}/remover       -> tira da lista de pendentes, sem ação no SISDPU
 - POST /api/confirmacoes/confirmar-lote/stream        -> confirma vários itens em sequência (SSE, log ao vivo)
 - POST /api/confirmacoes/{historico_id}/conversa      -> lê a conversa inteira (p/ o celular simulado)
+- GET  /api/confirmacoes/buscar?paj=...               -> busca por PAJ, IGNORA o corte de antiguidade
 """
 
 from fastapi import APIRouter, Body, Request
@@ -91,3 +92,18 @@ async def api_conversa_whatsapp(historico_id: str, payload: dict = Body(default=
     except Exception as e:  # noqa: BLE001
         r = {"ok": False, "erro": str(e)}
     return JSONResponse(r, status_code=200 if r.get("ok") else 400)
+
+
+_CAMPOS_BUSCA = ["id", "paj", "paj_norm", "url_detalhe", "assistido", "numeros", "mov_seq",
+                 "tram_caixa", "ts", "prazo", "dias_decorridos", "prazo_expirado",
+                 "verif_em", "verif_pronto_para_concluir", "verif_tem_resposta",
+                 "verif_texto_resposta", "verif_data_resposta", "verif_confirmou", "verif_erro"]
+
+
+@router.get("/api/confirmacoes/buscar", response_class=JSONResponse)
+async def api_buscar_confirmacao(paj: str = ""):
+    """Busca por PAJ entre os candidatos a confirmação — IGNORA o corte de antiguidade
+    (a busca tem PRIORIDADE sobre o corte; pedido do usuário, 2026-10-28). Usado pela
+    caixa de busca acima da tabela de pendentes."""
+    itens = svc.buscar_pendencia_por_paj(paj)
+    return {"ok": True, "itens": [{c: r.get(c) for c in _CAMPOS_BUSCA} for r in itens]}

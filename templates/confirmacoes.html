@@ -63,9 +63,36 @@
     {% endif %}
 </div>
 
-<div class="mb-3" style="display:flex;align-items:center;gap:10px;">
+<div class="mb-3" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
     <button class="btn-accent" id="conf-verificar-btn" onclick="confVerificar()">Verificar respostas</button>
     <span id="conf-status" class="text-tertiary" style="font-size:12.5px;"></span>
+    <span style="flex:1;"></span>
+    <input type="text" id="conf-busca-input" class="wa-input" style="width:260px;font-size:12.5px;"
+           placeholder="Buscar PAJ (ignora o corte de antiguidade)…"
+           onkeydown="if(event.key==='Enter'){ event.preventDefault(); confBuscarPaj(); }">
+    <button class="btn-subtle" onclick="confBuscarPaj()">Buscar</button>
+    <button class="btn-subtle" id="conf-busca-limpar-btn" style="display:none;" onclick="confLimparBusca()">Limpar busca</button>
+</div>
+
+<div id="conf-busca-wrap" style="display:none;margin-bottom:22px;">
+    <p id="conf-busca-aviso" class="text-tertiary" style="font-size:12.5px;margin:0 0 8px;"></p>
+    <div class="fluent-card" style="overflow-x:auto;">
+        <table class="fluent-table" id="conf-busca-table">
+            <thead>
+                <tr>
+                    <th style="width:8rem;">PAJ</th>
+                    <th>Assistido</th>
+                    <th style="width:9rem;">Número</th>
+                    <th style="width:8rem;">Envio / Mov.</th>
+                    <th style="width:12rem;">Caixa</th>
+                    <th style="min-width:22rem;">Resposta</th>
+                    <th style="width:8rem;">Situação</th>
+                    <th style="width:16rem;">Ação</th>
+                </tr>
+            </thead>
+            <tbody id="conf-busca-body"></tbody>
+        </table>
+    </div>
 </div>
 
 <div id="conf-lote-bar" class="fluent-card">
@@ -85,7 +112,7 @@
                 <th style="width:8rem;">PAJ</th>
                 <th>Assistido</th>
                 <th style="width:9rem;">Número</th>
-                <th style="width:7rem;">Mov.</th>
+                <th style="width:8rem;">Envio / Mov.</th>
                 <th style="width:12rem;">Caixa</th>
                 <th style="min-width:22rem;">Resposta</th>
                 <th style="width:8rem;">Situação</th>
@@ -110,7 +137,7 @@
                 </td>
                 <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
                 <td class="text-secondary" style="font-size:12.5px;">{{ (it.numeros or [])|first or "—" }}</td>
-                <td class="text-secondary" style="font-size:12.5px;">{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
+                <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ it.ts | data_br if it.ts else "—" }}<br>{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
                 <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ it.tram_caixa or "—" }}</td>
                 <td class="conf-resposta conf-resposta-cel {{ '' if verificado and not it.verif_erro else 'text-tertiary' }}">
                     <span class="conf-resposta-texto">{%- if it.verif_erro -%}{{ it.verif_erro }}
@@ -175,7 +202,7 @@
                 <tr>
                     <th style="width:8rem;">PAJ</th>
                     <th>Assistido</th>
-                    <th style="width:7rem;">Mov.</th>
+                    <th style="width:8rem;">Envio / Mov.</th>
                     <th>Resposta do assistido</th>
                     <th style="width:11rem;">Confirmado em</th>
                 </tr>
@@ -196,7 +223,7 @@
                         {% endif %}
                     </td>
                     <td><div class="col-assistido" title="{{ it.assistido }}">{{ it.assistido or "—" }}</div></td>
-                    <td class="text-secondary" style="font-size:12.5px;">{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
+                    <td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">{{ it.ts | data_br if it.ts else "—" }}<br>{% if it.mov_seq %}Mov {{ it.mov_seq }}{% else %}—{% endif %}</td>
                     <td class="conf-resposta">
                         <span class="conf-resposta-texto">{{ it.confirmacao_resposta or "—" }}</span>
                         <button class="conf-abrir-conversa-btn" onclick="confAbrirConversa('{{ it.id }}', this)"
@@ -257,8 +284,12 @@ document.querySelectorAll('#conf-registradas-body tr:not(#conf-reg-empty) .conf-
 });
 
 function _confPintarLinha(it) {
-    const tr = document.querySelector('.conf-row[data-id="' + it.historico_id + '"]');
-    if (!tr) return;
+    // O mesmo PAJ pode estar visível em 2 lugares ao mesmo tempo (tabela de
+    // pendentes + resultado de uma busca ativa) — repinta TODAS as cópias.
+    document.querySelectorAll('.conf-row[data-id="' + it.historico_id + '"]').forEach(tr => _confPintarUmaLinha(tr, it));
+}
+
+function _confPintarUmaLinha(tr, it) {
     const respCel = tr.querySelector('.conf-resposta-cel');
     const respTexto = respCel.querySelector('.conf-resposta-texto');
     const sitCel = tr.querySelector('.conf-situacao-badge-cel');
@@ -303,6 +334,105 @@ function _confPintarLinha(it) {
     }
 }
 
+// "2026-10-28T03:48:12" -> "28/10/2026" (só a data, p/ a coluna "Envio / Mov.")
+function _confDataBr(iso) {
+    const m = (iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : '—';
+}
+
+// Monta o <tr> de um resultado de BUSCA — mesma estrutura/classes/atributos da linha
+// server-renderizada (Jinja) da tabela de pendentes, para que TODAS as ações já
+// existentes (confConfirmar/confToggleLote/confRemover/confAbrirConversa e a
+// repintura via _confPintarLinha) funcionem sem nenhum código extra.
+function _confConstruirLinha(it) {
+    const verificado = !!it.verif_em;
+    const habilitado = verificado && it.verif_pronto_para_concluir && it.verif_confirmou && !it.verif_erro;
+    const numero = (it.numeros && it.numeros[0]) || '—';
+    const movTxt = it.mov_seq ? ('Mov ' + it.mov_seq) : '—';
+    const pajHtml = it.url_detalhe
+        ? '<a href="' + _confEsc(it.url_detalhe) + '" target="_blank" rel="noopener" class="accent-link" '
+          + 'title="Abrir o PAJ no SISDPU" style="font-family:\'Cascadia Code\',\'Consolas\',monospace;'
+          + 'font-weight:600;white-space:nowrap;">' + _confEsc(it.paj) + '</a>'
+        : '<span style="font-family:\'Cascadia Code\',\'Consolas\',monospace;font-weight:600;white-space:nowrap;">'
+          + _confEsc(it.paj) + '</span>';
+    let respostaTxt, respostaClasse = '';
+    if (it.verif_erro) { respostaTxt = _confEsc(it.verif_erro); respostaClasse = 'text-tertiary'; }
+    else if (verificado) { respostaTxt = it.verif_tem_resposta ? _confEsc(_confFormatarResposta(it.verif_texto_resposta || '')) : '(sem resposta ainda)'; }
+    else { respostaTxt = 'Clique em "Verificar respostas"…'; respostaClasse = 'text-tertiary'; }
+    let sitBadge;
+    if (it.verif_erro) sitBadge = '<span class="conf-badge conf-erro" title="' + _confEsc(it.verif_erro) + '">Erro</span>';
+    else if (verificado && it.verif_confirmou) sitBadge = '<span class="conf-badge conf-ok" title="' + (it.verif_data_resposta ? ('Respondido em ' + _confEsc(it.verif_data_resposta)) : '') + '">Respondido</span>';
+    else if (verificado) sitBadge = '<span class="conf-badge conf-sem" title="' + (it.verif_tem_resposta ? 'Há resposta, mas sem texto legível para conferir.' : 'Ainda sem resposta.') + '">Não</span>';
+    else sitBadge = '<span class="conf-badge conf-sem">não verificado</span>';
+    const dias = (it.dias_decorridos === null || it.dias_decorridos === undefined) ? null : it.dias_decorridos;
+    const diasTitle = 'Enviado em ' + _confDataHoraBr(it.ts) + (it.prazo ? (' · prazo de ' + it.prazo + ' dia' + (it.prazo != 1 ? 's' : '') + (it.prazo_expirado ? ' (expirado)' : '')) : '');
+    const urgenteBadge = it.prazo === 0
+        ? '<span class="conf-badge conf-erro" title="Mensagem enviada com marcação de urgência (prazo 0 dias)">Urgente</span>' : '';
+    let motivo;
+    if (!verificado) motivo = 'Verifique as respostas primeiro';
+    else if (it.verif_erro) motivo = it.verif_erro;
+    else if (!it.verif_pronto_para_concluir) motivo = 'Trâmite não localizado na caixa de destino — confira manualmente.';
+    else if (!it.verif_tem_resposta) motivo = 'Ainda sem resposta do assistido — não é possível confirmar.';
+    else motivo = 'Há resposta, mas sem texto legível para confirmar automaticamente — confira manualmente.';
+
+    return '<tr class="conf-row" data-id="' + it.id + '" '
+        + 'data-texto-resposta="' + _confEsc(it.verif_texto_resposta || '') + '" '
+        + 'data-data-resposta="' + _confEsc(it.verif_data_resposta || '') + '">'
+      + '<td>' + pajHtml + '</td>'
+      + '<td><div class="col-assistido" title="' + _confEsc(it.assistido || '') + '">' + (_confEsc(it.assistido) || '—') + '</div></td>'
+      + '<td class="text-secondary" style="font-size:12.5px;">' + _confEsc(numero) + '</td>'
+      + '<td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">' + _confDataBr(it.ts) + '<br>' + movTxt + '</td>'
+      + '<td class="text-secondary" style="font-size:12.5px;white-space:nowrap;">' + (_confEsc(it.tram_caixa) || '—') + '</td>'
+      + '<td class="conf-resposta conf-resposta-cel ' + respostaClasse + '">'
+        + '<span class="conf-resposta-texto">' + respostaTxt + '</span>'
+        + '<button class="conf-abrir-conversa-btn" onclick="confAbrirConversa(\'' + it.id + '\', this)" '
+        + 'title="Abrir a conversa completa do WhatsApp">📱 Abrir conversa</button>'
+      + '</td>'
+      + '<td class="conf-situacao-cel"><div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">'
+        + '<span class="conf-badge ' + (it.prazo_expirado ? 'conf-erro' : 'conf-sem') + '" title="' + _confEsc(diasTitle) + '">'
+        + (dias === null ? '—' : dias) + ' dia' + (dias !== 1 ? 's' : '') + '</span>'
+        + urgenteBadge
+        + '<span class="conf-situacao-badge-cel">' + sitBadge + '</span>'
+      + '</div></td>'
+      + '<td class="conf-acao-cel">'
+        + '<button class="btn-accent conf-confirmar-btn" style="padding:5px 12px;font-size:12.5px;white-space:nowrap;" '
+        + (habilitado ? '' : 'disabled') + ' onclick="confConfirmar(\'' + it.id + '\', this)" '
+        + 'title="' + (habilitado ? 'Movimenta o PAJ e conclui a tramitação da caixa de aguardo.' : _confEsc(motivo)) + '">'
+        + 'Registrar resposta no PAJ</button>'
+        + '<div class="conf-lote-linha">'
+          + '<button class="btn-subtle conf-lote-btn" style="padding:4px 8px;font-size:11.5px;white-space:nowrap;" '
+          + (habilitado ? '' : 'disabled') + ' title="' + (habilitado ? 'Adiciona à confirmação em bloco.' : _confEsc(motivo)) + '" '
+          + 'onclick="confToggleLote(\'' + it.id + '\', this)">Incluir em bloco</button>'
+          + '<button class="btn-subtle conf-remover-btn" style="padding:4px 8px;font-size:11.5px;color:#dc2626;" '
+          + 'title="Tira da lista, sem mexer no SISDPU" onclick="confRemover(\'' + it.id + '\', this)">Remover</button>'
+        + '</div>'
+      + '</td>'
+      + '</tr>';
+}
+
+async function confBuscarPaj() {
+    const input = document.getElementById('conf-busca-input');
+    const q = (input.value || '').trim();
+    if (!q) { confLimparBusca(); return; }
+    const r = await fetch('/api/confirmacoes/buscar?paj=' + encodeURIComponent(q));
+    const d = await r.json().catch(() => ({}));
+    const itens = (d && d.itens) || [];
+    document.getElementById('conf-pendentes-wrap').style.display = 'none';
+    document.getElementById('conf-busca-wrap').style.display = 'block';
+    document.getElementById('conf-busca-limpar-btn').style.display = 'inline-block';
+    document.getElementById('conf-busca-aviso').textContent = itens.length
+        ? (itens.length + ' resultado(s) para "' + q + '" — ignora o corte de antiguidade.')
+        : ('Nenhum PAJ pendente de confirmação encontrado para "' + q + '".');
+    document.getElementById('conf-busca-body').innerHTML = itens.map(_confConstruirLinha).join('');
+}
+
+function confLimparBusca() {
+    document.getElementById('conf-busca-input').value = '';
+    document.getElementById('conf-busca-wrap').style.display = 'none';
+    document.getElementById('conf-busca-limpar-btn').style.display = 'none';
+    document.getElementById('conf-pendentes-wrap').style.display = '';
+}
+
 async function confVerificar() {
     const btn = document.getElementById('conf-verificar-btn');
     const st = document.getElementById('conf-status');
@@ -325,13 +455,21 @@ function _confAjustaContadorPend(delta) {
 }
 
 function _confRemoveLinhaPendente(tr) {
-    delete confLote[tr.dataset.id];
+    const id = tr.dataset.id;
+    delete confLote[id];
     confAtualizaBarraLote();
-    tr.remove();
-    _confAjustaContadorPend(-1);
-    const tbody = document.querySelector('#conf-pendentes-table tbody');
-    if (!tbody || !tbody.querySelector('tr')) {
-        document.getElementById('conf-pendentes-wrap').innerHTML = _confSemPendentesHtml();
+    // O mesmo PAJ pode estar em 2 tabelas ao mesmo tempo (pendentes + busca) — some
+    // com TODAS as cópias. Só ajusta o contador/estado vazio da tabela de pendentes
+    // se o item realmente estava contado nela (uma busca pode achar algo fora do
+    // corte de antiguidade, que nunca entrou nesse contador).
+    const estavaNaTabelaPendentes = !!document.querySelector('#conf-pendentes-table .conf-row[data-id="' + id + '"]');
+    document.querySelectorAll('.conf-row[data-id="' + id + '"]').forEach(el => el.remove());
+    if (estavaNaTabelaPendentes) {
+        _confAjustaContadorPend(-1);
+        const tbody = document.querySelector('#conf-pendentes-table tbody');
+        if (tbody && !tbody.querySelector('tr')) {
+            document.getElementById('conf-pendentes-wrap').innerHTML = _confSemPendentesHtml();
+        }
     }
 }
 
@@ -482,30 +620,38 @@ function confAtualizaBarraLote() {
 
 function confToggleLote(historicoId, btn) {
     const tr = btn.closest('tr');
+    // Sincroniza TODAS as cópias da linha (pendentes + busca) — o estado "incluído
+    // no bloco" é por PAJ, não por tabela.
+    const todas = document.querySelectorAll('.conf-row[data-id="' + historicoId + '"]');
     if (confLote[historicoId]) {
         delete confLote[historicoId];
-        btn.textContent = 'Incluir em bloco';
-        tr.classList.remove('conf-row-selecionada');
+        todas.forEach(el => {
+            el.classList.remove('conf-row-selecionada');
+            const b = el.querySelector('.conf-lote-btn');
+            if (b) b.textContent = 'Incluir em bloco';
+        });
     } else {
         confLote[historicoId] = {
             historico_id: historicoId,
             texto_resposta: tr.dataset.textoResposta || '',
             data_resposta: tr.dataset.dataResposta || '',
         };
-        btn.textContent = 'Remover do bloco';
-        tr.classList.add('conf-row-selecionada');
+        todas.forEach(el => {
+            el.classList.add('conf-row-selecionada');
+            const b = el.querySelector('.conf-lote-btn');
+            if (b) b.textContent = 'Remover do bloco';
+        });
     }
     confAtualizaBarraLote();
 }
 
 function confLimparLote() {
     Object.keys(confLote).forEach(hid => {
-        const tr = document.querySelector('.conf-row[data-id="' + hid + '"]');
-        if (tr) {
+        document.querySelectorAll('.conf-row[data-id="' + hid + '"]').forEach(tr => {
             tr.classList.remove('conf-row-selecionada');
             const btn = tr.querySelector('.conf-lote-btn');
             if (btn) btn.textContent = 'Incluir em bloco';
-        }
+        });
     });
     confLote = {};
     confAtualizaBarraLote();
@@ -521,15 +667,17 @@ async function confExecutarLote() {
     const d = await window.enviarComPopup('/api/confirmacoes/confirmar-lote/stream', { itens }, '— confirmando em bloco…');
     const resultado = (d && d.itens) || [];
     resultado.forEach(r => {
-        const tr = document.querySelector('.conf-row[data-id="' + r.historico_id + '"]');
-        if (!tr) return;
+        const trs = document.querySelectorAll('.conf-row[data-id="' + r.historico_id + '"]');
+        if (!trs.length) return;
         const info = confLote[r.historico_id] || {};
         if (r.ok) {
-            confMoverParaRegistradas(tr, r.historico_id, info);
+            confMoverParaRegistradas(trs[0], r.historico_id, info);
         } else {
-            tr.classList.remove('conf-row-selecionada');
-            const btn = tr.querySelector('.conf-lote-btn');
-            if (btn) btn.textContent = 'Incluir em bloco';
+            trs.forEach(tr => {
+                tr.classList.remove('conf-row-selecionada');
+                const btn = tr.querySelector('.conf-lote-btn');
+                if (btn) btn.textContent = 'Incluir em bloco';
+            });
         }
     });
     confLote = {};
